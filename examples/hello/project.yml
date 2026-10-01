@@ -1,0 +1,38 @@
+name: hello
+mode: bin
+output: build/hello
+
+# 桥接 C++ 源码直接参与本应用编译（源码内联方案）。
+# 不依赖预编译的 qtphp-bridge.lib —— 那样会和 Qt/PHPX 版本强绑定。
+sources:
+  - src/main.php
+  - D:/git/php/typephp-qt/src/QtApp.php
+  - D:/git/php/typephp-qt/src/WidgetTree.php
+  - D:/git/php/typephp-qt/php-src/qt.stub.php
+  - D:/git/php/typephp-qt/cpp-src/qt_bridge.cc
+  - D:/git/php/typephp-qt/cpp-src/qt_widgets.cc
+
+build-dir: build
+
+cxx-std: c++20
+
+include-paths:
+  - D:/git/php/typephp-qt/cpp-src
+  - D:/git/php/typephp-qt/php-src
+  - D:/tools/Qt/6.9.3/msvc2022_64/include
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtCore
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtGui
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtWidgets
+
+link-paths:
+  - D:/tools/Qt/6.9.3/msvc2022_64/lib
+
+link-libs:
+  - Qt6Core.lib
+  - Qt6Gui.lib
+  - Qt6Widgets.lib
+
+cxx-flags:
+  - /Zc:__cplusplus
+  - /permissive-
+  - /EHsc

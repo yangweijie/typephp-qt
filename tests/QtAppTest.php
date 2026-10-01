@@ -1,0 +1,540 @@
+<?php
+
+declare(strict_types=1);
+
+namespace TypePHP\Qt\Tests;
+
+use PHPUnit\Framework\TestCase;
+use TypePHP\Qt\QtApp;
+use TypePHP\Qt\WidgetTree;
+
+use function test_inject_event;
+use function test_reset;
+use function test_window;
+
+/** 字符串 callable 测试用的计数器（放文件级，供函数名字符串引用）。 */
+$GLOBALS['arity_probe_count'] = 0;
+
+/** 零参数函数，用作字符串 callable。 */
+function arity_probe_zero(): void
+{
+    $GLOBALS['arity_probe_count'] = ($GLOBALS['arity_probe_count'] ?? 0) + 1;
+}
+
+function arity_probe_count(): int
+{
+    return (int) ($GLOBALS['arity_probe_count'] ?? 0);
+}
+
+function arity_probe_reset(): void
+{
+    $GLOBALS['arity_probe_count'] = 0;
+}
+
+/**
+ * QtApp 的领域逻辑测试。
+ *
+ * 全部走 FakeBridge 的纯 PHP 全局函数实现，不需要 Qt 或编译器。
+ */
+final class QtAppTest extends TestCase
+{
+    private QtApp $app;
+
+    protected function setUp(): void
+    {
+        test_reset();
+        $this->app = new QtApp();
+        $this->app->create(['name' => 'TestApp']);
+        $this->app->createWindow('Test', ['width' => 800, 'height' => 600]);
+    }
+
+    // ── 生命周期 ──
+
+    public function testCreateWindowReturnsHandle(): void
+    {
+        $this->assertNotNull($this->app->handle());
+        $this->assertTrue(qt_window_is_open($this->app->handle()));
+    }
+
+    public function testHandleRequired(): void
+    {
+        $fresh = new QtApp();
+        $this->expectException(\RuntimeException::class);
+        $fresh->handle();
+    }
+
+    public function testCloseMarksWindowClosed(): void
+    {
+        $this->app->close();
+        $this->assertFalse(qt_window_is_open($this->app->handle()));
+    }
+
+    public function testDestroyClearsHandle(): void
+    {
+        $this->app->destroy();
+        $this->expectException(\RuntimeException::class);
+        $this->app->handle();
+    }
+
+    // ── 渲染与取值 ──
+
+    public function testRenderThenReadValue(): void
+    {
+        $this->app->render(WidgetTree::vbox([
+            WidgetTree::label('Hello', ['id' => 'greeting']),
+            WidgetTree::lineEdit('initial', ['id' => 'input']),
+        ]));
+        $this->app->run(1);
+
+        $this->assertSame('Hello', $this->app->text('greeting'));
+        $this->assertSame('initial', $this->app->text('input'));
+    }
+
+    public function testViewRebuildsEveryFrame(): void
+    {
+        $state = ['n' => 0];
+        $this->app->view(function () use (&$state): array {
+            return WidgetTree::vbox([
+                WidgetTree::label('n=' . $state['n'], ['id' => 'counter']),
+            ]);
+        });
+
+        $this->app->run(1);
+        $this->assertSame('n=0', $this->app->text('counter'));
+
+        $state['n'] = 7;
+        $this->app->run(1);
+        $this->assertSame('n=7', $this->app->text('counter'));
+    }
+
+    public function testUnknownWidgetValueIsNull(): void
+    {
+        $this->assertNull($this->app->value('nope'));
+    }
+
+    public function testTextNormalizesNullToEmptyString(): void
+    {
+        $this->assertSame('', $this->app->text('nope'));
+    }
+
+    public function testCheckedReadsBoolean(): void
+    {
+        $this->app->render(WidgetTree::vbox([
+            WidgetTree::checkbox('On', true, ['id' => 'flag']),
+        ]));
+        $this->app->run(1);
+        $this->assertTrue($this->app->checked('flag'));
+    }
+
+    // ── 事件 ──
+
+    public function testEventHandlerReceivesEvent(): void
+    {
+        $seen = null;
+        $this->app->on('btn', 'click', function ($event) use (&$seen) {
+            $seen = $event;
+        });
+
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'btn']);
+        $this->app->run(1);
+
+        $this->assertSame('btn', $seen['id']);
+        $this->assertSame('click', $seen['type']);
+    }
+
+    public function testTypedEventParameterHandler(): void
+    {
+        $seen = null;
+        $this->app->on('btn', 'click', function (array $event) use (&$seen) {
+            $seen = $event['id'] ?? null;
+        });
+
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'btn']);
+        $this->app->run(1);
+
+        $this->assertSame('btn', $seen);
+    }
+
+    /**
+     * 零参数处理器不能被传入 $event。
+     *
+     * AOT 编译后的闭包对实参个数做精确校验（多传一个就抛 ArgumentCountError），
+     * 而普通 PHP 会静默忽略多余实参 —— 所以这条必须显式断言，
+     * 否则本地测试全绿、编译后一点按钮就崩。
+     */
+    public function testZeroArgHandlerIsCalledWithoutEvent(): void
+    {
+        $called = 0;
+        $this->app->on('btn', 'click', function () use (&$called) {
+            $called++;
+        });
+
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'btn']);
+        $this->app->run(1);
+
+        $this->assertSame(1, $called);
+    }
+
+    public function testZeroArgWildcardHandler(): void
+    {
+        $called = 0;
+        $this->app->onAny('click', function () use (&$called) {
+            $called++;
+        });
+
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'a']);
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'b']);
+        $this->app->run(1);
+
+        $this->assertSame(2, $called);
+    }
+
+    /** 方法数组形式的处理器也要能正确探测参数个数。 */
+    public function testMethodArrayHandlerArity(): void
+    {
+        $controller = new class {
+            public int $zeroCalls = 0;
+            public ?string $lastId = null;
+
+            public function noArgs(): void
+            {
+                $this->zeroCalls++;
+            }
+
+            public function withEvent(array $event): void
+            {
+                $this->lastId = $event['id'] ?? null;
+            }
+        };
+
+        $this->app->on('a', 'click', [$controller, 'noArgs']);
+        $this->app->on('b', 'click', [$controller, 'withEvent']);
+
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'a']);
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'b']);
+        $this->app->run(1);
+
+        $this->assertSame(1, $controller->zeroCalls);
+        $this->assertSame('b', $controller->lastId);
+    }
+
+    /** 函数名字符串形式的处理器。 */
+    public function testStringCallableHandler(): void
+    {
+        \TypePHP\Qt\Tests\arity_probe_reset();
+
+        $this->app->on('btn', 'click', 'TypePHP\Qt\Tests\arity_probe_zero');
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'btn']);
+        $this->app->run(1);
+
+        $this->assertSame(1, \TypePHP\Qt\Tests\arity_probe_count());
+    }
+
+    public function testWildcardHandlerCatchesAllIds(): void
+    {
+        $ids = [];
+        $this->app->onAny('click', function ($event) use (&$ids) {
+            $ids[] = $event['id'];
+        });
+
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'a']);
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'b']);
+        $this->app->run(1);
+
+        $this->assertSame(['a', 'b'], $ids);
+    }
+
+    public function testSpecificHandlerWinsOverWildcard(): void
+    {
+        $log = [];
+        $this->app->on('a', 'click', function () use (&$log) { $log[] = 'specific'; });
+        $this->app->onAny('click', function () use (&$log) { $log[] = 'wildcard'; });
+
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'a']);
+        $this->app->run(1);
+
+        $this->assertSame(['specific'], $log);
+    }
+
+    public function testUnhandledEventIsIgnored(): void
+    {
+        $this->app->on('other', 'click', function () {
+            $this->fail('不应被调用');
+        });
+
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'unknown']);
+        $this->app->run(1);
+
+        $this->addToAssertionCount(1);
+    }
+
+    public function testThrowingHandlerDoesNotKillLoop(): void
+    {
+        $reached = false;
+        $this->app->on('bad', 'click', function () {
+            throw new \RuntimeException('boom');
+        });
+        $this->app->on('good', 'click', function () use (&$reached) {
+            $reached = true;
+        });
+
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'bad']);
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'good']);
+        $this->app->run(1);
+
+        $this->assertTrue($reached, '一个回调抛异常不应阻断后续事件');
+    }
+
+    public function testThrowingHandlerShowsErrorBox(): void
+    {
+        $this->app->on('bad', 'click', function () {
+            throw new \RuntimeException('boom');
+        });
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'bad']);
+        $this->app->run(1);
+
+        $messages = test_window($this->app->handle())['messages'] ?? [];
+        $this->assertNotEmpty($messages);
+        $this->assertSame('error', $messages[0]['type']);
+        $this->assertStringContainsString('boom', $messages[0]['text']);
+    }
+
+    public function testDispatchWithoutRunningLoop(): void
+    {
+        $called = false;
+        $this->app->on('btn', 'click', function () use (&$called) { $called = true; });
+        $this->app->dispatch(['type' => 'click', 'id' => 'btn']);
+        $this->assertTrue($called);
+    }
+
+    // ── 状态驱动闭环 ──
+
+    public function testEventChangesStateThenViewReflectsIt(): void
+    {
+        $state = ['count' => 0];
+
+        $this->app->view(function () use (&$state): array {
+            return WidgetTree::vbox([
+                WidgetTree::label('count=' . $state['count'], ['id' => 'counter']),
+                WidgetTree::button('+1', ['id' => 'inc']),
+            ]);
+        });
+        $this->app->on('inc', 'click', function () use (&$state) {
+            $state['count']++;
+        });
+
+        $this->app->run(1);
+        $this->assertSame('count=0', $this->app->text('counter'));
+
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'inc']);
+        $this->app->run(1);
+        $this->assertSame('count=1', $this->app->text('counter'));
+    }
+
+    // ── 窗口装饰 ──
+
+    public function testSetTitle(): void
+    {
+        $this->app->setTitle('New Title');
+        $this->assertSame('New Title', test_window($this->app->handle())['title']);
+    }
+
+    public function testSetStatus(): void
+    {
+        $this->app->setStatus(['Ready', 'v1.0']);
+        $this->assertSame(['Ready', 'v1.0'], test_window($this->app->handle())['status']);
+    }
+
+    public function testSetMenu(): void
+    {
+        $this->app->setMenu([['type' => 'item', 'id' => 'file', 'text' => 'File']]);
+        $menu = test_window($this->app->handle())['menu'];
+        $this->assertSame('File', $menu[0]['text']);
+    }
+
+    public function testResize(): void
+    {
+        $this->app->resize(1024, 768);
+        $win = test_window($this->app->handle());
+        $this->assertSame(1024, $win['width']);
+        $this->assertSame(768, $win['height']);
+    }
+
+    public function testSetTimer(): void
+    {
+        $this->app->setTimer('tick', 250);
+        $this->assertSame(250, \TypePHP\Qt\Fake\FakeState::$timers[$this->app->handle()]['tick']);
+    }
+
+    public function testSetTimerZeroCancels(): void
+    {
+        $this->app->setTimer('tick', 250);
+        $this->app->setTimer('tick', 0);
+        $this->assertArrayNotHasKey('tick', \TypePHP\Qt\Fake\FakeState::$timers[$this->app->handle()]);
+    }
+
+    public function testSetTray(): void
+    {
+        $this->app->setTray(['tooltip' => 'MyApp', 'visible' => true]);
+        $this->assertSame('MyApp', test_window($this->app->handle())['tray']['tooltip']);
+    }
+
+    // ── 无头模式 ──
+
+    public function testHeadlessIsOffByDefault(): void
+    {
+        $this->assertFalse($this->app->isHeadless());
+    }
+
+    public function testHeadlessCanBeToggled(): void
+    {
+        $this->app->headless(true);
+        $this->assertTrue($this->app->isHeadless());
+
+        $this->app->headless(false);
+        $this->assertFalse($this->app->isHeadless());
+    }
+
+    /** 无头模式下消息框不弹窗，直接返回 default —— 否则 CI 会永久阻塞。 */
+    public function testHeadlessMessageReturnsDefaultWithoutDialog(): void
+    {
+        $this->app->headless(true);
+        $result = $this->app->message(['type' => 'error', 'default' => 'cancel']);
+
+        $this->assertSame('cancel', $result);
+        // 假桥的 messages 记录不应增加，说明根本没走对话框
+        $messages = test_window($this->app->handle())['messages'] ?? [];
+        $this->assertSame([], $messages);
+    }
+
+    public function testHeadlessConfirmUsesDefault(): void
+    {
+        $this->app->headless(true);
+        $this->assertFalse($this->app->confirm('确定吗？'));
+    }
+
+    public function testHeadlessFileDialogsReturnEmpty(): void
+    {
+        $this->app->headless(true);
+        $this->assertSame([], $this->app->openFile());
+        $this->assertSame([], $this->app->saveFile());
+        $this->assertSame('', $this->app->pickDirectory());
+    }
+
+    /** 非无头模式下仍走真实桥接（假桥会记录调用）。 */
+    public function testNonHeadlessMessageGoesToBridge(): void
+    {
+        $this->app->headless(false);
+        $this->app->message(['type' => 'info', 'default' => 'ok']);
+
+        $messages = test_window($this->app->handle())['messages'] ?? [];
+        $this->assertCount(1, $messages);
+    }
+
+    // ── 错误读取 ──
+
+    public function testLastErrorIsEmptyInitially(): void
+    {
+        $this->assertSame('', $this->app->lastError());
+    }
+
+    public function testLastErrorRecordsHandlerFailure(): void
+    {
+        $this->app->headless(true);
+        $this->app->on('bad', 'click', function () {
+            throw new \RuntimeException('boom');
+        });
+
+        $this->app->dispatch(['type' => 'click', 'id' => 'bad']);
+
+        $this->assertStringContainsString('boom', $this->app->lastError());
+    }
+
+    public function testClearErrorResets(): void
+    {
+        $this->app->headless(true);
+        $this->app->on('bad', 'click', function () {
+            throw new \RuntimeException('boom');
+        });
+        $this->app->dispatch(['type' => 'click', 'id' => 'bad']);
+
+        $this->app->clearError();
+        $this->assertSame('', $this->app->lastError());
+    }
+
+    // ── 对话框 ──
+
+    public function testMessageReturnsDefaultButton(): void
+    {
+        $result = $this->app->message(['type' => 'info', 'default' => 'ok']);
+        $this->assertSame('ok', $result);
+    }
+
+    public function testConfirmReturnsFalseWhenDefaultNo(): void
+    {
+        $this->assertFalse($this->app->confirm('确定吗？'));
+    }
+
+    public function testAlertRecordsMessage(): void
+    {
+        $this->app->alert('注意', '标题');
+        $messages = test_window($this->app->handle())['messages'];
+        $this->assertSame('info', $messages[0]['type']);
+        $this->assertSame('注意', $messages[0]['text']);
+    }
+
+    public function testOpenFileReturnsEmptyOnCancel(): void
+    {
+        $this->assertSame([], $this->app->openFile());
+    }
+
+    public function testNotify(): void
+    {
+        $this->app->notify('标题', '内容');
+        $notes = test_window($this->app->handle())['notifications'];
+        $this->assertSame('标题', $notes[0]['title']);
+    }
+
+    // ── 剪贴板 ──
+
+    public function testClipboardRoundTrip(): void
+    {
+        $this->app->clipboardWrite('hello');
+        $this->assertSame('hello', $this->app->clipboardRead());
+    }
+
+    // ── 补丁 ──
+
+    public function testPatchUpdatesProps(): void
+    {
+        $this->app->render(WidgetTree::vbox([
+            WidgetTree::label('before', ['id' => 'lbl']),
+        ]));
+        $this->app->run(1);
+
+        $this->app->patch([['op' => 'set', 'id' => 'lbl', 'props' => ['text' => 'after']]]);
+        $this->assertSame('after', $this->app->text('lbl'));
+    }
+
+    // ── 截图 ──
+
+    public function testSnapshotRecordsPath(): void
+    {
+        $this->assertTrue($this->app->snapshot('shot.png'));
+        $this->assertContains('shot.png', \TypePHP\Qt\Fake\FakeState::$snapshots);
+    }
+
+    // ── 帧数控制 ──
+
+    public function testRunMaxFramesStopsEarly(): void
+    {
+        $this->app->run(3);
+        $this->assertSame(3, $this->app->frameCount());
+    }
+
+    public function testRunFramesHelper(): void
+    {
+        $this->app->runFrames(2);
+        $this->assertSame(2, $this->app->frameCount());
+    }
+}

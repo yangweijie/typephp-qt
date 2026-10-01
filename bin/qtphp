@@ -1,0 +1,924 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * qtphp — TypePHP\Qt 命令行工具。
+ *
+ * 用法：
+ *   qtphp doctor            检查工具链（Qt/MSVC/tpc/PHP）
+ *   qtphp new <name>        创建新项目
+ *   qtphp build <path>      编译项目
+ *   qtphp run <path>        运行项目
+ *   qtphp package <path>    打包项目
+ *   qtphp test              运行测试
+ *   qtphp lint              校验桥接契约
+ */
+
+// 自动定位项目根目录
+$rootDir = dirname(__DIR__);
+$srcDir = $rootDir . '/src';
+$binDir = $rootDir . '/bin';
+
+// 加载核心类
+require_once $srcDir . '/FakeBridge.php';
+require_once $srcDir . '/WidgetTree.php';
+require_once $srcDir . '/QtApp.php';
+
+use TypePHP\Qt\FakeBridge;
+use TypePHP\Qt\WidgetTree;
+use TypePHP\Qt\QtApp;
+
+// ── 颜色输出 ──
+
+function color(string $text, string $color): string
+{
+    $codes = [
+        'red' => "\033[31m",
+        'green' => "\033[32m",
+        'yellow' => "\033[33m",
+        'blue' => "\033[34m",
+        'cyan' => "\033[36m",
+        'bold' => "\033[1m",
+        'reset' => "\033[0m",
+    ];
+    return ($codes[$color] ?? '') . $text . $codes['reset'];
+}
+
+function info(string $msg): void
+{
+    echo color('[INFO] ', 'cyan') . $msg . PHP_EOL;
+}
+
+function success(string $msg): void
+{
+    echo color('[OK] ', 'green') . $msg . PHP_EOL;
+}
+
+function warning(string $msg): void
+{
+    echo color('[WARN] ', 'yellow') . $msg . PHP_EOL;
+}
+
+function error(string $msg): void
+{
+    echo color('[ERROR] ', 'red') . $msg . PHP_EOL;
+}
+
+// ── 命令实现 ──
+
+function cmdDoctor(): int
+{
+    echo color('=== TypePHP\\Qt 工具链检查 ===', 'bold') . PHP_EOL . PHP_EOL;
+
+    $allOk = true;
+
+    // PHP
+    $phpVersion = PHP_VERSION;
+    if (version_compare($phpVersion, '8.1.0', '>=')) {
+        success("PHP $phpVersion");
+    } else {
+        error("PHP $phpVersion (需要 >= 8.1)");
+        $allOk = false;
+    }
+
+    // tpc
+    $tpcPath = findTpc();
+    if ($tpcPath) {
+        success("tpc: $tpcPath");
+    } else {
+        error('tpc: 未找到（需要 swoole/typephp 或手动安装）');
+        $allOk = false;
+    }
+
+    // Qt
+    $qtDir = findQt();
+    if ($qtDir) {
+        success("Qt: $qtDir");
+    } else {
+        warning('Qt: 未找到（仅影响真实编译/运行，不影响测试）');
+    }
+
+    // MSVC
+    $vcvars = findVcvars();
+    if ($vcvars) {
+        success("MSVC: $vcvars");
+    } else {
+        warning('MSVC: 未找到（仅影响真实编译）');
+    }
+
+    // PHPUnit
+    $phpunit = $GLOBALS['rootDir'] . '/vendor/bin/phpunit';
+    if (file_exists($phpunit)) {
+        success("PHPUnit: $phpunit");
+    } else {
+        warning('PHPUnit: 未找到（运行 composer install 安装）');
+    }
+
+    echo PHP_EOL;
+    if ($allOk) {
+        success('核心工具链就绪！');
+    } else {
+        error('部分工具链缺失，请安装后重试。');
+    }
+
+    return $allOk ? 0 : 1;
+}
+
+function findTpc(): ?string
+{
+    $candidates = [
+        $GLOBALS['rootDir'] . '/vendor/bin/tpc',
+        $GLOBALS['rootDir'] . '/vendor/swoole/typephp/bin/tpc',
+        'D:/git/php/tpc_v0.9.4_windows_x64/tpc.exe',
+    ];
+    foreach ($candidates as $path) {
+        if (file_exists($path)) return $path;
+    }
+    // 尝试 PATH
+    $output = shell_exec('where tpc 2>nul');
+    if ($output && trim($output)) {
+        $lines = explode("\n", trim($output));
+        return trim($lines[0]);
+    }
+    return null;
+}
+
+function findQt(): ?string
+{
+    $candidates = [
+        'D:/tools/Qt/6.9.3/msvc2022_64',
+        'C:/Qt/6.9.3/msvc2022_64',
+        'D:/Qt/6.9.3/msvc2022_64',
+    ];
+    foreach ($candidates as $path) {
+        if (is_dir($path)) return $path;
+    }
+    $env = getenv('QT_DIR');
+    if ($env && is_dir($env)) return $env;
+    return null;
+}
+
+function findVcvars(): ?string
+{
+    $candidates = [
+        'D:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat',
+        'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat',
+        'C:/Program Files/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat',
+    ];
+    foreach ($candidates as $path) {
+        if (file_exists($path)) return $path;
+    }
+    return null;
+}
+
+function cmdNew(string $name): int
+{
+    $targetDir = getcwd() . DIRECTORY_SEPARATOR . $name;
+    if (is_dir($targetDir)) {
+        error("目录已存在: $targetDir");
+        return 1;
+    }
+
+    info("创建项目: $name");
+
+    // 创建目录结构
+    mkdir($targetDir, 0755, true);
+    mkdir($targetDir . '/src', 0755, true);
+    mkdir($targetDir . '/assets', 0755, true);
+
+    $qtDir = findQt() ?? 'D:/tools/Qt/6.9.3/msvc2022_64';
+    $tpcDir = findTpcDir() ?? 'D:/git/php/tpc_v0.9.4_windows_x64';
+    // 框架根目录（composer 包位置）：由 CLI 自身位置推导
+    $pkgDir = $GLOBALS['rootDir'];
+
+    // project.yml —— 桥接 C++ 源码直接参与本应用编译（源码内联方案）
+    $projectYml = <<<YML
+name: {$name}
+mode: bin
+output: build/{$name}
+
+sources:
+  - src/main.php
+  - {$pkgDir}/src/QtApp.php
+  - {$pkgDir}/src/WidgetTree.php
+  - {$pkgDir}/php-src/qt.stub.php
+  - {$pkgDir}/cpp-src/qt_bridge.cc
+  - {$pkgDir}/cpp-src/qt_widgets.cc
+
+build-dir: build
+
+cxx-std: c++20
+
+include-paths:
+  - {$pkgDir}/cpp-src
+  - {$pkgDir}/php-src
+  - {$qtDir}/include
+  - {$qtDir}/include/QtCore
+  - {$qtDir}/include/QtGui
+  - {$qtDir}/include/QtWidgets
+
+link-paths:
+  - {$qtDir}/lib
+
+link-libs:
+  - Qt6Core.lib
+  - Qt6Gui.lib
+  - Qt6Widgets.lib
+
+cxx-flags:
+  - /Zc:__cplusplus
+  - /permissive-
+  - /EHsc
+YML;
+    file_put_contents($targetDir . '/project.yml', $projectYml);
+
+    // main.php —— 状态驱动的声明式示例
+    $mainPhp = <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+use TypePHP\Qt\QtApp;
+use TypePHP\Qt\WidgetTree;
+
+// 注意：AOT 要求全局作用域只有声明，所以 $state 定义在 main() 里，
+// 闭包用 use (&$state) 按引用捕获。命令行参数从 main() 的参数拿。
+function main(int $argc, array $argv): void
+{
+    /** @var array<string, mixed> $state 应用状态：事件改它，视图读它。 */
+    $state = ['name' => 'World', 'greeting' => 'Hello, World!', 'clicks' => 0];
+
+    $app = new QtApp();
+    $app->create(['name' => 'MyApp', 'version' => '1.0']);
+    $app->createWindow('My App', ['width' => 720, 'height' => 480, 'centered' => true]);
+    $app->setStatus(['就绪']);
+
+    // 视图函数每帧按 $state 重新描述界面，控件状态（光标/选中）由 diff 保留
+    $app->view(function () use (&$state): array {
+        return WidgetTree::vbox([
+            WidgetTree::label((string) $state['greeting'], [
+                'id' => 'greeting',
+                'style' => 'font-size:20px;font-weight:bold',
+            ]),
+            WidgetTree::hbox([
+                WidgetTree::lineEdit((string) $state['name'], ['id' => 'name_input', 'placeholder' => '输入名字']),
+                WidgetTree::button('打招呼', ['id' => 'greet_btn']),
+            ]),
+            WidgetTree::label('点击次数：' . $state['clicks'], ['id' => 'clicks']),
+            WidgetTree::spacer(1),
+        ]);
+    });
+
+    // 事件处理器只改状态。闭包参数必须显式标注类型。
+    $app->on('greet_btn', 'click', function () use ($app, &$state) {
+        $state['name'] = $app->text('name_input');
+        $state['greeting'] = 'Hello, ' . ($state['name'] === '' ? 'World' : $state['name']) . '!';
+        $state['clicks'] = (int) $state['clicks'] + 1;
+        $app->setStatus(['已打招呼 · 第 ' . $state['clicks'] . ' 次']);
+    });
+
+    $app->on('name_input', 'submit', function (array $event) use (&$state) {
+        $state['name'] = (string) ($event['value'] ?? '');
+        $state['greeting'] = 'Hello, ' . ($state['name'] === '' ? 'World' : $state['name']) . '!';
+    });
+
+    // 无头验收：--shot <path> 渲染几帧后存 PNG 退出，便于自动化检查
+    $shot = shot_path($argv);
+    if ($shot !== '') {
+        $app->runFrames(3);
+        $ok = $app->snapshot($shot);
+        echo $ok ? "snapshot: $shot\n" : "snapshot failed\n";
+        $app->destroy();
+        return;
+    }
+
+    // 无头自检：--selftest 逐个触发所有事件，验证每个 handler 都能调用。
+    // AOT 编译后的闭包对实参个数做精确校验，参数个数不匹配只有真正
+    // 触发事件时才暴露 —— 所以这个自检要实际分发事件。
+    if (has_flag($argv, '--selftest')) {
+        $app->headless(true);
+        $app->run(1);
+        $app->dispatch(['type' => 'click', 'id' => 'greet_btn']);
+        $app->dispatch(['type' => 'submit', 'id' => 'name_input', 'value' => 'Ada']);
+
+        if ($app->lastError() !== '') {
+            echo "selftest failed: ", $app->lastError(), "\n";
+        } else {
+            echo "selftest passed\n";
+        }
+        $app->destroy();
+        return;
+    }
+
+    $app->run();
+}
+
+/** 命令行里是否存在某个布尔开关。 */
+function has_flag(array $argv, string $flag): bool
+{
+    $count = count($argv);
+    for ($i = 1; $i < $count; $i++) {
+        if ($argv[$i] === $flag) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** 从命令行参数里解析 `--shot <path>`；没有该参数返回空串。 */
+function shot_path(array $argv): string
+{
+    $count = count($argv);
+    for ($i = 1; $i < $count; $i++) {
+        if ($argv[$i] === '--shot' && $i + 1 < $count) {
+            return (string) $argv[$i + 1];
+        }
+    }
+    return '';
+}
+PHP;
+    file_put_contents($targetDir . '/src/main.php', $mainPhp);
+
+    // build.bat —— 编译 + 部署运行时 DLL
+    $vcvars = findVcvars() ?? 'D:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat';
+    $buildBat = <<<BAT
+@echo off
+setlocal
+call "{$vcvars}" >nul 2>&1
+cd /d %~dp0
+
+php "{$pkgDir}/bin/qtphp" build .
+
+endlocal & exit /b %errorlevel%
+BAT;
+    file_put_contents($targetDir . '/build.bat', $buildBat);
+
+    // run.bat
+    $runBat = <<<BAT
+@echo off
+setlocal
+cd /d %~dp0
+
+if not exist "build\\{$name}.exe" (
+    echo [ERROR] 未找到 build\\{$name}.exe，请先运行 build.bat
+    endlocal & exit /b 1
+)
+
+build\\{$name}.exe %*
+
+endlocal & exit /b %errorlevel%
+BAT;
+    file_put_contents($targetDir . '/run.bat', $runBat);
+
+    // package.bat
+    $packageBat = <<<BAT
+@echo off
+setlocal
+cd /d %~dp0
+
+php "{$pkgDir}/bin/qtphp" package .
+
+endlocal & exit /b %errorlevel%
+BAT;
+    file_put_contents($targetDir . '/package.bat', $packageBat);
+
+    // README
+    $readme = <<<MD
+# {$name}
+
+基于 TypePHP (AOT) + Qt 6 的原生桌面应用。
+
+## 构建
+
+```bat
+build.bat
+```
+
+编译并自动部署 Qt / PHP 运行时 DLL 到 `build/`。
+
+## 运行
+
+```bat
+run.bat
+```
+
+## 打包
+
+```bat
+package.bat
+```
+
+组装自包含的 `dist/` 目录，可直接分发给用户。
+
+## 写代码
+
+编辑 `src/main.php`：
+
+- `\$state` 保存应用状态
+- `\$app->view(fn)` 每帧按状态描述界面
+- `\$app->on(id, type, fn)` 处理事件，**只改状态**
+
+控件状态（输入光标、表格选中、滚动位置）在重渲染后自动保留。
+MD;
+    file_put_contents($targetDir . '/README.md', $readme);
+
+    success("项目已创建: $targetDir");
+    info("下一步: cd $name && build.bat");
+
+    return 0;
+}
+
+/** 定位 tpc 安装目录（含 phpx/ 与运行时 DLL）。 */
+function findTpcDir(): ?string
+{
+    $tpc = findTpc();
+    return $tpc ? dirname($tpc) : null;
+}
+
+function cmdBuild(string $path): int
+{
+    $projectYml = $path . '/project.yml';
+    if (!file_exists($projectYml)) {
+        error("未找到 project.yml: $projectYml");
+        return 1;
+    }
+
+    info("编译项目: $path");
+
+    $tpc = findTpc();
+    if (!$tpc) {
+        error('未找到 tpc');
+        return 1;
+    }
+
+    // tpc 需要 MSVC 环境（cl.exe / link.exe 在 PATH 上）。
+    // 先写一个临时批处理，在里面 call vcvars64.bat 再调 tpc，
+    // 避免依赖用户事先开好 "Developer Command Prompt"。
+    $vcvars = findVcvars();
+    $projectAbs = realpath($projectYml) ?: $projectYml;
+    $tpcCmd = '"' . $tpc . '" "' . $projectAbs . '" -O2';
+
+    if ($vcvars && !msvcEnvironmentReady()) {
+        $bat = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'qtphp-build-' . getmypid() . '.bat';
+        $lines = [
+            '@echo off',
+            'call "' . $vcvars . '" >nul 2>&1',
+            'cd /d "' . (realpath($path) ?: $path) . '"',
+            $tpcCmd,
+        ];
+        file_put_contents($bat, implode("\r\n", $lines) . "\r\n");
+        passthru('cmd /c "' . $bat . '" 2>&1', $exitCode);
+        @unlink($bat);
+    } else {
+        passthru($tpcCmd . ' 2>&1', $exitCode);
+    }
+
+    if ($exitCode !== 0) {
+        error("编译失败 (exit $exitCode)");
+        return $exitCode;
+    }
+
+    // 编译成功后自动部署运行时 DLL，否则双击 exe 会报"找不到 DLL"
+    deployRuntimeDlls($path);
+
+    return 0;
+}
+
+/**
+ * 当前进程是否已有可用的 MSVC 环境。
+ *
+ * 只查 cl.exe 不够 —— cl.exe 常在系统 PATH 上，但 INCLUDE/LIB 没设置，
+ * 结果编译时报 "cstring: No such file or directory"。所以必须查 INCLUDE。
+ */
+function msvcEnvironmentReady(): bool
+{
+    $include = getenv('INCLUDE');
+    return $include !== false && $include !== '';
+}
+
+/**
+ * 把运行时依赖 DLL 复制到可执行文件旁。
+ *
+ * 覆盖三类：PHP/PHPX 运行时、Qt 运行库、MSVC 运行时。
+ * Qt 的平台插件（platforms/qwindows.dll）不在这一步，由 package 阶段的
+ * windeployqt 负责；开发期直接跑 exe 需要它，所以这里也一并部署。
+ */
+function deployRuntimeDlls(string $projectPath): void
+{
+    $buildDir = rtrim($projectPath, '/\\') . '/build';
+    if (!is_dir($buildDir)) {
+        return;
+    }
+
+    $tpcDir = findTpcDir();
+    $qtDir = findQt();
+
+    $copied = 0;
+
+    // PHP/PHPX 运行时 DLL 闭包（实测依赖）
+    $runtimeDlls = [
+        'phpx.dll',
+        'php8ts.dll',
+        'libmpdec++-4.0.1.dll',
+        'libmpdec-4.0.1.dll',
+        'gmp-10.dll',
+        'mpfr-6.dll',
+    ];
+    foreach ($runtimeDlls as $dll) {
+        $src = $tpcDir . '/' . $dll;
+        if (file_exists($src)) {
+            copy($src, $buildDir . '/' . $dll);
+            $copied++;
+        }
+    }
+
+    // Qt 运行库（源码内联方案下 exe 直接依赖这些）
+    if ($qtDir) {
+        foreach (['Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll'] as $dll) {
+            $src = $qtDir . '/bin/' . $dll;
+            if (file_exists($src)) {
+                copy($src, $buildDir . '/' . $dll);
+                $copied++;
+            }
+        }
+
+        // 平台插件：缺了它 Qt 会报
+        // "could not find or load the Qt platform plugin windows"
+        $pluginDir = $buildDir . '/platforms';
+        $qwindows = $qtDir . '/plugins/platforms/qwindows.dll';
+        if (file_exists($qwindows)) {
+            if (!is_dir($pluginDir)) {
+                mkdir($pluginDir, 0755, true);
+            }
+            copy($qwindows, $pluginDir . '/qwindows.dll');
+            $copied++;
+        }
+
+        // 样式插件（Fusion 之外的原生样式）
+        $stylesDir = $buildDir . '/styles';
+        $stylePlugin = $qtDir . '/plugins/styles/qmodernwindowsstyle.dll';
+        if (file_exists($stylePlugin)) {
+            if (!is_dir($stylesDir)) {
+                mkdir($stylesDir, 0755, true);
+            }
+            copy($stylePlugin, $stylesDir . '/qmodernwindowsstyle.dll');
+            $copied++;
+        }
+    }
+
+    // MSVC 运行时
+    $vcRedist = findVcRedistDir();
+    if ($vcRedist) {
+        foreach (['msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'] as $dll) {
+            $src = $vcRedist . '/' . $dll;
+            if (file_exists($src) && !file_exists($buildDir . '/' . $dll)) {
+                copy($src, $buildDir . '/' . $dll);
+                $copied++;
+            }
+        }
+    }
+
+    if ($copied > 0) {
+        success("已部署 $copied 个运行时文件到 build/");
+    } else {
+        warning('未能找到运行时 DLL，exe 可能无法直接运行');
+    }
+}
+
+/** 定位 VC 运行时 DLL 目录（msvcp140.dll 等）。 */
+function findVcRedistDir(): ?string
+{
+    $roots = [
+        'C:/Windows/System32',
+        'C:/Program Files/Microsoft Visual Studio/2022/BuildTools/VC/Redist/MSVC',
+        'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Redist/MSVC',
+    ];
+    foreach ($roots as $root) {
+        if (!is_dir($root)) continue;
+        if (file_exists($root . '/msvcp140.dll')) {
+            return $root;
+        }
+        // Redist 目录下有多层版本号，找最新一个
+        $dirs = glob($root . '/*/x64/Microsoft.VC143.CRT', GLOB_ONLYDIR) ?: [];
+        rsort($dirs);
+        foreach ($dirs as $dir) {
+            if (file_exists($dir . '/msvcp140.dll')) {
+                return $dir;
+            }
+        }
+    }
+    return null;
+}
+
+function cmdRun(string $path): int
+{
+    $name = basename(rtrim($path, '/\\'));
+    $exe = rtrim($path, '/\\') . '/build/' . $name . '.exe';
+    if (!file_exists($exe)) {
+        error("未找到可执行文件: $exe");
+        info("请先运行: qtphp build $path");
+        return 1;
+    }
+
+    // 缺 DLL 时给出可操作的提示，而不是让 Windows 弹一个看不懂的错误框
+    $missing = checkRuntimeDlls(dirname($exe));
+    if ($missing) {
+        warning('以下 DLL 缺失，exe 可能无法启动：' . implode(', ', $missing));
+        info("运行 'qtphp build $path' 可自动部署；或执行 'qtphp package $path' 生成自包含目录。");
+    }
+
+    info("运行: $exe");
+    passthru('"' . $exe . '" 2>&1', $exitCode);
+    return $exitCode;
+}
+
+/** 检查 exe 同目录下缺失的运行时 DLL。 */
+function checkRuntimeDlls(string $dir): array
+{
+    $required = [
+        'phpx.dll',
+        'php8ts.dll',
+        'libmpdec++-4.0.1.dll',
+        'Qt6Core.dll',
+        'Qt6Gui.dll',
+        'Qt6Widgets.dll',
+        'platforms/qwindows.dll',
+    ];
+    $missing = [];
+    foreach ($required as $dll) {
+        if (!file_exists($dir . '/' . $dll)) {
+            $missing[] = $dll;
+        }
+    }
+    return $missing;
+}
+
+function cmdPackage(string $path): int
+{
+    $path = rtrim($path, '/\\');
+    $name = basename($path);
+    $exe = $path . '/build/' . $name . '.exe';
+    if (!file_exists($exe)) {
+        error("未找到可执行文件: $exe");
+        info("请先运行: qtphp build $path");
+        return 1;
+    }
+
+    $distDir = $path . '/dist';
+    if (!is_dir($distDir)) {
+        mkdir($distDir, 0755, true);
+    }
+
+    info("打包到: $distDir");
+
+    // 先补齐运行时 DLL（幂等）
+    deployRuntimeDlls($path);
+
+    // 复制 exe 与 build/ 下全部 DLL
+    $buildDir = $path . '/build';
+    foreach (glob($buildDir . '/*.exe') as $file) {
+        copy($file, $distDir . '/' . basename($file));
+    }
+    foreach (glob($buildDir . '/*.dll') as $file) {
+        copy($file, $distDir . '/' . basename($file));
+    }
+
+    // assets 目录（如果项目有）
+    if (is_dir($path . '/assets')) {
+        copyDir($path . '/assets', $distDir . '/assets');
+    }
+
+    // Qt 依赖 + 平台插件：缺了这一步会在启动时报
+    // "could not find or load the Qt platform plugin windows"
+    $qtDir = findQt();
+    if (!$qtDir) {
+        error('未找到 Qt，无法部署 Qt 依赖');
+        return 1;
+    }
+    $windeployqt = $qtDir . '/bin/windeployqt.exe';
+    if (!file_exists($windeployqt)) {
+        error("未找到 windeployqt: $windeployqt");
+        return 1;
+    }
+    info('运行 windeployqt（部署 Qt DLL 与平台插件）...');
+    passthru('"' . $windeployqt . '" --no-translations --no-compiler-runtime "' . $distDir . '/' . $name . '.exe" 2>&1', $qtExit);
+    if ($qtExit !== 0) {
+        warning("windeployqt 返回 $qtExit，继续检查产物");
+    }
+
+    // 自检：验证关键文件齐全
+    return verifyPackage($distDir, $name);
+}
+
+/** 自检打包产物：关键 DLL、平台插件、可执行文件是否齐全。 */
+function verifyPackage(string $distDir, string $name): int
+{
+    echo PHP_EOL;
+    info('自检打包产物...');
+
+    $required = [
+        $name . '.exe',
+        'phpx.dll',
+        'php8ts.dll',
+        'Qt6Core.dll',
+        'Qt6Gui.dll',
+        'Qt6Widgets.dll',
+        'platforms/qwindows.dll',
+    ];
+
+    $missing = [];
+    foreach ($required as $file) {
+        if (!file_exists($distDir . '/' . $file)) {
+            $missing[] = $file;
+        }
+    }
+
+    if ($missing) {
+        error('缺少关键文件：');
+        foreach ($missing as $file) {
+            echo "  - $file" . PHP_EOL;
+        }
+        return 1;
+    }
+
+    // 统计产物大小
+    $size = dirSize($distDir);
+    success(sprintf('打包完成: %s (%.1f MB)', $distDir, $size / 1048576));
+    info('关键文件齐全，可脱离开发环境运行。');
+    return 0;
+}
+
+function copyDir(string $src, string $dst): void
+{
+    if (!is_dir($dst)) {
+        mkdir($dst, 0755, true);
+    }
+    foreach (scandir($src) ?: [] as $item) {
+        if ($item === '.' || $item === '..') continue;
+        $s = $src . '/' . $item;
+        $d = $dst . '/' . $item;
+        if (is_dir($s)) {
+            copyDir($s, $d);
+        } else {
+            copy($s, $d);
+        }
+    }
+}
+
+function dirSize(string $dir): int
+{
+    $size = 0;
+    $iterator = new \RecursiveIteratorIterator(
+        new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
+    );
+    foreach ($iterator as $file) {
+        if ($file->isFile()) {
+            $size += $file->getSize();
+        }
+    }
+    return $size;
+}
+
+function cmdTest(): int
+{
+    $phpunit = $GLOBALS['rootDir'] . '/vendor/bin/phpunit';
+    if (!file_exists($phpunit)) {
+        error('未找到 PHPUnit，请运行: composer install');
+        return 1;
+    }
+
+    info('运行测试...');
+    // phpunit.xml 里已配置 bootstrap，无需再传
+    passthru('"' . $phpunit . '" --colors=always 2>&1', $exitCode);
+    return $exitCode;
+}
+
+function cmdLint(): int
+{
+    echo color('=== 桥接契约校验 ===', 'bold') . PHP_EOL . PHP_EOL;
+
+    $stubFile = $GLOBALS['rootDir'] . '/php-src/qt.stub.php';
+    if (!file_exists($stubFile)) {
+        error("未找到 stub 文件: $stubFile");
+        return 1;
+    }
+
+    $content = file_get_contents($stubFile);
+
+    // 提取 stub 函数
+    preg_match_all('/function\s+(qt_\w+)\s*\(([^)]*)\)/', $content, $matches, PREG_SET_ORDER);
+    $stubFunctions = [];
+    foreach ($matches as $match) {
+        $stubFunctions[] = 'php_' . $match[1];
+    }
+
+    info('Stub 函数 (' . count($stubFunctions) . ' 个):');
+    foreach ($stubFunctions as $fn) {
+        echo "  - $fn" . PHP_EOL;
+    }
+
+    // 检查 C++ 实现
+    $cppFiles = glob($GLOBALS['rootDir'] . '/cpp-src/*.cc');
+    $definedFunctions = [];
+    foreach ($cppFiles as $file) {
+        $cpp = file_get_contents($file);
+        preg_match_all('/^(?:Variant|void|Bool|String|Int|Array)\s+(php_\w+)\s*\(/m', $cpp, $cppMatches);
+        foreach ($cppMatches[1] as $fn) {
+            $definedFunctions[] = $fn;
+        }
+    }
+
+    echo PHP_EOL;
+    info('C++ 实现 (' . count($definedFunctions) . ' 个):');
+    foreach ($definedFunctions as $fn) {
+        echo "  - $fn" . PHP_EOL;
+    }
+
+    // 比对
+    echo PHP_EOL;
+    $missing = array_diff($stubFunctions, $definedFunctions);
+    $extra = array_diff($definedFunctions, $stubFunctions);
+
+    if (empty($missing) && empty($extra)) {
+        success('契约一致！');
+        return 0;
+    }
+
+    if (!empty($missing)) {
+        error('C++ 中缺失的实现:');
+        foreach ($missing as $fn) {
+            echo "  - $fn" . PHP_EOL;
+        }
+    }
+
+    if (!empty($extra)) {
+        warning('C++ 中多余的实现:');
+        foreach ($extra as $fn) {
+            echo "  - $fn" . PHP_EOL;
+        }
+    }
+
+    return 1;
+}
+
+// ── 主入口 ──
+
+function main(array $argv): int
+{
+    $GLOBALS['rootDir'] = dirname(__DIR__);
+
+    if (count($argv) < 2) {
+        echo color('TypePHP\\Qt 工具', 'bold') . PHP_EOL . PHP_EOL;
+        echo '用法:' . PHP_EOL;
+        echo '  qtphp doctor            检查工具链' . PHP_EOL;
+        echo '  qtphp new <name>        创建新项目' . PHP_EOL;
+        echo '  qtphp build <path>      编译项目' . PHP_EOL;
+        echo '  qtphp run <path>        运行项目' . PHP_EOL;
+        echo '  qtphp package <path>    打包项目' . PHP_EOL;
+        echo '  qtphp test              运行测试' . PHP_EOL;
+        echo '  qtphp lint              校验桥接契约' . PHP_EOL;
+        return 0;
+    }
+
+    $command = $argv[1];
+
+    switch ($command) {
+        case 'doctor':
+            return cmdDoctor();
+        case 'new':
+            if (!isset($argv[2])) {
+                error('请指定项目名称');
+                return 1;
+            }
+            return cmdNew($argv[2]);
+        case 'build':
+            if (!isset($argv[2])) {
+                error('请指定项目路径');
+                return 1;
+            }
+            return cmdBuild($argv[2]);
+        case 'run':
+            if (!isset($argv[2])) {
+                error('请指定项目路径');
+                return 1;
+            }
+            return cmdRun($argv[2]);
+        case 'package':
+            if (!isset($argv[2])) {
+                error('请指定项目路径');
+                return 1;
+            }
+            return cmdPackage($argv[2]);
+        case 'test':
+            return cmdTest();
+        case 'lint':
+            return cmdLint();
+        default:
+            error("未知命令: $command");
+            return 1;
+    }
+}
+
+exit(main($argv));

@@ -1,0 +1,71 @@
+{
+    "name": "yangweijie/typephp-qt",
+    "description": "Rapid development framework for native desktop GUI applications built with TypePHP (AOT-compiled PHP) and Qt 6 — declarative widget tree, one-command build, self-verifying packaging and headless testing.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "typephp",
+        "aot",
+        "aot-compiler",
+        "tpc",
+        "qt",
+        "qt6",
+        "qt-widgets",
+        "desktop",
+        "gui",
+        "native",
+        "php"
+    ],
+    "require": {
+        "php": ">=8.1"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^13.3",
+        "swoole/typephp": ">=0.9"
+    },
+    "bin": [
+        "bin/qtphp"
+    ],
+    "autoload": {
+        "psr-4": {
+            "TypePHP\\Qt\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "TypePHP\\Qt\\Tests\\": "tests/"
+        },
+        "files": [
+            "src/FakeBridge.php"
+        ]
+    },
+    "scripts": {
+        "doctor": "@php bin/qtphp doctor",
+        "test": "@php bin/qtphp test",
+        "lint": "@php bin/qtphp lint",
+        "demo:build": "@php bin/qtphp build examples/hello",
+        "demo:run": "@php bin/qtphp run examples/hello",
+        "demo:package": "@php bin/qtphp package examples/hello"
+    },
+    "scripts-descriptions": {
+        "doctor": "Check the local toolchain (Qt, MSVC, tpc) and print actionable fixes.",
+        "test": "Run the framework test suite — headless, no Qt or compiler required.",
+        "lint": "Validate the bridge contract: stub signatures vs. C++ symbols.",
+        "demo:build": "Compile the bundled example app with tpc.",
+        "demo:run": "Deploy Qt deps and run the example app.",
+        "demo:package": "Assemble and self-verify a shippable dist/ folder for the example."
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "extra": {
+        "qt-version": "6.9.3",
+        "bridge": {
+            "stub": "php-src/qt.stub.php",
+            "sources": [
+                "cpp-src",
+                "php-src"
+            ]
+        }
+    }
+}

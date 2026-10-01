@@ -1,0 +1,42 @@
+# Build output
+/build/
+/dist/
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.lib
+*.exp
+
+# Generated per-project files (produced by `qtphp build`)
+/project.yml
+/qt.conf
+
+# Deployed Qt runtime — never commit
+/Qt6*.dll
+/phpx.dll
+/php8*.dll
+/libmpdec*.dll
+/gmp-*.dll
+/mpfr-*.dll
+/libsqlite3.dll
+/platforms/
+/styles/
+/imageformats/
+/iconengines/
+/translations/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Composer
+/vendor/
+composer.lock
+
+# Scratch
+*.png
+!docs/**/*.png
+!examples/**/assets/*.png
