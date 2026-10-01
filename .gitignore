@@ -1,6 +1,7 @@
 # Build output
 /build/
 /dist/
+/example/hello/dist/
 *.exe
 *.obj
 *.pdb
