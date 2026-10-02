@@ -822,6 +822,10 @@ static QtWindowBox *boxFrom(Variant box) { return box.toBox<QtWindowBox>(); }
 
 String php_qt_bridge_version() { return String(QTBRIDGE_VERSION); }
 
+String php_qt_webview_backend() { return String(qtWebViewBackend()); }
+
+Bool php_qt_webview_supports_js() { return qtWebViewSupportsJs(); }
+
 Variant php_qt_app_create(Array options) {
     if (!qt_application) {
         qt_application = new QApplication(qt_argc, qt_argv);

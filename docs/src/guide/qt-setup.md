@@ -17,6 +17,13 @@ The bridge uses **three Qt modules and nothing else**:
 No QML/Quick, no Network, no Sql — verified against every `#include` in `cpp-src/`.
 So a **minimal Qt Widgets install is enough**, which is what the commands below give you.
 
+::: tip The webview widget does not need extra Qt modules
+`WidgetTree::webView()` uses **WebView2 on Windows** (Microsoft's Edge engine, not a Qt module —
+the SDK is vendored in `third_party/`, and the runtime ships with Windows) and **QTextBrowser
+elsewhere**, which is part of QtWidgets. So enabling the webview never means installing
+QtWebEngine — which would add 1.5–2 GB. See [WebView](/widgets/webview.md).
+:::
+
 ::: tip Version
 Qt **6.0 or newer**. The project is developed and tested against **6.9.3**; `qtphp`'s automatic
 detection looks for 6.9.3 specifically, so any other version needs `QT_DIR` (see below).

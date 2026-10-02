@@ -72,6 +72,8 @@
 |---|---|
 | `clipboardRead(): string` | 读剪贴板 |
 | `clipboardWrite(string $text): void` | 写剪贴板 |
+| `webViewBackend(): string` | `'webview2'` 或 `'textbrowser'` |
+| `webViewSupportsJs(): bool` | 当前后端能否运行 JavaScript |
 
 ### 验收与诊断
 
@@ -122,6 +124,8 @@ WidgetTree::combo(array $items, string $value = '', array $props = [])
 WidgetTree::list(array $items, string $value = '', array $props = [])
 WidgetTree::table(array $columns, array $rows, array $props = [])
 WidgetTree::tree(array $nodes, array $props = [])
+WidgetTree::webView(string $url = '', array $props = [])
+WidgetTree::html(string $html, array $props = [])
 ```
 
 ---
@@ -146,6 +150,8 @@ WidgetTree::tree(array $nodes, array $props = [])
 | `cell` | table（单元格被编辑） | 新文本 | `row`、`col` |
 | `expand` / `collapse` | tree | 节点 id | `expanded` |
 | `close` | tabs（关闭按钮） | 索引 | `index` |
+| `loaded` / `navigating` | webview | URL | `loaded` 带 `success` |
+| `title` | webview | 文档标题 | — |
 
 事件对象：
 

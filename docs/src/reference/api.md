@@ -72,6 +72,8 @@ A handler may declare 0 or 1 parameters (`array $event`) — the framework probe
 |---|---|
 | `clipboardRead(): string` | Read the clipboard |
 | `clipboardWrite(string $text): void` | Write the clipboard |
+| `webViewBackend(): string` | `'webview2'` or `'textbrowser'` |
+| `webViewSupportsJs(): bool` | Whether the compiled-in backend can run JavaScript |
 
 ### Verification and diagnostics
 
@@ -122,6 +124,8 @@ WidgetTree::combo(array $items, string $value = '', array $props = [])
 WidgetTree::list(array $items, string $value = '', array $props = [])
 WidgetTree::table(array $columns, array $rows, array $props = [])
 WidgetTree::tree(array $nodes, array $props = [])
+WidgetTree::webView(string $url = '', array $props = [])
+WidgetTree::html(string $html, array $props = [])
 ```
 
 ---
@@ -146,6 +150,8 @@ WidgetTree::tree(array $nodes, array $props = [])
 | `cell` | table (cell edited) | new text | `row`, `col` |
 | `expand` / `collapse` | tree | node id | `expanded` |
 | `close` | tabs (close button) | the index | `index` |
+| `loaded` / `navigating` | webview | the URL | `success` on `loaded` |
+| `title` | webview | the document title | — |
 
 The event object:
 

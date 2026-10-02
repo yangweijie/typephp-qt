@@ -17,6 +17,7 @@ sources:
   - ../../php-src/qt.stub.php
   - ../../cpp-src/qt_bridge.cc
   - ../../cpp-src/qt_widgets.cc
+  - ../../cpp-src/qt_webview.cc
 
 build-dir: build
 
@@ -31,9 +32,11 @@ include-paths:
   - D:/tools/Qt/6.9.3/msvc2022_64/include/QtWidgets
 
 link-paths:
+  - ../../third_party/webview2/x64
   - D:/tools/Qt/6.9.3/msvc2022_64/lib
 
 link-libs:
+  - WebView2Loader.dll.lib
   - Qt6Core.lib
   - Qt6Gui.lib
   - Qt6Widgets.lib
@@ -42,3 +45,8 @@ cxx-flags:
   - /Zc:__cplusplus
   - /permissive-
   - /EHsc
+  # WebView2 后端（完整 Chromium）。不定义 QT_WEBVIEW2 时会退化成
+  # QTextBrowser（HTML 子集、不支持 JS），一样能编译运行。
+  # 路径相对本文件：../../third_party/webview2 是仓库里 vendor 的 SDK。
+  - /DQT_WEBVIEW2
+  - /I"../../third_party/webview2/include"

@@ -20,6 +20,7 @@ WidgetTree::button('OK', ['id' => 'ok']);
 | [Inputs](/widgets/inputs.md) | `lineedit` `textedit` `spin` `doublespin` `slider` `checkbox` `radio` `combo` |
 | [Data](/widgets/data.md) | `list` `table` `tree` |
 | [Display](/widgets/display.md) | `label` `button` `progress` `image` `link` |
+| [WebView](/widgets/webview.md) | `webview` |
 
 ## Cheat sheet
 

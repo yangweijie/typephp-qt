@@ -16,6 +16,13 @@
 没有 QML/Quick，没有 Network，没有 Sql —— 这是对着 `cpp-src/` 里每一个 `#include` 核过的。
 所以**装一个最小的 Qt Widgets 就够了**，下面给的就是最小集。
 
+::: tip webview 控件不需要额外的 Qt 模块
+`WidgetTree::webView()` 在 **Windows 上用 WebView2**（微软 Edge 内核，不是 Qt 模块 ——
+SDK 已 vendor 在 `third_party/`，运行时随 Windows 自带），**其余平台用 QTextBrowser**，
+它是 QtWidgets 的一部分。所以启用 webview 永远不需要装 QtWebEngine —— 那会多出 1.5–2 GB。
+详见 [WebView](/zh/widgets/webview.md)。
+:::
+
 ::: tip 版本要求
 Qt **6.0 及以上**。项目开发和实测用的是 **6.9.3**；`qtphp` 的自动探测也是照 6.9.3 的路径找的，
 所以**其他版本要显式给 `QT_DIR`**（见下文）。Qt 5 不行 —— 代码全程用的是 Qt 6 API。

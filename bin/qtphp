@@ -447,6 +447,7 @@ sources:
   - {$pkgDir}/php-src/qt.stub.php
   - {$pkgDir}/cpp-src/qt_bridge.cc
   - {$pkgDir}/cpp-src/qt_widgets.cc
+  - {$pkgDir}/cpp-src/qt_webview.cc
 
 build-dir: build
 
@@ -461,9 +462,12 @@ include-paths:
   - {$qtDir}/include/QtWidgets
 
 link-paths:
+  # WebView2 loader（webview 控件用；SDK 已 vendor 在包里）
+  - {$pkgDir}/third_party/webview2/x64
   - {$qtDir}/lib
 
 link-libs:
+  - WebView2Loader.dll.lib
   - Qt6Core.lib
   - Qt6Gui.lib
   - Qt6Widgets.lib
@@ -472,6 +476,10 @@ cxx-flags:
   - /Zc:__cplusplus
   - /permissive-
   - /EHsc
+  # webview 控件用 WebView2 后端（完整 Chromium，支持 JS）。
+  # 注释掉这两行就退化成 QTextBrowser（HTML 子集、不支持 JS），一样能编译运行。
+  - /DQT_WEBVIEW2
+  - /I"{$pkgDir}/third_party/webview2/include"
 YML;
     file_put_contents($targetDir . '/project.yml', $projectYml);
 
@@ -673,7 +681,7 @@ function main(int $argc, array $argv): void
     });
 
     // 视图函数每帧按 $state 重新描述界面，控件状态（光标/选中）由 diff 保留
-    $app->view(function () use (&$state): array {
+    $app->view(function () use (&$state, $app): array {
         return WidgetTree::vbox([
             WidgetTree::label((string) $state['greeting'], [
                 'id' => 'greeting',
@@ -684,7 +692,18 @@ function main(int $argc, array $argv): void
                 WidgetTree::button('打招呼', ['id' => 'greet_btn']),
             ]),
             WidgetTree::label('点击次数：' . $state['clicks'] . ' · 托盘点击 ' . $state['tray'] . ' 次', ['id' => 'clicks']),
-            WidgetTree::spacer(1),
+
+            // 内嵌网页：Windows 上是 WebView2（完整 Chromium、支持 JS），
+            // 其余平台是 QTextBrowser（HTML 子集、不支持 JS）。
+            // url 也可以是本地文件（相对可执行文件目录解析）。
+            WidgetTree::group('WebView（后端 ' . $app->webViewBackend()
+                . '，JS ' . ($app->webViewSupportsJs() ? '支持' : '不支持') . '）', [
+                WidgetTree::html(
+                    '<h3 style="color:#1d4ed8">内嵌网页</h3>'
+                    . '<p>这是用 <b>WidgetTree::html()</b> 直接渲染的 HTML。</p>',
+                    ['id' => 'demo_webview', 'grow' => 1]
+                ),
+            ], ['grow' => 1]),
         ]);
     });
 
@@ -1096,6 +1115,16 @@ function deployRuntimeDlls(string $projectPath): void
         }
     }
 
+    // WebView2 加载器：用了 webview 控件就必须带上，否则 exe 起不来
+    // （0xC0000135 = 找不到 DLL，且报错只说缺 DLL、不说是哪个）。
+    // 注意 WebView2 **运行时**由系统提供（Win10/11 随 Edge 自带），
+    // 这里搬的只是那 195KB 的 loader。
+    $wv2Loader = $GLOBALS['rootDir'] . '/third_party/webview2/x64/WebView2Loader.dll';
+    if (file_exists($wv2Loader) && !file_exists($buildDir . '/WebView2Loader.dll')) {
+        copy($wv2Loader, $buildDir . '/WebView2Loader.dll');
+        $copied++;
+    }
+
     if ($copied > 0) {
         success("已部署 $copied 个运行时文件到 build/");
     } else {
@@ -1277,6 +1306,9 @@ function checkRuntimeDlls(string $dir): array
         'Qt6Gui.dll',
         'Qt6Widgets.dll',
         'platforms/qwindows.dll',
+        // webview 控件需要；缺了 exe 直接 0xC0000135（找不到 DLL），
+        // 而系统报错不会说缺的是哪一个 —— 这里点名。
+        'WebView2Loader.dll',
     ];
     $missing = [];
     foreach ($required as $dll) {

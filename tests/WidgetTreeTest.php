@@ -299,4 +299,36 @@ final class WidgetTreeTest extends TestCase
         $node = WidgetTree::vbox($children);
         $this->assertSame([0, 1], array_keys($node['children']));
     }
+
+    // ── webview ──
+
+    public function testWebViewWithUrl(): void
+    {
+        $node = WidgetTree::webView('https://example.com', ['id' => 'wv']);
+        $this->assertSame('webview', $node['type']);
+        $this->assertSame('https://example.com', $node['url']);
+        $this->assertSame('wv', $node['id']);
+    }
+
+    /** 不传 url 时不写这个键 —— 否则会覆盖掉同节点上的 html。 */
+    public function testWebViewWithoutUrlOmitsKey(): void
+    {
+        $node = WidgetTree::webView('', ['id' => 'wv', 'html' => '<p>hi</p>']);
+        $this->assertArrayNotHasKey('url', $node);
+        $this->assertSame('<p>hi</p>', $node['html']);
+    }
+
+    public function testHtmlHelperBuildsWebView(): void
+    {
+        $node = WidgetTree::html('<h1>Title</h1>', ['id' => 'doc']);
+        $this->assertSame('webview', $node['type']);
+        $this->assertSame('<h1>Title</h1>', $node['html']);
+    }
+
+    /** 本地文件路径也走 url（相对 exe 目录解析由 C++ 侧负责）。 */
+    public function testWebViewAcceptsLocalPath(): void
+    {
+        $node = WidgetTree::webView('assets/help.html', ['id' => 'help']);
+        $this->assertSame('assets/help.html', $node['url']);
+    }
 }

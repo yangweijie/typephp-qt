@@ -32,7 +32,7 @@ function main(int $argc, array $argv): void
     $app->create(['name' => 'HelloApp', 'version' => '1.0', 'organization' => 'TypePHP']);
     $app->createWindow('Hello TypePHP-Qt', [
         'width' => 760,
-        'height' => 560,
+        'height' => 720,
         'min_width' => 520,
         'min_height' => 380,
         'centered' => true,
@@ -64,7 +64,7 @@ function main(int $argc, array $argv): void
 
     // ── 视图：每帧按 $state 重新描述界面 ──
     // 控件状态（输入光标、表格选中、滚动位置）由 C++ 侧的 id diff 保留。
-    $app->view(function () use (&$state): array {
+    $app->view(function () use (&$state, $app): array {
         $greetingStyle = 'font-size:22px;font-weight:bold;'
             . ($state['dark'] ? 'color:#0ea5e9;' : 'color:#1d4ed8;');
 
@@ -102,7 +102,7 @@ function main(int $argc, array $argv): void
                 WidgetTree::hbox([
                     WidgetTree::button('推进', ['id' => 'step_btn']),
                     WidgetTree::button('重置', ['id' => 'reset_btn']),
-                    WidgetTree::spacer(1),
+            WidgetTree::spacer(1),
                     WidgetTree::label('点击次数：' . $state['clicks'], ['id' => 'click_count']),
                 ]),
             ]),
@@ -126,6 +126,17 @@ function main(int $argc, array $argv): void
                 WidgetTree::spacer(1),
                 WidgetTree::link('TypePHP 文档', 'https://github.com/swoole/typephp', ['id' => 'doc_link']),
             ]),
+
+            WidgetTree::group('WebView（backend=' . $app->webViewBackend()
+                . '，js=' . ($app->webViewSupportsJs() ? '支持' : '不支持') . '）', [
+                WidgetTree::webView('', [
+                    'id' => 'wv',
+                    'html' => '<h1 style="color:#1d4ed8">WebView OK</h1>'
+                              . '<p>由 <b>' . $app->webViewBackend() . '</b> 后端渲染</p>'
+                              . '<p>加粗 · 斜体 · 中文</p>',
+                    'grow' => 1,
+                ]),
+            ], ['grow' => 1]),
         ]);
     });
 
@@ -242,7 +253,8 @@ function main(int $argc, array $argv): void
     // 无头验收：--shot <path> 渲染几帧后存 PNG 退出。
     $shot = shot_path($argv);
     if ($shot !== '') {
-        $app->run(2);
+        // TEMP: 给 WebView2 异步初始化留时间
+        for ($i = 0; $i < 120; $i++) { $app->runFrames(1); }
         $ok = $app->snapshot($shot);
         $app->destroy();
         return;

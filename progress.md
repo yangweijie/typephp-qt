@@ -1,5 +1,70 @@
 # Progress Log — typephp-qt
 
+## Session 24 — 2026-10-03（增加 webview 支持）
+
+### 任务
+> 「增加 webview 支持」
+
+### 先确认可行性（三条路，代价差别很大）
+| 方案 | 需下载 | 能力 | 打包 |
+|---|---|---|---|
+| QTextBrowser | 无（QtWidgets 自带） | HTML 子集，**无 JS** | 不变 |
+| QtWebEngine | ~300MB → 解压 1.5–2GB | 完整 Chromium | +几十 MB |
+| **系统 WebView2** | 运行时本机已有（148.x），SDK 需自取 | 完整 Chromium（Edge 内核） | 仅 195KB loader |
+
+**用户选择「QTextBrowser 和 WebView2 都做」** —— 轻量的跨平台默认 + Windows 上的完整浏览器。
+
+### 实现
+- **`cpp-src/qt_webview.cc`**（新，约 380 行）：一个 `webview` 控件，两种后端按 `QT_WEBVIEW2`
+  编译期二选一；对外同一组属性（`url`/`html`/`zoom`）与事件（`loaded`/`title`/`navigating`/`link`）。
+- **WebView2 SDK vendor 到 `third_party/webview2/`**：从 NuGet 取 `Microsoft.Web.WebView2`
+  1.0.4258.31，只留编译需要的（`WebView2.h` 2.9MB + import lib 3.5KB + loader DLL 195KB），
+  刻意**不 vendor** 那 11MB 的静态库。压缩后仅约 200KB，用户无需任何额外下载步骤。
+- **PHP 侧**：`WidgetTree::webView()` / `WidgetTree::html()`；`QtApp::webViewBackend()` /
+  `webViewSupportsJs()`（应用据此做降级提示，而不是白屏）；FakeBridge 同步。
+- **`qtphp build` 自动部署 `WebView2Loader.dll`**，并加进 `run` 的依赖自检。
+
+### 踩到的坑（都实测确认）
+1. **`Q_OBJECT` 用不了** —— 本项目不走 moc。改用 `dynamic_cast` 替代 `qobject_cast`。
+2. **`wil::unique_cotaskmem_string` 不可用** —— 没有 WIL 头。改用手写 `takeCoTaskMemString()`。
+3. **`bool` vs `Bool`** —— `qtphp lint` 的正则只认 `Variant|void|Bool|String|Int|Array`，
+   写 `bool php_qt_...` 会被判成「缺失实现」。改用 `Bool`。
+4. **缺 `WebView2Loader.dll` → `0xC0000135`** —— 系统报错只说「找不到 DLL」不说哪个。
+   加进部署与自检后能点名。
+5. **webview 被压成 694×16**（最费时的一个）—— 两层原因叠加：
+   - WebView2 画在自己的子窗口里，对 Qt 的 `sizeHint` 毫无贡献；占位标签删掉后内层布局为空、
+     sizeHint 归零，外层布局就把它压扁 → 设 `Expanding` + `sizeHint()`
+   - 窗口内容比窗口高时 Qt 会压缩可压缩项，`setMinimumSize(1,1)` 等于允许压到 0
+     → 改为 `setMinimumHeight(120)`
+6. **`--shot` 截不到 WebView2 画面** —— 它画在独立子窗口，`QWidget::grab()` 不含那块区域。
+   这是后端限制（QTextBrowser 能截到），已写入文档。
+
+### 验证
+```
+WebView2 后端    → 编译通过；真实运行 NavigationCompleted success=1；尺寸 694×123
+                   （修复前 694×16，画面完全看不见）
+QTextBrowser     → 编译通过；--shot 截图确认渲染出「WebView OK」+ 加粗/斜体/中文
+                   标签正确显示 backend=textbrowser, js=不支持
+两后端同一份 PHP → 关掉 /DQT_WEBVIEW2 重新编译，程序照常运行
+脚手架            → qtphp new → build（自动带 WebView2 配置与 loader）→ selftest 通过
+qtphp test       → 123 tests（+7：webview 工厂 4 个、后端查询 3 个）
+qtphp lint       → 契约一致（26 个桥接函数）
+示例 selftest    → 25/25，exit 0
+docs             → 63 页（+2 中英 webview 页），链接与锚点全过
+```
+
+### 顺带修正的文档矛盾
+`qt-setup.md` 刚写完「只用 Core/Gui/Widgets、没有别的 Qt 模块」。加了 webview 后要说明：
+**webview 不需要 QtWebEngine** —— Windows 走 WebView2（非 Qt 模块），其余走 QtWidgets 自带的
+QTextBrowser。中英两版都补了这个 tip，避免读者以为要装 1.5–2GB。
+
+### 教训
+**异步初始化的控件，尺寸问题会伪装成「渲染失败」。** 我一度以为 WebView2 没渲染出来，
+查了几轮才发现导航是成功的、只是控件被压成 16px 高 —— **画面为零不是因为没画，而是因为没地方画**。
+以后遇到「控件空白」，先量尺寸再怀疑渲染链路。
+
+---
+
 ## Session 23 — 2026-10-02（文档补 Qt 安装与编译，跨系统）
 
 ### 任务

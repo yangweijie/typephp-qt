@@ -385,6 +385,9 @@ QWidget *qtCreateWidget(QtWindowBox *box, const QString &type, const Variant &no
         });
         return tree;
     }
+    if (type == QLatin1String("webview")) {
+        return qtCreateWebView(box, id);
+    }
     return nullptr;  // spacer 与未知类型
 }
 
@@ -714,6 +717,13 @@ void qtApplyProp(QtWindowBox *box, QWidget *widget, const QString &type, const Q
             const QPixmap pixmap(qtResolvePath(toQString(value)));
             if (!pixmap.isNull()) label->setPixmap(pixmap);
         }
+        return;
+    }
+    // ── webview ──
+    // url / html / zoom 交给 qt_webview.cc 里的后端处理（两个后端的实现不同，
+    // 但都接受同一组属性）。
+    if (key == QLatin1String("url") || key == QLatin1String("html") || key == QLatin1String("zoom")) {
+        qtWebViewApplyProp(widget, key, value);
         return;
     }
     if (key == QLatin1String("scaled_size")) {

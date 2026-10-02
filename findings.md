@@ -863,3 +863,66 @@ Linux 上因此多一行 `[OK] Linux 构建前置: 齐全`（7 行检查项 + �
 **offscreen 下 `--shot` 渲染不出中文**（方框）：Qt offscreen 平台插件的字体枚举
 取不到中文字体。`--selftest` / `--difftest` 不受影响（不渲染像素）。
 要检查中文渲染，`--shot` 不要加 offscreen。
+
+## F26. webview：三种实现路线的真实代价（Session 24）
+
+要做「内嵌网页」时，面前有三条路，代价差一个数量级：
+
+| 方案 | 额外下载 | 能力 | 打包增量 | 跨平台 |
+|---|---|---|---|---|
+| QTextBrowser | **无**（QtWidgets 自带） | HTML 子集 + 图片 + 链接，**无 JS** | 0 | ✅ 全平台 |
+| QtWebEngine | ~300MB → 解压 **1.5–2GB** | 完整 Chromium | +几十 MB（含 `QtWebEngineProcess.exe`） | ✅ |
+| 系统 WebView2 | 运行时**系统已有**，SDK 需自取 | 完整 Chromium（Edge 内核） | **195KB**（loader DLL） | ❌ 仅 Windows |
+
+**选型**：QTextBrowser 做跨平台默认 + WebView2 做 Windows 增强，同一份 PHP 代码两边都能跑。
+这样**既不需要用户装 1.5–2GB 的 QtWebEngine，也不需要平台外的额外步骤**。
+
+### WebView2 SDK 怎么拿、留哪些
+Windows SDK **不含** `WebView2.h`（实测 `Windows Kits\Include` 里没有），要从 NuGet 取：
+```bash
+curl -sL -o wv2.zip https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2
+```
+（2026-10 取到 1.0.4258.31）。包里只需要三样：
+
+| 文件 | 大小 | 说明 |
+|---|---|---|
+| `build/native/include/WebView2.h` | 2.9MB | COM 接口定义 |
+| `build/native/include/WebView2EnvironmentOptions.h` | 19KB | 选项实现 |
+| `build/native/x64/WebView2Loader.dll.lib` | 3.5KB | import lib |
+| `build/native/x64/WebView2Loader.dll` | 195KB | 随应用分发 |
+
+**11MB 的 `WebView2LoaderStatic.lib` 不用 vendor** —— import lib + 195KB DLL 小得多，
+而且那个 DLL 本来就要随应用部署。压缩后整个 vendor 目录约 200KB，入库毫无压力。
+
+### WebView2 的五个工程约束（都踩过）
+1. **本项目不走 moc**，所以 `Q_OBJECT` 用不了 → 用 `dynamic_cast` 代替 `qobject_cast`。
+2. **没有 WIL 头**（`wil::unique_cotaskmem_string` 编译不过）→ 手写
+   `takeCoTaskMemString(LPWSTR)`：取 QString 后 `CoTaskMemFree`。
+3. **COM 初始化是异步的** —— 控件同步建得出来，但「环境 → 控制器 → webview」三级对象是回调产出的。
+   做法：先返回一个占位 QWidget（diff 需要稳定指针），回调完成后把真 webview 贴进去；
+   就绪前到达的 `url`/`html`/`zoom` 记进 pending，就绪后补发。**应用侧看不出异步。**
+4. **`ICoreWebView2Environment` 全进程只该建一次**（由用户数据目录唯一确定），
+   否则每个 webview 拉起一组浏览器进程。用懒加载单例。
+5. **环境创建签名是 4 个参数**：`CreateCoreWebView2EnvironmentWithOptions(browserExeFolder,
+   userDataFolder, options, handler)`。
+
+### 最费时的坑：尺寸塌陷伪装成「渲染失败」
+症状：webview 区域一片空白，看起来像没渲染。
+真相：**导航是成功的**（`NavigationCompleted success=1`），只是控件被压成 **694×16**。
+两层原因叠加：
+- WebView2 画在自己的子窗口里，对 Qt 的 `sizeHint` **毫无贡献**；占位标签一删、内层布局为空、
+  sizeHint 归零，外层布局就把它压扁 → 需要 `QSizePolicy::Expanding` + `sizeHint()` 覆写
+- 窗口内容比窗口高时 Qt 会压缩「可压缩」的项，而 `setMinimumSize(1,1)` 等于允许压到 0
+  → 改为 `setMinimumHeight(120)`：宁可让布局紧张，也别让 webview 消失
+
+**教训：遇到「控件空白」，先量尺寸，再怀疑渲染链路。**
+
+### `--shot` 截不到 WebView2（已知限制，非缺陷）
+WebView2 画在独立子窗口，`QWidget::grab()` 不含那块区域 → PNG 里是空白。
+**QTextBrowser 后端能截到**（Qt 自己画的，实测截图确认）。
+`--selftest` / `--difftest` 不受影响（不看像素）。
+
+### `qtphp lint` 的返回类型白名单
+正则只认 `Variant|void|Bool|String|Int|Array`。写 `bool php_qt_foo()` 会被判成
+「C++ 中缺失的实现」。**用 `Bool`（php::Bool）**，与既有实现一致。
+

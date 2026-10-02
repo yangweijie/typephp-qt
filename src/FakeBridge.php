@@ -42,6 +42,9 @@ namespace TypePHP\Qt\Fake {
 
         public static string $clipboard = '';
 
+        /** 测试替身报的 webview 后端；默认 textbrowser（与无 Qt 的环境一致）。 */
+        public static string $webViewBackend = 'textbrowser';
+
         public static int $seq = 0;
 
         /** @var string[] snapshot() 收到的路径 */
@@ -58,6 +61,7 @@ namespace TypePHP\Qt\Fake {
             self::$props = [];
             self::$timers = [];
             self::$clipboard = '';
+            self::$webViewBackend = 'textbrowser';
             self::$seq = 0;
             self::$snapshots = [];
             self::$renders = [];
@@ -284,6 +288,23 @@ namespace {
         FakeState::$clipboard = $text;
     }
 
+    /**
+     * 测试替身里固定报 textbrowser 后端。
+     *
+     * 这是刻意的：它跑在普通 PHP 上、没有 Qt，报 "webview2" 会骗过应用侧的能力判断
+     * （比如以为能用 JS）。测试里要验「不支持 JS 时的降级路径」也靠它。
+     * 想模拟 WebView2 可用时，用 test_set_webview_backend() 覆盖。
+     */
+    function qt_webview_backend(): string
+    {
+        return FakeState::$webViewBackend;
+    }
+
+    function qt_webview_supports_js(): bool
+    {
+        return FakeState::$webViewBackend === 'webview2';
+    }
+
     // ── 测试辅助（真实桥接没有这些） ──
 
     /** 注入一个事件到队列。 */
@@ -308,6 +329,12 @@ namespace {
     function test_reset(): void
     {
         FakeState::reset();
+    }
+
+    /** 覆盖 webview 后端名，用于测「支持 JS」与「不支持 JS」两条分支。 */
+    function test_set_webview_backend(string $backend): void
+    {
+        FakeState::$webViewBackend = $backend;
     }
 
     // ── 内部 ──

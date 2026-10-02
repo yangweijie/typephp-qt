@@ -20,6 +20,7 @@ WidgetTree::button('确定', ['id' => 'ok']);
 | [输入](/zh/widgets/inputs.md) | `lineedit` `textedit` `spin` `doublespin` `slider` `checkbox` `radio` `combo` |
 | [数据](/zh/widgets/data.md) | `list` `table` `tree` |
 | [展示](/zh/widgets/display.md) | `label` `button` `progress` `image` `link` |
+| [内嵌网页](/zh/widgets/webview.md) | `webview` |
 
 ## 速查表
 

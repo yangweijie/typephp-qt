@@ -127,6 +127,29 @@ inline QString qtResolvePath(const QString &path) {
     return fromExe;
 }
 
+/**
+ * 把 webview 的 `url` 属性解析成 QUrl。
+ *
+ * 与 qtResolvePath 的区别：webview 的 url 既可能是**远程地址**（http/https/file/data…），
+ * 也可能是**本地文件**（相对或绝对路径）。判定顺序：
+ *   1. 有 scheme 的（http://、https://、file://、data:、about:）→ 直接用
+ *   2. 否则当本地路径 → 走 qtResolvePath（相对 exe 目录解析）→ 转成 file:// URL
+ *
+ * 这样 `'assets/help.html'` 与 `'https://example.com'` 都能直接写。
+ */
+inline QUrl qtResolveUrl(const QString &raw) {
+    const QString trimmed = raw.trimmed();
+    if (trimmed.isEmpty()) return QUrl();
+
+    // 带 scheme 的一律当 URL；`C:/x` 这种单字母盘符不算 scheme
+    const int colon = trimmed.indexOf(QLatin1Char(':'));
+    if (colon > 1) return QUrl(trimmed);
+    if (colon == 1 && !trimmed.at(0).isLetter()) return QUrl(trimmed);
+
+    // 无 scheme → 本地文件
+    return QUrl::fromLocalFile(qtResolvePath(trimmed));
+}
+
 /** 取一个"签名"字符串。数组递归展开，用于跨调用比对属性是否变化。 */
 inline QString qtSignature(const Variant &value) {
     if (value.isUndef() || value.isNull()) return QStringLiteral("\x01");
@@ -224,6 +247,20 @@ void qtApplyProp(QtWindowBox *box, QWidget *widget, const QString &type, const Q
 
 /** 该 type 是否是容器（有自己的子布局/子页）。 */
 bool qtIsContainer(const QString &type);
+
+// ── webview（实现在 qt_webview.cc，后端按编译期开关二选一）──
+
+/** 创建 webview 控件：Windows 且启用 SDK 时是 WebView2，否则 QTextBrowser。 */
+QWidget *qtCreateWebView(QtWindowBox *box, const QString &id);
+
+/** 当前编译进去的后端名："webview2" 或 "textbrowser"。 */
+const char *qtWebViewBackend();
+
+/** 该后端是否支持 JavaScript（QTextBrowser 不支持，应用可据此降级提示）。 */
+bool qtWebViewSupportsJs();
+
+/** 把 url / html / zoom 应用到 webview 控件（后端差异封装在 qt_webview.cc 里）。 */
+void qtWebViewApplyProp(QWidget *widget, const QString &key, const Variant &value);
 
 /** 读取控件当前值，供 qt_window_widget_value() 使用。 */
 Variant qtWidgetValue(QWidget *widget, const QString &type);

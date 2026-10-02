@@ -30,6 +30,10 @@ examples/hello/dist/
 /iconengines/
 /translations/
 
+# WebView2 运行时用户数据（首次创建 webview 时生成在 exe 同级）
+/.webview2/
+**/.webview2/
+
 # Editor / OS
 .idea/
 .vscode/

@@ -12,6 +12,7 @@
 - **源码内联** — 桥接 C++ 直接参与应用编译，不依赖预编译二进制，永远不会和 Qt/PHPX 版本脱节
 - **一键打包** — `qtphp package` 组装自包含产物并自检：Windows 出 `dist/` 目录（windeployqt + PHP/PHPX 运行时 + 平台插件），macOS 出 `dist/<Name>.app`（macdeployqt + ad-hoc 签名，PHP 侧全静态无需搬运行时），Linux 出 `dist/<name>/`（`ldd` 传递闭包搬进 `lib/` + `patchelf` 把 DT_RPATH 改成 `$ORIGIN/lib` + `qt.conf` 指插件目录）
 - **无头测试** — 纯 PHP 桥接替身，不需要 Qt 或编译器；三个内置开关做自动化验收：`--shot` 出 PNG、`--selftest` 逐个触发事件、`--difftest` 验表格/树的 diff 边界
+- **内嵌网页** — `WidgetTree::webView()`；Windows 上是 WebView2（完整 Chromium、支持 JS），其余平台自动退回 QTextBrowser（HTML 子集），同一份 PHP 代码两边都能跑
 
 ## 平台支持
 
@@ -244,6 +245,8 @@ while ($app->isOpen()) {
 | `menu` | 菜单项（含托盘菜单） | `payload.checked` |
 | `timer` | 定时器 | 见 `setTimer()` |
 | `tray` | 系统托盘 | `value` 为手势：`left`/`right`/`double`/`middle` |
+| `loaded` / `navigating` | webview | URL（`loaded` 带 `payload.success`） |
+| `title` | webview | 文档标题 |
 
 `on($id, $type, …)` 与 `onAny($type, …)` 可以同时注册，**两个都会触发**（先特例、后通配）——
 所以 `onAny` 适合放埋点、日志这类横切关注点。
@@ -253,6 +256,8 @@ while ($app->isOpen()) {
 **容器**：`vbox` `hbox` `grid` `form` `group` `frame` `scroll` `tabs` `tab` `stack` `page` `split` `spacer` `separator`
 
 **控件**：`label` `button` `lineedit` `textedit` `spin` `doublespin` `slider` `progress` `checkbox` `radio` `combo` `list` `table` `tree` `image` `link`
+
+**内嵌网页**：`webview`（Windows 用 WebView2 = 完整 Chromium + JS；其余平台用 QTextBrowser = HTML 子集，无 JS）
 
 ## 常用属性
 

@@ -149,3 +149,9 @@ function qt_window_set_timer(mixed $window, string $id, int $intervalMs): void {
 function qt_clipboard_read(): string {}
 
 function qt_clipboard_write(string $text): void {}
+
+/** 当前编译进去的 webview 后端名："webview2"（完整 Chromium）或 "textbrowser"（HTML 子集）。 */
+function qt_webview_backend(): string {}
+
+/** 该后端是否支持 JavaScript —— QTextBrowser 不支持，应用可据此降级提示。 */
+function qt_webview_supports_js(): bool {}

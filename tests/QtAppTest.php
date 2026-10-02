@@ -658,6 +658,36 @@ final class QtAppTest extends TestCase
         $this->assertSame('hello', $this->app->clipboardRead());
     }
 
+    // ── webview ──
+
+    /**
+     * 测试替身默认报 textbrowser —— 它跑在普通 PHP 上、没有 Qt，
+     * 报 "webview2" 会骗过应用的能力判断（以为能用 JS）。
+     */
+    public function testWebViewBackendDefaultsToTextBrowserInTests(): void
+    {
+        $this->assertSame('textbrowser', $this->app->webViewBackend());
+        $this->assertFalse($this->app->webViewSupportsJs());
+    }
+
+    /** 覆盖后端名后，JS 能力判断要跟着变（应用据此走不同分支）。 */
+    public function testWebViewBackendCanBeOverridden(): void
+    {
+        test_set_webview_backend('webview2');
+        $this->assertSame('webview2', $this->app->webViewBackend());
+        $this->assertTrue($this->app->webViewSupportsJs());
+    }
+
+    public function testWebViewRendersIntoTree(): void
+    {
+        $this->app->render(WidgetTree::vbox([
+            WidgetTree::webView('https://example.com', ['id' => 'wv']),
+        ]));
+        $this->app->run(1);
+
+        $this->assertSame('https://example.com', test_props($this->app->handle(), 'wv')['url']);
+    }
+
     // ── 补丁 ──
 
     public function testPatchUpdatesProps(): void
