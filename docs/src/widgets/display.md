@@ -57,7 +57,7 @@ $app->on('save', 'click', function () use ($state) {
 });
 ```
 
-A checkable button emits `toggle`:
+A checkable button emits `toggle` (and `press` / `release` like any button):
 
 ```php
 WidgetTree::button('Bold', ['id' => 'bold', 'checkable' => true, 'checked' => $state->bold]);

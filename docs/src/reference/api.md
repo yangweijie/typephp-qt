@@ -133,13 +133,19 @@ WidgetTree::tree(array $nodes, array $props = [])
 | `click` | button, link | the link's href | — |
 | `change` | lineedit, textedit, spin, doublespin, slider, combo | the new value | `index` for combo |
 | `submit` | lineedit | the text | — |
-| `toggle` | checkbox, radio | `'0'` / `'1'` | — |
+| `toggle` | checkbox, radio, checkable button, checkable group | `'0'` / `'1'` | — |
 | `select` | list, table, tree | row / item id | `index` |
 | `activate` | list, table, tree | row / item id | — |
 | `tab` | tabs, stack | the index | `index` |
 | `menu` | menu item | — | `checked` |
 | `timer` | timer | — | — |
 | `tray` | system tray | `left` / `right` / `double` / `middle` | — |
+| `press` / `release` | button | — | — |
+| `commit` | lineedit (focus lost or Enter) | the text | — |
+| `itemClick` | list (every click, even re-clicking the same row) | item id | — |
+| `cell` | table (cell edited) | new text | `row`, `col` |
+| `expand` / `collapse` | tree | node id | `expanded` |
+| `close` | tabs (close button) | the index | `index` |
 
 The event object:
 

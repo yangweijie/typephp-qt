@@ -12,7 +12,7 @@ WidgetTree::hbox(array $children, array $props = [])
 | 属性 | 说明 |
 |---|---|
 | `spacing` | 子项间距（px） |
-| `margin` | 外边距（px） |
+| `margin` | 外边距（px）；单个整数表示四边同值，或 `[上, 右, 下, 左]` 四元组 |
 | `grow` | 在父布局中的伸展权重 |
 
 ```php

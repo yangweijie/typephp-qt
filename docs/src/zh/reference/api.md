@@ -133,13 +133,19 @@ WidgetTree::tree(array $nodes, array $props = [])
 | `click` | button, link | link 的 href | — |
 | `change` | lineedit, textedit, spin, doublespin, slider, combo | 新值 | combo 带 `index` |
 | `submit` | lineedit | 文本 | — |
-| `toggle` | checkbox, radio | `'0'` / `'1'` | — |
+| `toggle` | checkbox、radio、可切换 button、可切换 group | `'0'` / `'1'` | — |
 | `select` | list, table, tree | 行 / 项 id | `index` |
 | `activate` | list, table, tree | 行 / 项 id | — |
 | `tab` | tabs, stack | 索引 | `index` |
 | `menu` | 菜单项 | — | `checked` |
 | `timer` | 定时器 | — | — |
 | `tray` | 系统托盘 | `left` / `right` / `double` / `middle` | — |
+| `press` / `release` | button | — | — |
+| `commit` | lineedit（失焦或回车） | 文本 | — |
+| `itemClick` | list（每次点击都发，重复点同一行也发） | 项 id | — |
+| `cell` | table（单元格被编辑） | 新文本 | `row`、`col` |
+| `expand` / `collapse` | tree | 节点 id | `expanded` |
+| `close` | tabs（关闭按钮） | 索引 | `index` |
 
 事件对象：
 

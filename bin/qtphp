@@ -1047,13 +1047,22 @@ function deployRuntimeDlls(string $projectPath): void
 
         // 平台插件：缺了它 Qt 会报
         // "could not find or load the Qt platform plugin windows"
+        //
+        // **qoffscreen 必须一起带上**：`--selftest` / `--shot` / `--difftest`
+        // 这些无头验收开关在 CI 里要配 QT_QPA_PLATFORM=offscreen 跑，
+        // 而 Qt 找不到 offscreen 插件时会直接 abort（0xC0000409），
+        // 表现为「一开无头验收就崩」—— 与 macOS bundle 缺
+        // libqoffscreen.dylib 是同一个坑（F16→F17），只是 Windows 侧没实测过。
         $pluginDir = $buildDir . '/platforms';
-        $qwindows = $qtDir . '/plugins/platforms/qwindows.dll';
-        if (file_exists($qwindows)) {
+        foreach (['qwindows.dll', 'qoffscreen.dll', 'qminimal.dll'] as $plugin) {
+            $src = $qtDir . '/plugins/platforms/' . $plugin;
+            if (!file_exists($src)) {
+                continue;
+            }
             if (!is_dir($pluginDir)) {
                 mkdir($pluginDir, 0755, true);
             }
-            copy($qwindows, $pluginDir . '/qwindows.dll');
+            copy($src, $pluginDir . '/' . $plugin);
             $copied++;
         }
 

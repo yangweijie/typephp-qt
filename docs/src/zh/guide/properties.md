@@ -25,7 +25,7 @@ WidgetTree::label('你好', ['id' => 'greeting', 'style' => 'color:red', 'align'
 | 属性 | 适用 | 说明 |
 |---|---|---|
 | `title` | group, tabs, tab | 标题文本 |
-| `margin` | 布局类 | 外边距 |
+| `margin` | 布局类 | 外边距：整数，或 `[上, 右, 下, 左]` |
 | `spacing` | 布局类 | 子项间距 |
 | `row` / `col` | grid, form | 网格位置 |
 | `row_span` / `col_span` | grid | 跨行/跨列 |
@@ -72,7 +72,7 @@ WidgetTree::label('你好', ['id' => 'greeting', 'style' => 'color:red', 'align'
 | `select_mode` | table, tree | 选择模式 |
 | `stretch_last` | table | 最后一列自动伸展 |
 | `checkable` | list, table, tree | 条目带复选框 |
-| `editable` | combo | 可编辑 |
+| `editable` | combo、table | 可编辑（table 上开启单元格就地编辑并触发 `cell` 事件） |
 
 ### `current` 的口径按控件不同
 

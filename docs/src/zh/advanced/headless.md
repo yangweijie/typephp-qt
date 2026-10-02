@@ -80,6 +80,18 @@ qtphp run . --difftest
 
 三者都**不挑平台**。要在无 GUI 会话（CI）里跑，设 `QT_QPA_PLATFORM=offscreen`。
 
+::: warning offscreen 下 `--shot` 检查不了中文
+Qt 的 offscreen 平台插件走自己的字体枚举，可能取不到中文字体，
+于是 `--shot` 出的图里中文全是方框。`--selftest` / `--difftest` 不受影响
+（它们不渲染像素）。
+
+界面有中文又想**看图**时，`--shot` 就**别**加 `QT_QPA_PLATFORM=offscreen`
+（需要有桌面会话）；另外两个开关继续用 offscreen 没问题。
+:::
+
+Windows 上 `qtphp build` 会把 `qwindows.dll` / `qoffscreen.dll` / `qminimal.dll`
+一起部署到 `build/platforms/`，所以这三个开关在开发产物上直接可用。
+
 ## 无头模式做了什么
 
 `headless(true)` 让所有阻塞调用立即返回，不碰 Qt 的模态 API：

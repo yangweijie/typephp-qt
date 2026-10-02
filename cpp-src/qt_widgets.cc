@@ -139,6 +139,10 @@ QWidget *qtCreateWidget(QtWindowBox *box, const QString &type, const Variant &no
     if (type == QLatin1String("group")) {
         auto *group = new QGroupBox();
         new QVBoxLayout(group);
+        // checkable group 勾掉时 Qt 会把内容置灰，状态变化要能上报
+        QObject::connect(group, &QGroupBox::toggled, ctx, [box, id](bool on) {
+            box->enqueue(QStringLiteral("toggle"), id, on ? QStringLiteral("1") : QStringLiteral("0"));
+        });
         return group;
     }
     if (type == QLatin1String("frame")) {
@@ -161,6 +165,13 @@ QWidget *qtCreateWidget(QtWindowBox *box, const QString &type, const Variant &no
             Array payload;
             payload.set("index", Variant(static_cast<Int>(index)));
             box->enqueue(QStringLiteral("tab"), id, QString::number(index), payload);
+        });
+        // 标签页上的关闭按钮（closable => true）被点：只上报，是否真关由 PHP 决定
+        // （状态驱动 —— 直接关掉会和下一帧的视图打架）。
+        QObject::connect(tabs, &QTabWidget::tabCloseRequested, ctx, [box, id](int index) {
+            Array payload;
+            payload.set("index", Variant(static_cast<Int>(index)));
+            box->enqueue(QStringLiteral("close"), id, QString::number(index), payload);
         });
         return tabs;
     }
@@ -214,6 +225,15 @@ QWidget *qtCreateWidget(QtWindowBox *box, const QString &type, const Variant &no
         button->setCursor(Qt::PointingHandCursor);
         QObject::connect(button, &QPushButton::clicked, ctx,
                          [box, id]() { box->enqueue(QStringLiteral("click"), id); });
+        // checkable 按钮（以及 group）还要发 toggle —— 否则 'checkable' => true
+        // 只是个能按下去的装饰，用户拿不到状态变化。
+        QObject::connect(button, &QPushButton::toggled, ctx, [box, id](bool on) {
+            box->enqueue(QStringLiteral("toggle"), id, on ? QStringLiteral("1") : QStringLiteral("0"));
+        });
+        QObject::connect(button, &QPushButton::pressed, ctx,
+                         [box, id]() { box->enqueue(QStringLiteral("press"), id); });
+        QObject::connect(button, &QPushButton::released, ctx,
+                         [box, id]() { box->enqueue(QStringLiteral("release"), id); });
         return button;
     }
     if (type == QLatin1String("lineedit")) {
@@ -222,6 +242,10 @@ QWidget *qtCreateWidget(QtWindowBox *box, const QString &type, const Variant &no
                          [box, id](const QString &text) { box->enqueue(QStringLiteral("change"), id, text); });
         QObject::connect(edit, &QLineEdit::returnPressed, ctx,
                          [box, id, edit]() { box->enqueue(QStringLiteral("submit"), id, edit->text()); });
+        // 失焦（或回车）表示「这一格编辑完了」—— 表单场景常用它触发校验/保存，
+        // 与每敲一个字都发的 change 区分开。
+        QObject::connect(edit, &QLineEdit::editingFinished, ctx,
+                         [box, id, edit]() { box->enqueue(QStringLiteral("commit"), id, edit->text()); });
         return edit;
     }
     if (type == QLatin1String("textedit")) {
@@ -281,6 +305,10 @@ QWidget *qtCreateWidget(QtWindowBox *box, const QString &type, const Variant &no
             payload.set("index", Variant(static_cast<Int>(index)));
             box->enqueue(QStringLiteral("change"), id, combo->currentText(), payload);
         });
+        // 可编辑下拉（editable => true）里手打的文本也要上报，
+        // 否则用户输的内容拿不到。
+        QObject::connect(combo, &QComboBox::editTextChanged, ctx,
+                         [box, id](const QString &text) { box->enqueue(QStringLiteral("change"), id, text); });
         return combo;
     }
     if (type == QLatin1String("list")) {
@@ -294,6 +322,11 @@ QWidget *qtCreateWidget(QtWindowBox *box, const QString &type, const Variant &no
         });
         QObject::connect(list, &QListWidget::itemDoubleClicked, ctx, [box, id](QListWidgetItem *item) {
             box->enqueue(QStringLiteral("activate"), id, item->data(Qt::UserRole).toString());
+        });
+        // 单击：select 只在「选中项变化」时发；点同一项再点一次不会发 select，
+        // 但 itemClicked 会发 —— 需要「每次点击都响应」的场景用它。
+        QObject::connect(list, &QListWidget::itemClicked, ctx, [box, id](QListWidgetItem *item) {
+            box->enqueue(QStringLiteral("itemClick"), id, item->data(Qt::UserRole).toString());
         });
         return list;
     }
@@ -316,6 +349,15 @@ QWidget *qtCreateWidget(QtWindowBox *box, const QString &type, const Variant &no
         QObject::connect(table, &QTableWidget::itemDoubleClicked, ctx, [box, id](QTableWidgetItem *item) {
             box->enqueue(QStringLiteral("activate"), id, item->data(Qt::UserRole).toString());
         });
+        // 单元格被就地编辑：editable 表格要靠它把改动收回状态。
+        // payload 带 row / col，value 是新文本。
+        QObject::connect(table, &QTableWidget::cellChanged, ctx, [box, id, table](int row, int col) {
+            auto *cell = table->item(row, col);
+            Array payload;
+            payload.set("row", Variant(static_cast<Int>(row)));
+            payload.set("col", Variant(static_cast<Int>(col)));
+            box->enqueue(QStringLiteral("cell"), id, cell ? cell->text() : QString(), payload);
+        });
         return table;
     }
     if (type == QLatin1String("tree")) {
@@ -328,6 +370,18 @@ QWidget *qtCreateWidget(QtWindowBox *box, const QString &type, const Variant &no
         });
         QObject::connect(tree, &QTreeWidget::itemDoubleClicked, ctx, [box, id](QTreeWidgetItem *item, int) {
             box->enqueue(QStringLiteral("activate"), id, item->data(0, Qt::UserRole).toString());
+        });
+        // 展开/折叠：懒加载子节点、记住展开状态都要靠它。
+        // value 是节点 id，payload.expanded 给最终状态（省得自己判方向）。
+        QObject::connect(tree, &QTreeWidget::itemExpanded, ctx, [box, id](QTreeWidgetItem *item) {
+            Array payload;
+            payload.set("expanded", Variant(true));
+            box->enqueue(QStringLiteral("expand"), id, item->data(0, Qt::UserRole).toString(), payload);
+        });
+        QObject::connect(tree, &QTreeWidget::itemCollapsed, ctx, [box, id](QTreeWidgetItem *item) {
+            Array payload;
+            payload.set("expanded", Variant(false));
+            box->enqueue(QStringLiteral("collapse"), id, item->data(0, Qt::UserRole).toString(), payload);
         });
         return tree;
     }
@@ -521,6 +575,31 @@ void qtApplyProp(QtWindowBox *box, QWidget *widget, const QString &type, const Q
     }
 
     // ── 容器 ──
+    if (key == QLatin1String("spacing") || key == QLatin1String("margin")) {
+        // 布局可能挂在控件自己身上（vbox/hbox/grid/form 都是一个 QWidget + 一个 layout），
+        // 也可能挂在它内部那个容器控件上（group/frame/scroll 的 layout 在子控件上）。
+        QLayout *layout = widget->layout();
+        if (!layout) return;
+
+        if (key == QLatin1String("spacing")) {
+            layout->setSpacing(static_cast<int>(value.toInt()));
+        } else {
+            // margin 支持两种写法：单个 int（四边同值），或 [上, 右, 下, 左] 四元组
+            if (value.isArray()) {
+                const Array margins = value.toArray();
+                const int n = static_cast<int>(margins.count());
+                const int top = n > 0 ? static_cast<int>(margins.get(0).toInt()) : 0;
+                const int right = n > 1 ? static_cast<int>(margins.get(1).toInt()) : top;
+                const int bottom = n > 2 ? static_cast<int>(margins.get(2).toInt()) : top;
+                const int left = n > 3 ? static_cast<int>(margins.get(3).toInt()) : right;
+                layout->setContentsMargins(left, top, right, bottom);
+            } else {
+                const int m = static_cast<int>(value.toInt());
+                layout->setContentsMargins(m, m, m, m);
+            }
+        }
+        return;
+    }
     if (key == QLatin1String("title")) {
         if (auto *group = qobject_cast<QGroupBox *>(widget)) { group->setTitle(toQString(value)); return; }
         if (auto *tabs = qobject_cast<QTabWidget *>(widget->parentWidget())) {
@@ -791,7 +870,13 @@ void qtApplyProp(QtWindowBox *box, QWidget *widget, const QString &type, const Q
         return;
     }
     if (key == QLatin1String("editable")) {
-        if (auto *combo = qobject_cast<QComboBox *>(widget)) combo->setEditable(value.toBool());
+        if (auto *combo = qobject_cast<QComboBox *>(widget)) { combo->setEditable(value.toBool()); return; }
+        // 表格默认 NoEditTriggers（只读），要让 cellChanged 有意义就必须能编辑。
+        if (auto *table = qobject_cast<QTableWidget *>(widget)) {
+            table->setEditTriggers(value.toBool() ? QAbstractItemView::DoubleClicked
+                                                  : QAbstractItemView::NoEditTriggers);
+            return;
+        }
         return;
     }
     if (key == QLatin1String("multi")) {

@@ -11,7 +11,7 @@
 - **PHP 主循环** — Qt 事件泵由 PHP 驱动，业务逻辑全部留在 PHP 里，可单测
 - **源码内联** — 桥接 C++ 直接参与应用编译，不依赖预编译二进制，永远不会和 Qt/PHPX 版本脱节
 - **一键打包** — `qtphp package` 组装自包含产物并自检：Windows 出 `dist/` 目录（windeployqt + PHP/PHPX 运行时 + 平台插件），macOS 出 `dist/<Name>.app`（macdeployqt + ad-hoc 签名，PHP 侧全静态无需搬运行时），Linux 出 `dist/<name>/`（`ldd` 传递闭包搬进 `lib/` + `patchelf` 把 DT_RPATH 改成 `$ORIGIN/lib` + `qt.conf` 指插件目录）
-- **无头测试** — 纯 PHP 桥接替身，不需要 Qt 或编译器；`--shot` 模式可出 PNG 做视觉验收
+- **无头测试** — 纯 PHP 桥接替身，不需要 Qt 或编译器；三个内置开关做自动化验收：`--shot` 出 PNG、`--selftest` 逐个触发事件、`--difftest` 验表格/树的 diff 边界
 
 ## 平台支持
 
@@ -22,9 +22,10 @@
 | Linux (Debian/Ubuntu) | ✅ | ✅ `dist/<name>/`（ldd 依赖闭包 + patchelf 改 DT_RPATH + `qt.conf`） | 见下 |
 
 Linux 侧的实测环境是 Debian 12 arm64 + `qt6-base-dev 6.4.2` + `cmake 3.25.1`：
-`build` 产出 ELF PIE 可执行文件，`QT_QPA_PLATFORM=offscreen` 下 `--selftest` 14/14、
-`--difftest` 20/20、`--shot` 出图全部 rc=0。`package` 出 `dist/hello/`（实测 85 个 `.so` +
-10 个 Qt 插件，140.3 MB），产物在 `env -i QT_QPA_PLATFORM=offscreen` 下同样 14/14、20/20 全 rc=0。
+`build` 产出 ELF PIE 可执行文件，`QT_QPA_PLATFORM=offscreen` 下三个验收开关全部 rc=0
+（当时示例的 `--selftest` 是 14 条用例、`--difftest` 20 条，示例后来扩充过，用例数已增长）。
+`package` 出 `dist/hello/`（实测 85 个 `.so` + 10 个 Qt 插件，140.3 MB），
+产物在 `env -i QT_QPA_PLATFORM=offscreen` 下同样全 rc=0。
 首次编译要现编私有 PHP embed 运行时，
 除 Qt 外还需这些包（phpx 的 gmp/mpfr 与 PHP 源码的构建流程需要 bison/re2c 等工具，brew 在 mac 上是顺带装好的）：
 
@@ -192,9 +193,29 @@ while ($app->isOpen()) {
 
 - **定时器**：`setTimer('clock', 1000)` 注册/改间隔（间隔 ≤ 0 即停），到点发
   `['type'=>'timer','id'=>'clock']`，所以用 `on('clock','timer', …)` 接。
-- **托盘**：`setTray(['tooltip'=>…, 'visible'=>…])`；左键点击发的是**不带 id** 的
-  `['type'=>'tray']`，只能用 `onAny('tray', …)` 接。`icon` 可以不传 —— 桥接会兜底用窗口图标，
-  窗口也没图标时用系统标准图标：**macOS/Linux 上无图标的托盘项根本不显示**，兜底不是美化，是可用性。
+- **托盘**：`setTray(['icon'=>…, 'tooltip'=>…, 'visible'=>…, 'menu'=>[…]])`。
+  激活发的是**不带 id** 的 `['type'=>'tray']`，只能用 `onAny('tray', …)` 接，
+  `value` 是手势（`left` / `right` / `double` / `middle`）。
+  传了 `menu` 就由 Qt 托管右键菜单（右击弹菜单、不再发 `right`），菜单项走普通的 `menu` 事件：
+
+  ```php
+  $app->setTray([
+      'icon' => 'assets/icon.png',
+      'menu' => [
+          ['type' => 'item', 'id' => 'tray.show', 'text' => '显示主窗口'],
+          ['type' => 'item', 'id' => 'tray.quit', 'text' => '退出'],
+      ],
+  ]);
+  $app->on('tray.quit', 'menu', function () use ($app) { $app->close(); });
+  ```
+
+  `icon` 可以不传 —— 桥接会兜底用窗口图标，窗口也没图标时用系统标准图标：
+  **macOS/Linux 上无图标的托盘项根本不显示**，兜底不是美化，是可用性。
+  相对路径的 `icon` 按**可执行文件所在目录**解析，所以 `build/` 和 `dist/` 里都成立
+  （`qtphp build` 会自动把 `assets/` 拷进 `build/`）。
+- **看不到托盘图标？** 先看 Windows 是否把新图标收进了溢出区（`^` 箭头后面）——
+  查注册表 `HKCU:\Control Panel\NotifyIconSettings` 里该 exe 的 `IsPromoted`，
+  空值就表示在溢出区。这是 Windows 的默认行为，不是框架问题。详见[文档](https://yangweijie.github.io/typephp-qt/zh/guide/dialogs.html)。
 - 系统托盘不可用时（如无桌面会话的 CI）`show()` 是空操作，不会报错；`notify()` 在无托盘时
   回退成消息框，因此 `headless(true)` 下它直接返回，避免阻塞。
 
@@ -203,15 +224,24 @@ while ($app->isOpen()) {
 | 事件 | 触发控件 | 说明 |
 |------|----------|------|
 | `click` | button, link | link 的 `value` 是 href |
+| `press` / `release` | button | 按下 / 抬起 |
 | `change` | lineedit, textedit, spin, doublespin, slider, combo | `value` 为新值 |
 | `submit` | lineedit | 回车触发 |
-| `toggle` | checkbox, radio | `value` 为 `'0'`/`'1'` |
+| `commit` | lineedit | 失焦或回车，表示「这一格编辑完了」 |
+| `toggle` | checkbox, radio, 可切换 button / group | `value` 为 `'0'`/`'1'` |
 | `select` | list, table, tree | `value` 为行/项 id |
 | `activate` | list, table, tree | 双击 |
+| `itemClick` | list | 每次点击都发（重复点同一行也发） |
+| `cell` | table | 单元格被编辑（需 `editable`），`payload.row`/`payload.col` |
+| `expand` / `collapse` | tree | 展开 / 折叠，`payload.expanded` |
 | `tab` | tabs, stack | `payload.index` |
-| `menu` | 菜单项 | `payload.checked` |
+| `close` | tabs | 关闭按钮（需 `closable`），`payload.index` |
+| `menu` | 菜单项（含托盘菜单） | `payload.checked` |
 | `timer` | 定时器 | 见 `setTimer()` |
-| `tray` | 系统托盘 | 左键点击 |
+| `tray` | 系统托盘 | `value` 为手势：`left`/`right`/`double`/`middle` |
+
+`on($id, $type, …)` 与 `onAny($type, …)` 可以同时注册，**两个都会触发**（先特例、后通配）——
+所以 `onAny` 适合放埋点、日志这类横切关注点。
 
 ## 控件目录
 
@@ -224,12 +254,15 @@ while ($app->isOpen()) {
 所有节点通用：`id` `visible` `enabled` `tooltip` `style` `size` `min_size` `max_size` `align` `grow`
 
 容器额外：`title` `margin` `spacing` `row` `col` `row_span` `col_span`
+（`margin` 支持整数四边同值，或 `[上, 右, 下, 左]` 四元组）
 
-输入类：`text` `placeholder` `readonly` `password` `clear_button` `max_length`
+输入类：`text` `placeholder` `readonly` `password` `clear_button` `max_length` `editable`
 
 数值类：`value` `min` `max` `step` `decimals` `prefix` `suffix`
 
-列表类：`items` `current` `columns` `rows` `row_ids` `nodes` `headers` `multi` `select_mode`
+列表类：`items` `current` `columns` `rows` `row_ids` `nodes` `headers` `multi` `select_mode` `closable`
+
+`editable` 用在 `combo` 上开启手输，用在 `table` 上开启单元格就地编辑（并触发 `cell` 事件）。
 
 `current` 是**声明式选中**，取值口径按控件类型不同：`table` 传行 id（不给 `row_ids` 时行 id 就是索引字符串）、
 `tree` 传节点 id（不给 `id` 时退化成节点文本）、`list` 传行索引、`combo`/`tabs`/`stack` 传索引或文本。
@@ -273,7 +306,7 @@ $w->patch([
 |------|------|
 | `qtphp doctor` | 检查工具链（PHP / tpc / PHP 运行时库 / Qt / C++ 编译器 / PHPUnit）。Qt 位置按平台探：Windows 装到 `C:/D:` 盘、macOS 是 brew keg-only、Linux 是 Debian 多架构 `/usr`；C++ 依次试 `clang++`、`g++`；Linux 额外查 12 项构建/打包前置（`bison`/`re2c`/`autoconf`/`pkg-config`/`xz`/`patchelf` + gmp/mpfr/onig/libxml2/sqlite3/zlib 头），缺哪些就打出 apt 包名与可直接粘贴的 `apt install -y …`（只 WARN，不影响 rc） |
 | `qtphp new <name>` | 创建新项目（`project.yml` + `project.macos.yml` + `project.linux.yml` + `Info.macos.plist` + Windows 三个 `.bat`） |
-| `qtphp build <path>` | 编译。入口 yml 按平台挑选（`project.macos.yml` / `project.linux.yml` → 回落 `project.yml`）；Windows 编译后自动部署运行时 DLL |
+| `qtphp build <path>` | 编译。入口 yml 按平台挑选（`project.macos.yml` / `project.linux.yml` → 回落 `project.yml`）；Windows 编译后自动部署运行时 DLL 与 `qwindows`/`qoffscreen`/`qminimal` 三个平台插件（offscreen 是无头验收的前提），并把 `assets/` 拷进 `build/` |
 | `qtphp run <path> [应用参数…]` | 运行产物，其后的参数原样透传（`--selftest` / `--shot out.png`）；启动前做依赖自检（Windows 查 DLL，macOS 用 `otool -L` 查 bundle 外绝对路径，Linux 用 `ldd` 查 `not found`） |
 | `qtphp package <path>` | 打包自包含产物并自检：Windows → `dist/` 目录，macOS → `dist/<Name>.app`（macOS 会额外补 `libqoffscreen.dylib`，让产物能无头跑 `--selftest`/`--difftest`），Linux → `dist/<name>/`（`lib/` 装 `ldd` 传递闭包、`plugins/` 装 `platforms`+`xcbglintegrations`、`qt.conf` 指插件目录，需要 `patchelf`） |
 | `qtphp test` | 运行测试 |
@@ -285,7 +318,7 @@ $w->patch([
 qtphp test
 ```
 
-112 个测试全部走纯 PHP 桥接替身，**不需要 Qt 或编译器**。
+116 个测试全部走纯 PHP 桥接替身，**不需要 Qt 或编译器**。
 
 视觉验收用无头截图（`qtphp run` 会把其后的参数原样透传给应用）：
 
@@ -320,7 +353,8 @@ qtphp run <path> --selftest       # 逐个触发所有事件，验证每个 hand
 qtphp run <path> --difftest       # 表格/树的差异更新边界（选中、行 id、列数、补丁）
 ```
 
-示例应用在 Windows / macOS / Linux 上都是 `--selftest` 14/14、`--difftest` 20/20。
+示例应用在 Windows / macOS / Linux 上都能通过三个开关（Windows 实测 `--selftest` 25/25、
+`--difftest` 20/20，全部 rc=0）。
 
 `--selftest` 能在无头环境覆盖"闭包参数个数不匹配"这类只在 AOT 下暴露的问题。
 `--difftest` 只能跑在真 Qt 上 —— diff 引擎与 `patch()` 的 `call` 都在 C++ 里，PHPUnit 摸不到它；
@@ -328,9 +362,22 @@ qtphp run <path> --difftest       # 表格/树的差异更新边界（选中、�
 其中一条专门验「`clear`/`appendRows` 之后重渲染必须以树为准」），照着写自己应用的边界断言即可。
 
 **产物也能无头验收**：三个开关本身不挑平台；要在无 GUI 会话（CI）里跑就设 `QT_QPA_PLATFORM=offscreen`。
-注意 `macdeployqt` 只按目标平台拷 `libqcocoa.dylib`，裸产物设 offscreen 会被 Qt 直接 abort（rc=134）——
-所以 `qtphp package` 在 macdeployqt 之后会把 `libqoffscreen.dylib` 补拷进 `Contents/PlugIns/platforms/`
-并把 Qt 引用改写成 `@executable_path`（约 +156 KB）。两条验收路：
+
+Windows 上 `qtphp build` 会把 `qwindows.dll` / `qoffscreen.dll` / `qminimal.dll` 一起部署到
+`build/platforms/`，所以开发产物直接就能跑无头验收（早期版本只部署 `qwindows.dll`，
+导致 offscreen 下三个开关全部 `0xC0000409` 崩溃）。
+
+::: warning offscreen 下 `--shot` 检查不了中文
+Qt 的 offscreen 平台插件走自己的字体枚举，可能取不到中文字体，于是 `--shot` 出的图里中文是方框。
+`--selftest` / `--difftest` 不受影响（它们不渲染像素）。界面有中文又想看图时，`--shot` 就**别**加
+`QT_QPA_PLATFORM=offscreen`（需要有桌面会话）。
+
+macOS 另有一处：`macdeployqt` 只按目标平台拷 `libqcocoa.dylib`，裸产物设 offscreen 会被 Qt 直接
+abort（rc=134）—— 所以 `qtphp package` 在 macdeployqt 之后会把 `libqoffscreen.dylib` 补拷进
+`Contents/PlugIns/platforms/` 并把 Qt 引用改写成 `@executable_path`（约 +156 KB）。
+:::
+
+两条验收路：
 
 ```bash
 QT_QPA_PLATFORM=offscreen ./build/hello --selftest    # 开发产物：靠开发机的 Qt 插件目录

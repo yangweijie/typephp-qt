@@ -1,5 +1,109 @@
 # Progress Log — typephp-qt
 
+## Session 22 — 2026-10-02（更新 README）
+
+### 任务
+> 「更新 README.md」
+
+Session 21 改了 8 个新事件、托盘能力、`margin`/`spacing`、offscreen 插件，
+README 里的事件表和托盘段已经过时，需要同步。
+
+### 改动（+65 / −18 行）
+
+| 位置 | 改了什么 |
+|---|---|
+| 特性列表 | 「无头测试」补上三个开关的完整说明（原来只提 `--shot`） |
+| 平台支持 | Linux 那段的 `14/14`、`20/20` 是 Session 12 的实测数字，示例后来扩充过 —— 改为「三个开关全部 rc=0」并注明当时的用例数，避免读者误当现状 |
+| 托盘段 | 从「左键点击」改写为四种手势 + `menu` 右键菜单（含可运行示例）+ 相对路径解析规则；新增「看不到托盘图标？」的排查提示（Windows 溢出区） |
+| 事件表 | 10 个 → **18 个**（补 `press`/`release`/`commit`/`itemClick`/`cell`/`expand`/`collapse`/`close`，`toggle` 扩到 checkable button/group，`tray` 标注手势）；补 `on`/`onAny` 双触发说明 |
+| 常用属性 | 补 `editable` 与 `closable`，说明 `editable` 在 table 上开启单元格编辑；`margin` 补四元组写法 |
+| 命令表 | `build` 行补「部署 qwindows/qoffscreen/qminimal 三个平台插件 + 拷 assets/」 |
+| 无头模式 | 新增 warning：offscreen 下 `--shot` 渲染不出中文（方框），另两个开关不受影响；补 Windows 平台插件已修好的说明 |
+| 测试段 | 112 → 116 个测试；`--selftest` 14/14 → 25/25 |
+
+### 核对（防止 README 又一次「撒谎」）
+逐项对着代码验，不是凭印象改：
+```
+控件目录    README 30 个 vs WidgetTree 30 个方法 → 完全一致
+常用属性    41 个逐个 grep 桥接实现 → 全部存在，无虚假声明
+事件表      18 个 vs 桥接实际 enqueue → 全覆盖，无遗漏
+命令表      7 个 vs CLI case 分支 → 一致
+markdown    表格列数不齐 0 行；代码围栏 32 个（偶数，配平）
+```
+
+### 教训
+README 是**最容易腐烂**的文件 —— 它不在构建链里，改代码时不会有人提醒你。
+这次是因为刚做完审计（F25 的核心教训就是「文档说有、代码没有」），
+所以改 README 时**先跑一遍交叉比对再动手**，而不是照着记忆改。
+
+---
+
+## Session 21 — 2026-10-02（审计「还有哪些组件漏了」）
+
+### 任务
+> 「检查是否还有其他组件漏了的 修复一下」
+
+起因是 Session 20 发现托盘只转发了 Qt 5 种激活方式里的 1 种。怀疑同类
+「能力被悄悄丢掉」的问题还有别处，于是做系统审计。
+
+### 方法
+把「桥接连了哪些 Qt 信号（19 个）」「实现了哪些属性键（52 个）」与
+「文档声称支持什么」做**三方交叉比对**：
+文档说有 / 代码没有 = 撒谎；代码有 / 文档没写 = 漏了。
+
+### 查实 5 个缺陷（都修了）
+
+| # | 缺陷 | 后果 |
+|---|---|---|
+| D1 | **`margin` / `spacing` 文档写了 4 处、有示例，代码里根本没实现** | 写了没效果，完全静默 |
+| D2 | **`checkable` 按钮/group 不发 `toggle`** | `display.md` 教用户用它，实际拿不到状态 |
+| D3 | **`build` 不部署 `qoffscreen.dll`** | offscreen 下三个无头开关全崩（`0xC0000409`），而文档正是让 CI 这么跑 |
+| D4 | **`onAny` 被 `on` 静默吃掉** | 埋点/日志类代码静默失效；文档明写「两个都会触发」 |
+| D5 | `editable` 不支持 table | 新加的 `cellChanged` 永不触发 |
+
+**D3 最严重**：按文档配的 CI（`QT_QPA_PLATFORM=offscreen`）一跑就崩。
+macOS 早有同类修复（F16→F17），Linux 也拷 `platforms/` 全量，
+`package` 阶段有 `vendorWindowsOffscreenPlugin()` —— **唯独 Windows 的 `build` 分支漏了**，
+历史记录里那句「Windows 同款已写（12.5，未实测）」从没验证过。
+
+**D4 最阴险**：`handleEvent()` 命中特例后 `return`，通配分支走不到。
+本次排查就踩到了（我加的 `onAny('timer')` 一条没收到，一度误判成「文件写入坏了」）。
+更麻烦的是**单测 `testSpecificHandlerWinsOverWildcard` 断言的正是这个旧行为**，
+与文档直接矛盾 —— 经确认采用文档语义，改代码 + 改测试。
+
+### 新增信号（用户选「尽量补全」）
+`press` / `release`、`commit`（失焦提交）、`itemClick`（含重复点同一行）、
+`cell`（表格编辑）、`expand` / `collapse`、`close`（标签页关闭按钮），
+`toggle` 扩展到 checkable button / group。全部沿用 `{type,id,value,payload}` 约定。
+配套把 `editable` 扩展到 table（否则 `cellChanged` 永不触发）。
+
+### 一个排查陷阱：tpc 增量缓存
+一度以为 `spacing` 实现有 bug（一加属性就崩）。实际是 **tpc 复用了上次带崩溃代码的
+编译产物**；改 `main.php` 强制重建就正常了。→ **改 C++ 后行为诡异，先 `rm -rf build`。**
+
+### 已知限制（非缺陷，已写文档）
+offscreen 下 `--shot` **渲染不出中文**（方框）：Qt offscreen 插件的字体枚举取不到中文字体。
+`--selftest` / `--difftest` 不受影响。要检查中文渲染，`--shot` 别加 offscreen。
+
+### 验证
+```
+margin/spacing        → 生效（截图对比：间距/边距明显变化；数组形式 [上,右,下,左] 也验了）
+press/release         → 真实鼠标点击 → 事件到达 PHP（日志确认）
+onAny 修复            → 修复前 0 条 timer 事件，修复后 8 秒收到 7 条（真实 AOT 二进制）
+offscreen 三开关       → 修复前全崩；修复后 --selftest/--difftest/--shot 全 exit 0
+无虚假事件            → 无交互跑 7 秒，新信号一条都不发（属性签名去重有效）
+qtphp test            → 116 tests（+2：onAny 双触发、8 个新信号分发）
+示例 --selftest        → 25 例（原 17）
+docs                  → 59 页，链接与锚点全过
+```
+
+### 教训
+**「文档说有、代码没有」是最值得优先修的一类缺陷** —— 它同时骗了用户和未来的自己。
+这次 5 个缺陷里 3 个（D1/D2/D4）都是文档与实现不一致，靠三方比对才挖出来。
+另外**测试也可能固化 bug**（D4 那个单测就是），所以「测试全绿」不等于「行为正确」。
+
+---
+
 ## Session 20 — 2026-10-02（「Qt 不支持托盘右击吗？」）
 
 ### 用户的问题很准

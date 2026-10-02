@@ -12,7 +12,7 @@ WidgetTree::hbox(array $children, array $props = [])
 | Property | Meaning |
 |---|---|
 | `spacing` | Gap between children (px) |
-| `margin` | Outer margin (px) |
+| `margin` | Outer margin (px); a single int for all four sides, or `[top, right, bottom, left]` |
 | `grow` | Stretch weight within the parent layout |
 
 ```php

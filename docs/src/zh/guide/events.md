@@ -34,13 +34,19 @@ AOT 编译后的闭包对实参个数做**精确校验**，多传一个就抛 `A
 | `click` | button, link | link 的 href | — |
 | `change` | lineedit, textedit, spin, doublespin, slider, combo | 新值 | combo 带 `index` |
 | `submit` | lineedit | 文本 | — |
-| `toggle` | checkbox, radio | `'0'` / `'1'` | — |
+| `toggle` | checkbox、radio、可切换 button、可切换 group | `'0'` / `'1'` | — |
 | `select` | list, table, tree | 行 / 项 id | `index` |
 | `activate` | list, table, tree | 行 / 项 id | — |
 | `tab` | tabs, stack | 索引 | `index` |
 | `menu` | 菜单项 | — | `checked` |
 | `timer` | 定时器 | — | — |
-| `tray` | 系统托盘 | — | — |
+| `tray` | 系统托盘 | 手势 | — |
+| `press` / `release` | button | — | — |
+| `commit` | lineedit（失焦或回车） | 文本 | — |
+| `itemClick` | list（每次点击都发，重复点已选中的行也发） | 项 id | — |
+| `cell` | table（单元格被编辑，需 `editable`） | 新文本 | `row`、`col` |
+| `expand` / `collapse` | tree | 节点 id | `expanded` |
+| `close` | tabs（关闭按钮，需 `closable`） | 索引 | `index` |
 
 事件对象是一个关联数组：
 
@@ -171,7 +177,9 @@ $app->onAny('click', function (array $event) use ($state) {
 });
 ```
 
-`on($id, $type, …)` 和 `onAny($type, …)` 可以同时注册，**两个都会触发**。
+`on($id, $type, …)` 和 `onAny($type, …)` 可以同时注册，**两个都会触发** —— 先特例、后通配。
+这让 `onAny` 成为放横切关注点（埋点、日志、全局快捷键）的可靠位置，
+不用担心别处注册了什么。
 
 ## 处理器里能做什么
 

@@ -57,7 +57,7 @@ $app->on('save', 'click', function () use ($state) {
 });
 ```
 
-可切换按钮发 `toggle`：
+可切换按钮发 `toggle`（和普通按钮一样也会发 `press` / `release`）：
 
 ```php
 WidgetTree::button('加粗', ['id' => 'bold', 'checkable' => true, 'checked' => $state->bold]);

@@ -25,7 +25,7 @@ WidgetTree::label('Hello', ['id' => 'greeting', 'style' => 'color:red', 'align' 
 | Property | Applies to | Meaning |
 |---|---|---|
 | `title` | group, tabs, tab | Title text |
-| `margin` | layout containers | Outer margin |
+| `margin` | layout containers | Outer margin: an int, or `[top, right, bottom, left]` |
 | `spacing` | layout containers | Gap between children |
 | `row` / `col` | grid, form | Grid position |
 | `row_span` / `col_span` | grid | Span across rows / columns |
@@ -72,7 +72,7 @@ WidgetTree::label('Hello', ['id' => 'greeting', 'style' => 'color:red', 'align' 
 | `select_mode` | table, tree | Selection mode |
 | `stretch_last` | table | Let the last column stretch |
 | `checkable` | list, table, tree | Items carry checkboxes |
-| `editable` | combo | Editable |
+| `editable` | combo, table | Editable (on a table this enables in-place cell editing and the `cell` event) |
 
 ### `current` means different things per control
 

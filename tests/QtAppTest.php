@@ -340,7 +340,13 @@ final class QtAppTest extends TestCase
         $this->assertSame(['a', 'b'], $ids);
     }
 
-    public function testSpecificHandlerWinsOverWildcard(): void
+    /**
+     * on() 与 onAny() 同时注册时**两个都要触发**（文档明确承诺）。
+     *
+     * 早先的实现是「特例命中就 return」，通配被静默吃掉 —— 于是一旦为某个 id
+     * 注册过同类型处理器，全局监听就再也不工作（埋点/日志类代码会静默失效）。
+     */
+    public function testSpecificAndWildcardBothFire(): void
     {
         $log = [];
         $this->app->on('a', 'click', function () use (&$log) { $log[] = 'specific'; });
@@ -349,7 +355,60 @@ final class QtAppTest extends TestCase
         test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'a']);
         $this->app->run(1);
 
-        $this->assertSame(['specific'], $log);
+        // 顺序：先特例，后通配
+        $this->assertSame(['specific', 'wildcard'], $log);
+    }
+
+    /** 只有通配注册时，它当然要接住所有该类型事件。 */
+    public function testWildcardStillFiresWithoutSpecificHandler(): void
+    {
+        $log = [];
+        $this->app->onAny('click', function (array $event) use (&$log) { $log[] = $event['id']; });
+
+        test_inject_event($this->app->handle(), ['type' => 'click', 'id' => 'x']);
+        $this->app->run(1);
+
+        $this->assertSame(['x'], $log);
+    }
+
+    /**
+     * 桥接新增的控件信号（press/release/commit/cell/expand/collapse/close/itemClick）
+     * 走的是同一套 {type,id,value,payload} 事件约定，所以都能被 on/onAny 接住。
+     * 这里逐一验证分发不丢字段。
+     */
+    public function testExtendedControlSignalsDispatch(): void
+    {
+        $seen = [];
+        $this->app->onAny('press', function (array $e) use (&$seen) { $seen[] = 'press:' . $e['id']; });
+        $this->app->onAny('release', function (array $e) use (&$seen) { $seen[] = 'release:' . $e['id']; });
+        $this->app->onAny('commit', function (array $e) use (&$seen) { $seen[] = 'commit:' . $e['value']; });
+        $this->app->onAny('cell', function (array $e) use (&$seen) {
+            $seen[] = 'cell:' . $e['payload']['row'] . ',' . $e['payload']['col'] . '=' . $e['value'];
+        });
+        $this->app->onAny('expand', function (array $e) use (&$seen) { $seen[] = 'expand:' . $e['value']; });
+        $this->app->onAny('collapse', function (array $e) use (&$seen) { $seen[] = 'collapse:' . $e['value']; });
+        $this->app->onAny('close', function (array $e) use (&$seen) { $seen[] = 'close:' . $e['payload']['index']; });
+        $this->app->onAny('itemClick', function (array $e) use (&$seen) { $seen[] = 'itemClick:' . $e['value']; });
+
+        $this->app->dispatch(['type' => 'press', 'id' => 'btn']);
+        $this->app->dispatch(['type' => 'release', 'id' => 'btn']);
+        $this->app->dispatch(['type' => 'commit', 'id' => 'edit', 'value' => 'hello']);
+        $this->app->dispatch(['type' => 'cell', 'id' => 'tbl', 'value' => 'X', 'payload' => ['row' => 2, 'col' => 1]]);
+        $this->app->dispatch(['type' => 'expand', 'id' => 'tree', 'value' => 'node1']);
+        $this->app->dispatch(['type' => 'collapse', 'id' => 'tree', 'value' => 'node1']);
+        $this->app->dispatch(['type' => 'close', 'id' => 'tabs', 'payload' => ['index' => 3]]);
+        $this->app->dispatch(['type' => 'itemClick', 'id' => 'lst', 'value' => 'r7']);
+
+        $this->assertSame([
+            'press:btn',
+            'release:btn',
+            'commit:hello',
+            'cell:2,1=X',
+            'expand:node1',
+            'collapse:node1',
+            'close:3',
+            'itemClick:r7',
+        ], $seen);
     }
 
     public function testUnhandledEventIsIgnored(): void

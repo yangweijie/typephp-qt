@@ -527,6 +527,15 @@ function self_test(QtApp $app): void
         ['tray', '', 'double'],
         ['menu', 'tray.hello'],
         ['menu', 'tray.show'],
+        // 桥接新增的控件信号（press/release/commit/cell/expand/collapse/close/itemClick）
+        ['press', 'greet_btn'],
+        ['release', 'greet_btn'],
+        ['commit', 'name_input', 'Ada'],
+        ['cell', 'log_tbl', 'x'],
+        ['expand', 'file_tree', 'src'],
+        ['collapse', 'file_tree', 'src'],
+        ['close', 'main_tabs', '0'],
+        ['itemClick', 'task_list', 'r1'],
         ['click', 'close_log_btn'],
     ];
 

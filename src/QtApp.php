@@ -406,9 +406,11 @@ final class QtApp
         $id = (string) ($event['id'] ?? '');
         $type = (string) ($event['type'] ?? '');
 
+        // on() 与 onAny() 都要触发 —— 文档明确承诺「两个都会触发」。
+        // 早先这里在 on() 命中后直接 return，导致 onAny 被静默吃掉：
+        // 只要为某个 id 注册过同类型处理器，通配处理器就再也不执行。
         if ($id !== '' && isset($this->handlers[$id][$type])) {
             $this->safely($this->handlers[$id][$type], $event);
-            return;
         }
         if (isset($this->handlers['*'][$type])) {
             $this->safely($this->handlers['*'][$type], $event);

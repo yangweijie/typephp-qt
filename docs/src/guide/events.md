@@ -34,13 +34,19 @@ The framework already handles this for you (it probes arity at registration), bu
 | `click` | button, link | the link's href | — |
 | `change` | lineedit, textedit, spin, doublespin, slider, combo | the new value | `index` for combo |
 | `submit` | lineedit | the text | — |
-| `toggle` | checkbox, radio | `'0'` / `'1'` | — |
+| `toggle` | checkbox, radio, checkable button, checkable group | `'0'` / `'1'` | — |
 | `select` | list, table, tree | row / item id | `index` |
 | `activate` | list, table, tree | row / item id | — |
 | `tab` | tabs, stack | the index | `index` |
 | `menu` | menu item | — | `checked` |
 | `timer` | timer | — | — |
-| `tray` | system tray | — | — |
+| `tray` | system tray | the gesture | — |
+| `press` / `release` | button | — | — |
+| `commit` | lineedit (focus lost or Enter) | the text | — |
+| `itemClick` | list (every click, even on the already-selected row) | item id | — |
+| `cell` | table (cell edited, needs `editable`) | new text | `row`, `col` |
+| `expand` / `collapse` | tree | node id | `expanded` |
+| `close` | tabs (close button, needs `closable`) | the index | `index` |
 
 An event is an associative array:
 
@@ -172,7 +178,9 @@ $app->onAny('click', function (array $event) use ($state) {
 });
 ```
 
-`on($id, $type, …)` and `onAny($type, …)` may both be registered, and **both will fire**.
+`on($id, $type, …)` and `onAny($type, …)` may both be registered, and **both will fire** — the
+id-specific handler first, then the wildcard one. That makes `onAny` a reliable place for
+cross-cutting concerns (analytics, logging, a global shortcut) regardless of what else is registered.
 
 ## What a handler may do
 

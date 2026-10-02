@@ -80,6 +80,18 @@ The example app's 20 assertions live in `diff_test()` inside `examples/hello/src
 
 All three are platform-agnostic. To run them in a headless session (CI), set `QT_QPA_PLATFORM=offscreen`.
 
+::: warning `--shot` under offscreen cannot check CJK text
+Qt's offscreen platform uses its own font enumeration and may not find a CJK font, so
+`--shot` renders Chinese/Japanese/Korean text as boxes (tofu). `--selftest` and
+`--difftest` are unaffected — they never rasterise anything.
+
+If your UI has CJK text and you want to *look* at the PNG, run `--shot` **without**
+`QT_QPA_PLATFORM=offscreen` (needs a desktop session). Keep offscreen for the other two.
+:::
+
+On Windows, `qtphp build` deploys `qwindows.dll` / `qoffscreen.dll` / `qminimal.dll`
+into `build/platforms/` so all of these work straight from the dev artifact.
+
 ## What headless mode does
 
 `headless(true)` makes every blocking call return immediately without touching Qt's modal API:

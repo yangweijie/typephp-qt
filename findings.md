@@ -826,3 +826,40 @@ Linux 上因此多一行 `[OK] Linux 构建前置: 齐全`（7 行检查项 + �
 
 **未测**：macOS / Linux 上「无原生发行包、只有 composer 驱动」的退回路径 ——
 逻辑上仍走原顺序，但本窗口无 mac/Linux 环境复验。
+
+## F25. 桥接「能力静默丢失」审计（Session 21）
+
+起因：托盘只转发了 Qt 5 种激活方式里的 1 种（Session 20）。怀疑同类问题还有别处，
+于是把「桥接连了哪些 Qt 信号 / 实现了哪些属性」与「文档声称支持什么」做三方交叉比对。
+
+**方法**：`grep` 出全部 `QObject::connect` 与属性键，再与 `docs/src/**` 里的
+事件表 / 属性表求差集。**「文档说有、代码没有」= 撒谎；「代码有、文档没写」= 漏了。**
+
+### 查实的 5 个缺陷
+
+| # | 缺陷 | 后果 |
+|---|---|---|
+| D1 | `margin` / `spacing` 文档写了 4 处、有示例，**代码里根本没实现** | 写了没效果，完全静默 |
+| D2 | `checkable` 按钮/group 不发 `toggle`（`QPushButton::toggled` 没连） | `widgets/display.md` 教用户用它，实际拿不到状态 |
+| D3 | `build` 不部署 `qoffscreen.dll` | **`QT_QPA_PLATFORM=offscreen` 下三个无头开关全崩**（`0xC0000409`），而文档正是让 CI 这么跑 |
+| D4 | `onAny` 被 `on` 静默吃掉（`handleEvent` 命中特例后 `return`） | 埋点/日志/全局快捷键类代码静默失效；**文档明写「两个都会触发」** |
+| D5 | `editable` 不支持 table | 新加的 `cellChanged` 永不触发（表格默认只读） |
+
+### 冲突：测试 vs 文档
+`testSpecificHandlerWinsOverWildcard` 断言的正是 D4 的旧行为，
+与文档「两个都会触发」直接矛盾。经确认采用**文档语义** → 改代码 + 改测试。
+
+### 新增能力（用户要求「尽量补全信号」）
+`press` `release`（button）、`commit`（lineedit 失焦）、`itemClick`（list 单击）、
+`cell`（table 编辑）、`expand` `collapse`（tree）、`close`（tabs 关闭按钮）、
+`toggle` 扩展到 checkable button / group。全部沿用 `{type,id,value,payload}` 约定。
+
+### 一个排查陷阱：tpc 增量缓存
+一度以为 `spacing` 的实现有 bug（一加属性就崩）。实际是 **tpc 复用了上一次带崩溃代码的
+编译产物**；改 `main.php` 强制重建后就正常了。`qtphp` 自己不管理这个缓存。
+→ **改 C++ 后行为诡异时，先 `rm -rf build` 从零重建再判断。**
+
+### 已知限制（非缺陷，已写入文档）
+**offscreen 下 `--shot` 渲染不出中文**（方框）：Qt offscreen 平台插件的字体枚举
+取不到中文字体。`--selftest` / `--difftest` 不受影响（不渲染像素）。
+要检查中文渲染，`--shot` 不要加 offscreen。
