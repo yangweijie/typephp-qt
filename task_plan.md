@@ -71,6 +71,7 @@
 | 15 | 技能入库到仓库 `.ohmyagent/skills/` | ✅ done：复制 25 个文件并修掉入库才暴露的三处问题 —— `.sh` 的 CRLF（Linux 上 shebang 会坏）转 LF、`git update-index --chmod=+x` 补执行位（Windows 下 `git add` 记成 100644）、新增 `.gitattributes` 固化换行符规则（`*.sh`→LF / `*.bat`→CRLF / 图片→binary）。从 git 索引导出后逐字节验证 + 实跑通过。**未提交**（已暂存） |
 | 16 | VuePress 2 文档站 + GitHub Pages 部署 | ✅ done：`docs/` 下 30 页（指南 12 / 控件 5 / 深入 5 / 参考 5 / FAQ + 首页），VuePress 2 rc.31 + theme-default rc.137。新增两个构建期守门脚本（死链、跨页锚点），都做过鉴别力反证。`.github/workflows/docs.yml` 推 main 自动发布，base 按仓库名推导。事实核对：112 测试 / 24 桥接函数 / 30 控件 / 40 个 QtApp 方法 / 30 个 WidgetTree 方法 全部与代码一致。**待你手动开 Pages Source = GitHub Actions** |
 | 17 | 搜索插件 + 中英双语 | ✅ done：接入官方 `plugin-search`（索引内联，按语言配占位）；站点改为**英文默认（根）+ 中文 /zh/**，各 29 页共 59 页。中文页 52 处站内链接改写为 `/zh/` 前缀。**顺带查实**：theme 内置的 links-check 只验目标文件、**不校验锚点**（注入坏锚点仍构建成功），故保留自建 `check-anchors.py`，`check-links.py` 改定位为产物级复核 —— 形成源码/产物/锚点三层防护。中英文件名一一对应，语言切换与双语言搜索均实测可用 |
+| 18 | 修 docs CI（node 版本 + lock 不同步） | ✅ done：CI 日志里是两个独立问题 —— ① workflow 用 node 20，而 vuepress rc.31 要求 `>=22.18.0`（改 22）；② `sass` 是 theme 的**可选 peer**、未显式声明，npm 10 与 11 落位不同导致 CI 报 `Missing: sass@1.105.1 from lock file`（显式声明 + 用 npm 10 重生成 lock）。另加 `engines` 护栏把 node 要求变显式契约。**npm 10 与 npm 11 下 `npm ci` 均 rc=0** |
 
 ### Phase 10 分解（macOS）
 

@@ -4,6 +4,11 @@
   "private": true,
   "description": "Documentation site for yangweijie/typephp-qt",
   "type": "module",
+  "//engines": "vuepress@2.0.0-rc.31 requires node >=22.18.0. Declared here so the mismatch fails loudly at install time instead of as a wall of EBADENGINE warnings in CI.",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "//sass": "sass is an OPTIONAL PEER of theme-default. Declaring it explicitly removes the ambiguity that made npm 10 and npm 11 record it differently in the lock file.",
   "scripts": {
     "dev": "vuepress dev src",
     "build": "vuepress build src",
@@ -13,6 +18,7 @@
     "@vuepress/bundler-vite": "2.0.0-rc.31",
     "@vuepress/plugin-search": "2.0.0-rc.137",
     "@vuepress/theme-default": "2.0.0-rc.137",
+    "sass": "^1.105.0",
     "sass-embedded": "^1.105.0",
     "vue": "^3.5.13",
     "vuepress": "2.0.0-rc.31"

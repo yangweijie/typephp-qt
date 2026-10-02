@@ -1,5 +1,65 @@
 # Progress Log — typephp-qt
 
+## Session 18 — 2026-10-02（修 CI：node 版本 + lock 不同步）
+
+### 任务
+> 「ci 报错」（贴了 `npm ci` 的完整日志）
+
+日志里其实是**两个互不相干的问题**，都出在 docs 的 CI 上：
+
+### 问题 1：CI 的 node 太旧
+`vuepress@2.0.0-rc.31` 的 `engines` 要求 **`node >=22.18.0`**，而 workflow 写的是 `node-version: 20`。
+所以 `npm ci` 一上来就刷了一屏 `EBADENGINE`（涉及 `vuepress`、`@vueuse/*`、`@mdit/*` 等）。
+本地是 node 24，所以从没复现过。
+
+**修**：workflow 改 `node-version: 22`（22.23.3 满足要求）。
+
+### 问题 2：lock 文件不同步
+```
+npm error `npm ci` can only install packages when your package.json and package-lock.json are in sync
+npm error Missing: sass@1.105.1 from lock file
+npm error Missing: markdown-it@15.0.2 from lock file   (×2)
+```
+
+**根因**：`sass` 是 `@vuepress/theme-default` 的**可选 peer 依赖**（`peerDependenciesMeta.sass.optional = true`），
+而我的 `package.json` **从未显式声明它**。这种"可选 peer"的落位依赖 npm 的解析策略 ——
+**npm 10 与 npm 11 会把它记进 lock 的不同位置**，于是本地（npm 11 + node 24）生成的 lock
+到了 CI（npm 10 + node 20）就"缺包"。
+
+**修**：
+- 在 `devDependencies` 里**显式声明 `sass`**，消除歧义。
+- 用 **CI 同款 npm 10** 重新生成 lock（`npx --yes npm@10 install`）。
+
+### 顺带加的护栏
+`package.json` 里补 `engines: { node: ">=22.18.0" }`，把 node 要求变成**显式契约**：
+版本不符时 npm 会直接指出是我们自己的包不满足要求，而不是淹没在第三方包的告警里。
+（实测：npm 确实认这个字段 —— 约束不可满足时告警，配 `--engine-strict` 则硬失败。）
+
+**踩坑**：`"//comment"` 形式的注释键**只能放顶层**，放进 `devDependencies` 里会被 npm 当成包名
+报 `EINVALIDPACKAGENAME`。已移到顶层。
+
+### 验证（关键：两个 npm 版本都过）
+```
+npm 10（CI 同款）npm ci   → rc=0，无 EBADENGINE
+npm 11（本地）   npm ci   → rc=0，无 EBADENGINE
+lock 内容                → sass@1.105.1 ✓、两处 markdown-it@15.0.2 ✓
+engines 护栏             → 不可满足约束时 npm 正确告警 / --engine-strict 硬失败
+完整 CI 流程复现          → npm ci → 构建 59 页 → check-links → check-anchors 全过
+两种 base（'' 与 /typephp-qt/）→ 链接检查均无死链
+```
+
+### 教训
+**`npm install` 会掩盖 lock 不同步，`npm ci` 才会暴露。** 本地与 CI 的 npm 版本不同时，
+这个差别会变成"本地好好的、CI 挂掉"。改依赖后应该用 CI 同款版本复核：
+
+```bash
+npx --yes npm@10 ci
+```
+
+已写进 `docs/README.md`。
+
+---
+
 ## Session 17 — 2026-10-02（搜索插件 + 中英双语）
 
 ### 任务

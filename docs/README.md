@@ -6,16 +6,32 @@ VuePress 2 构建的文档站，**中英双语**。源文件在 `src/`。
 
 ```bash
 cd docs
-npm install        # 首次
+npm ci             # 首次（CI 同款；用 npm install 会重写 lock）
 npm run dev        # http://localhost:8080
 ```
 
 改 `src/` 下的 markdown 会热更新。
 
+**Node 版本要求 `>=22.18.0`** —— `vuepress@2.0.0-rc.31` 的 `engines` 要求。已在 `package.json` 里声明，版本不符时 npm 会直接提示（配 `--engine-strict` 则硬失败），不会只在 CI 里刷一屏 `EBADENGINE`。
+
 ## 构建
 
 ```bash
 npm run build      # 产物在 src/.vuepress/dist/
+```
+
+## 关于 lock 文件
+
+**改依赖后用 `npm ci` 验证，不要只跑 `npm install`。**
+
+`npm install` 会重写 lock，掩盖不同步问题；`npm ci` 严格按 lock 安装，正是 CI 的行为。本地 npm 与 CI 的 npm 版本不同时，这个差别会变成"本地好好的、CI 挂掉"。
+
+一个具体教训：`sass` 是 theme-default 的**可选 peer 依赖**，不显式声明时 npm 10 和 npm 11 会把它记进 lock 的不同位置，导致 CI 的 `npm ci` 报 `Missing: sass@1.105.1 from lock file`。**已在 `devDependencies` 里显式声明**以消除歧义。
+
+改动 lock 后建议用 CI 同款版本复核一遍：
+
+```bash
+npx --yes npm@10 ci
 ```
 
 ## 语言结构
