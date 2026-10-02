@@ -31,6 +31,27 @@ apt install -y qt6-base-dev cmake g++ pkg-config bison re2c autoconf xz-utils pa
   zlib1g-dev libxml2-dev libsqlite3-dev libonig-dev libgmp-dev libmpfr-dev
 ```
 
+### tpc 从哪来
+
+`qtphp` 按「**带运行时**」优先挑编译器，两条供给路线都支持：
+
+| 路线 | 位置 | 运行时来源 |
+|---|---|---|
+| 原生发行包 | 解压目录里的 `tpc.exe` / `tpc` | **自包含**：`phpx.dll`、`SDK/` 就在可执行文件旁边 |
+| composer 驱动 | `vendor/bin/tpc.php` | `vendor/swoole/phpx` 源码树，**首次构建时现编**私有 embed 运行时 |
+
+两者不通用：composer 驱动去找 `vendor/swoole/phpx/build/phpx.dll`，而该源码包不含编译产物 ——
+所以机器上**同时存在**两者时，若 composer 驱动还没建好运行时，`build` 会报
+`The PHPX runtime library was not found at: …\phpx\build\phpx.dll`。
+`qtphp` 会自动跳过这种「装得出却跑不通」的候选，改用带运行时的那个；也可以用环境变量显式指定：
+
+```bash
+TPC=/path/to/tpc.exe   qtphp build .   # 直接指定编译器（跳过体检）
+TPC_DIR=/path/to/dir   qtphp build .   # 指定安装目录
+```
+
+`qtphp doctor` 会打印实际选中的 tpc 与运行时库目录，排查时先看这两行。
+
 ## 5 分钟上手
 
 ### 1. 安装
@@ -244,6 +265,8 @@ $w->patch([
 要长期存在就得写回树里。未知 `method`、未知 `id` 静默忽略，与未知属性一致。
 
 
+## 命令
+
 | 命令 | 说明 |
 |------|------|
 | `qtphp doctor` | 检查工具链（PHP / tpc / PHP 运行时库 / Qt / C++ 编译器 / PHPUnit）。Qt 位置按平台探：Windows 装到 `C:/D:` 盘、macOS 是 brew keg-only、Linux 是 Debian 多架构 `/usr`；C++ 依次试 `clang++`、`g++`；Linux 额外查 12 项构建/打包前置（`bison`/`re2c`/`autoconf`/`pkg-config`/`xz`/`patchelf` + gmp/mpfr/onig/libxml2/sqlite3/zlib 头），缺哪些就打出 apt 包名与可直接粘贴的 `apt install -y …`（只 WARN，不影响 rc） |
@@ -294,6 +317,8 @@ qtphp run <path> --shot out.png   # 渲染几帧后存 PNG 退出（视觉验收
 qtphp run <path> --selftest       # 逐个触发所有事件，验证每个 handler 可调用
 qtphp run <path> --difftest       # 表格/树的差异更新边界（选中、行 id、列数、补丁）
 ```
+
+示例应用在 Windows / macOS / Linux 上都是 `--selftest` 14/14、`--difftest` 20/20。
 
 `--selftest` 能在无头环境覆盖"闭包参数个数不匹配"这类只在 AOT 下暴露的问题。
 `--difftest` 只能跑在真 Qt 上 —— diff 引擎与 `patch()` 的 `call` 都在 C++ 里，PHPUnit 摸不到它；

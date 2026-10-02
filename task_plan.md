@@ -66,6 +66,7 @@
 | 10 | macOS 原生编译路线（跨平台 CLI + 平台条件 project.yml + Qt6 + 私有 embed 运行时） | ✅ done |
 | 11 | macOS 运行/打包链路（`cmdRun`/`cmdPackage`/`deployRuntimeDlls` 曾只认 `.exe`+DLL） | ✅ done：11.1 run ✅、11.2 package ✅、11.3 运行时库定位 ✅、11.4 证伪+文档修正 ✅、11.5 参数透传（顺带修 `basename('.')`）✅、11.6 `qtphp new` 双平台模板 ✅ —— 全新项目在 mac 上 new→build→run --selftest→package→`env -i` 全链实测通过 |
 | 12 | 控件行为验收（表格/树 diff 边界）+ `patch` 的 `call` 操作 + 多窗口/托盘/定时器示例 | ✅ done：12.1 表格/树 diff（揪出并修掉 4 个 C++ 真缺陷，新增 `--difftest`）、12.2 `call` 六个方法（含签名作废与鉴别力反证）、12.3 多窗口/托盘/定时器演示（补 `QtApp::isOpen()` + 托盘兜底图标）、12.4 bundle 自带 offscreen 插件（产物可无头验收）、12.5 Windows 分支同款幂等补拷（本机无环境，未实测）、12.6 Linux 打包不再冒充 macOS（显式三路 + 明确报错，F19）、12.7 Linux 首次在真机跑通（Apple Container + Debian 12 arm64 + Qt 6.4.2：build→run→offscreen 14/14 + 20/20 + 出图全 rc=0，F20+F21）、12.8 Linux `package` 真机实现并验收（`dist/<name>/` = ldd 闭包 + `patchelf` DT_RPATH + `qt.conf`，产物 `env -i` offscreen 下 14/14 + 20/20 + 出图全 rc=0，F22）、12.9 Linux 硬前置落到 `doctor`（`linuxMissingPackages()` 12 项，命令 + 多架构头文件两类探测，两条分支都真机逼验，F23）—— `--selftest` 14/14、`--difftest` 20/20、112 例单测全绿 |
+| 13 | tpc 供给路线解析（Windows 上 composer 驱动抢占原生发行包 → `build` 报缺 `phpx.dll`） | ✅ done：`findTpc()` 改按**运行时体检**选路，删掉硬编码路径（F24）。Windows 端到端复验：`build` → `--selftest` 14/14 → `--shot` 21KB PNG → `test` 112/183 → `lint` 契约一致 |
 
 ### Phase 10 分解（macOS）
 
@@ -219,6 +220,26 @@
   均正确报出包名；恢复后「齐全」。回归：Linux `doctor`/`test` 112/183/`lint`/`package` 全 rc=0，
   `bin/qtphp` 两侧 sha256 一致；macOS `doctor` 输出仍 6 行、`test`/`lint`/`php -l` 全绿。
 
+### Phase 13 分解（tpc 供给路线，Windows）
+
+- [x] 13.1 复现并定位：`build examples/hello` 报 `The PHPX runtime library was not found at:
+  ...\phpx\build\phpx.dll`。定位链 `Windows.php::getBuildLibraryWarnings()` → `PhpxLocator::resolve()`
+  → 找的是 **`vendor/swoole/phpx`** 源码树（该包只有 `CMakeLists.txt`/`src`/`include`，无 `build/`）。
+  即 `findTpc()` 把 composer 驱动排在了自包含的原生发行包前面。
+- [x] 13.2 修法：不做「谁优先」的硬性排序（macOS/Linux 全链路本就建立在 composer 驱动 +
+  tpc 自建私有运行时之上，见 11.3），改为**按运行时体检** —— 选中的候选缺运行时、候选表里另有
+  带运行时的就改用后者。新增 `tpcHasRuntime()`（判据与 `findRuntimeLibDir()` 标记集一致，
+  `.php` 驱动恒 false）、`nativeTpcSearchDirs()`、`whichAll()`；删掉硬编码的
+  `D:/git/php/tpc_v0.9.4_windows_x64/tpc.exe`；`TPC`/`TPC_DIR` 显式指定时不体检。
+  CLI 1893 → 1986 行。
+- [x] 13.3 自纠：初版写成「原生发行包优先」，随即意识到这会改变 macOS/Linux 上已验证的行为，
+  `git checkout` 还原后改为体检方案 —— 是修复而非推倒重来。
+- [x] 13.4 Windows 端到端复验：`doctor` 6 项全 OK（tpc 与运行时库都指向原生包）、
+  `build` 成功、`--selftest` 14/14 rc=0、`--shot` 21KB PNG（读图确认控件齐全）、
+  `test` 112/183、`lint` 契约一致。
+- [ ] 13.5 **未测**：macOS/Linux 上「无原生发行包、只有 composer 驱动」的退回路径
+  （逻辑上仍走原顺序，本窗口无 mac/Linux 环境复验）。
+
 ## Errors Encountered
 
 | Error | Attempt | Resolution |
@@ -239,6 +260,8 @@
 | 点按钮报 `expects exactly 0 arguments, 1 given` | 1 | AOT 对闭包实参个数精确校验；注册时反射探测 arity，按实际个数调用 |
 | `--selftest` 卡死不退出 | 1 | 模态对话框在无头环境阻塞；新增 `QtApp::headless()` |
 | `Cannot re-assign typed object $ref` | 1 | AOT 类型推断限制；`ReflectionMethod`/`ReflectionFunction` 分用两个变量 |
+| **Windows `build` 报 `PHPX runtime library was not found at: ...\phpx\build\phpx.dll`** | 1 | composer 驱动（`vendor/bin/tpc.php`）被选中，而它依赖的 `vendor/swoole/phpx` 源码树不含编译产物；原生 tpc.exe 发行包才是自包含的。改为**按运行时体检选路**（F24） |
+| `--difftest` 在 Windows 上「崩溃」（`0xC0000409`），而 `--selftest` 正常 | 1 | **自己造的**：注入诊断标记时用 python heredoc 把 `"\n"` 写成了字面换行，破坏了字符串字面量。`php -l` 仍报「无语法错误」（因为换行在双引号里合法），但语义已变。教训：注入诊断代码后必须**跑一次再下结论**，且别在受损文件上叠加 Edit —— 还原后干净重建，两者都 14/14、20/20 |
 | macOS `doctor` 报「tpc 未找到」 | 1 | composer 只发 `bin/tpc.php`（`bin/tpc` 被跳过）；`findTpc()` 加 `.php` 候选并用 `PHP_BINARY` 起 |
 | macOS `build` 报 `Source file not exists: D:/git/php/...` | 1 | `sources` 改成相对 yml 目录的路径（tpc 本就按 `projectDir` 解析，Windows 同样成立） |
 | macOS 链接前即失败：`Neither libphp.dylib nor libphp.a found` | 1 | 未解：宿主 PHP 无 embed SAPI，需 tpc `--php-builder` 现编私有运行时（非交互终端必须显式传参） |
@@ -343,6 +366,6 @@
 |---|---|
 | `cpp-src/`（qt_common.h + qt_bridge.cc + qt_widgets.cc） | 2052 |
 | `src/`（QtApp + WidgetTree + FakeBridge） | 1032 |
-| `bin/qtphp` | 1893 |
+| `bin/qtphp` | 1986 |
 | `php-src/qt.stub.php` | 151 |
-| 合计 | 5128 |
+| 合计 | 5221 |

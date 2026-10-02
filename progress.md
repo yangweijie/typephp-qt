@@ -1,13 +1,15 @@
 # Progress Log — typephp-qt
 
-## 当前状态（Session 13 收尾：Phase 1–11 完成，Phase 12.1–12.9 完成）
+## 当前状态（Session 14：Phase 1–11 完成，Phase 12.1–12.9 完成）
 
 | 项 | 状态 |
 |---|---|
 | 全部 9 个 Phase（Windows 路线） | ✅ done |
+| **Windows 端到端（Session 14 复验）** | ✅ `build` → `--selftest` 14/14 → `--shot` 21KB PNG（读图确认）→ `test` 112/183 → `lint` 契约一致；`doctor` 6 项全 OK |
+| tpc 供给路线解析（Session 14） | ✅ 改按运行时体检选路，不再硬编码路径（F24）；带运行时的原生包不再被 composer 驱动抢占 |
 | Phase 10（macOS 原生编译路线） | ✅ done：`qtphp build examples/hello` 在 mac 上产出真实 Mach-O arm64 可执行文件，`--selftest` 10/10、`--shot` 出图 |
 | Phase 11（macOS 运行/打包/脚手架） | ✅ done：11.1–11.6 全绿，见下三行 |
-| `qtphp test` | ✅ 112 tests / 183 assertions（本轮 macOS 实测；Windows 未在本窗口复验） |
+| `qtphp test` | ✅ 112 tests / 183 assertions（macOS 与 Windows 均已实测） |
 | `qtphp lint` | ✅ 契约一致（24 个函数） |
 | 示例 `build` / `--shot` / `--selftest` / `package` | ✅ Windows 全部实测通过 |
 | 示例在 macOS 无头运行（FakeBridge） | ✅ 曾 `--selftest` 10/10、`--shot` 渲染出完整控件树（该 10 条为 12.3 之前的时点） |
@@ -21,7 +23,7 @@
 | **Linux（Debian 12 arm64 + Qt 6.4.2）build→run→验收** | ✅ 12.7 真实测：tpc 自建 embed 运行时、产出 ELF PIE aarch64 58 MB，offscreen 下 `--selftest` 14/14、`--difftest` 20/20、`--shot` 760×560 PNG，全部 rc=0（F21） |
 | `qtphp test` / `lint` / `new` / `doctor`（Linux） | ✅ 112 tests / 183 assertions、契约一致、`project.linux.yml` 三元组推导正确、doctor 7 项全 OK（12.9 起含「Linux 构建前置」探测） |
 | `qtphp package`（Linux） | ✅ 12.8 真实测：`dist/hello/` = 二进制 + 85 个 `.so` + 10 个 Qt 插件 + `qt.conf`，140.3 MB；`readelf -d` 只剩 `(RPATH) [$ORIGIN/lib]`，`ldd`（含 `libqxcb.so` 自己那次）没有一行落在产物外；`env -i QT_QPA_PLATFORM=offscreen` 下 `--selftest` 14/14、`--difftest` 20/20、`--shot` 全 rc=0，且 PNG 与开发产物**逐字节一致**（F22） |
-| 代码规模 | 5128 行（C++ 2052 / PHP 框架 1032 / CLI 1893 / 契约 151） |
+| 代码规模 | 5221 行（C++ 2052 / PHP 框架 1032 / CLI 1986 / 契约 151） |
 
 **Phase 11 收尾复验（2026-10-02，无代码改动）**
 `php bin/qtphp test` → OK (103 tests / 162 assertions)；`lint` → 契约一致（24 个函数）；
@@ -35,6 +37,90 @@ task_plan.md 的 macOS 环境段同步：私有 embed 运行时从「缺」改�
 - `FakeBridge::qt_fake_default_value()` 对 `table`/`tree`/`list`/`combo` 的返回值形态与真实桥接不一致（F13 尾部）
 - `--selftest`/`--difftest` 失败时退出码仍是 0，CI 里得靠 grep 判定
 - `call` 的方法表还可以长：`insertRow`/`removeRow`/`appendText`（日志流）目前都只能用整表重建绕
+
+---
+
+## Session 14 — 2026-10-02（Windows：修 tpc 供给路线选错）
+
+### 任务
+> 「按照新代码重新运行 hello」
+
+### 遇到的障碍（不是代码回归，是环境解析选错了编译器）
+`php bin/qtphp build examples/hello` 首次失败：
+
+```
+Fatal error: The PHPX runtime library was not found at:
+  D:\git\php\tpc_v0.9.4_windows_x64\phpx\build\phpx.dll
+Build PHPX first (for example, run `nmake phpx` ...)
+```
+
+### 根因
+`findTpc()` 的候选表把 **composer 驱动排在原生发行包前面**，且最后一项是硬编码的
+`D:/git/php/tpc_v0.9.4_windows_x64/tpc.exe`。系统里两个 tpc 的运行时来源完全不同：
+
+| | 原生发行包 | composer 驱动 |
+|---|---|---|
+| 位置 | `tpc_v0.9.4_windows_x64/tpc.exe` | `vendor/bin/tpc.php` |
+| 运行时 | 自包含（旁边就有 `phpx.dll`/`SDK`） | 依赖 `vendor/swoole/phpx` **源码树** |
+| 状态 | 解压即用 | 源码树无编译产物，需 `nmake phpx` 自建 |
+
+`PhpxLocator::resolve()` 去找 `vendor/swoole/phpx/build/phpx.dll` —— 该包只有
+`CMakeLists.txt`/`src`/`include`，没有 `build/`，于是直接报错。
+
+### 修法（`bin/qtphp`）
+**不硬性排序，改为按运行时体检** —— 两条路线在各自平台上都是对的（macOS/Linux 全链路
+本就建立在 composer 驱动 + tpc 自建私有运行时之上，见 F11.3），所以只解决
+「选中了跑不通的那个」：
+
+- `tpcHasRuntime()` —— 判据与 `findRuntimeLibDir()` 的标记集一致（`phpx/`、`SDK/` 目录
+  或 php 运行时 DLL/静态库）；**`.php` 驱动一律 false**（运行时在 `~/.typephp/php-builder`，
+  可能尚未构建，正是本次故障来源）。
+- `findTpc()` —— 保留 composer 优先的原顺序，但选中的候选缺运行时、候选表里另有带运行时的，
+  就改用后者。
+- `nativeTpcSearchDirs()` —— 替掉硬编码路径（`~/tpc*`、`~/.typephp/tpc`、`/opt/tpc` 等）。
+- `whichAll()` —— `where` 在 Windows 上可能返回多个，全部纳入候选。
+- `TPC` / `TPC_DIR` 显式指定时不做体检，照用。
+
+**先做错又改回的一条**：最初我把 composer 驱动整体降为兜底（"原生优先"），
+随后意识到这会改变 macOS/Linux 上已验证的行为 —— 那是**推倒重来而非修复**，遂 `git checkout`
+还原后改成上面的体检方案。
+
+### 验证（真实 AOT 二进制，Windows）
+```
+qtphp doctor  → tpc: ...tpc_v0.9.4_windows_x64\tpc.exe  ✅
+                PHP 运行时库: ...tpc_v0.9.4_windows_x64  ✅
+qtphp build examples/hello → Build successful（不设任何环境变量）
+hello.exe --selftest（精简 PATH）→ exit 0，14/14 ok
+hello.exe --shot shot.png → exit 0，21KB PNG（读图确认：菜单/分组/进度/表格/中文全部正确）
+qtphp test  → 112 tests / 183 assertions 全绿
+qtphp lint  → 契约一致！
+```
+
+### 未测
+macOS / Linux 上「无原生发行包、只有 composer 驱动」的退回路径 —— 逻辑上仍走原顺序，
+但本窗口无 mac/Linux 环境复验。
+
+### README 更新（本轮）
+- 修掉**孤儿表格**：命令表（`qtphp doctor`/`new`/`build`/…）此前没有标题，直接挂在
+  「增量补丁」的 `call` 说明后面，补上 `## 命令`。
+- 新增 `### tpc 从哪来`：两条供给路线的对照表、混用时的报错原文、
+  `TPC`/`TPC_DIR` 用法，并指向 `doctor` 打印的 tpc 与运行时库两行。
+- 无头验收段补实测数字：三个平台都是 `--selftest` 14/14、`--difftest` 20/20。
+- 事实核查（逐项对照代码，全部一致）：控件目录 30 项 vs C++ 类型分派、
+  事件表 10 项 vs `enqueue(QStringLiteral(...))`、`call` 六方法 vs `method == QLatin1String(...)`、
+  `qtphp new` 产物、112 测试数、`doctor` 6 行输出。
+
+### 一次自造故障（记录以免重犯）
+核查 README 时想验「`--difftest` 在 Windows 上是否可用」，注入诊断标记定位——
+结果 `--difftest` 报 `0xC0000409`，`--selftest` 却正常，看起来像平台缺陷。
+实际是**我的注入破坏了源文件**：python heredoc 把 `"\n"` 写成了字面换行，
+`php -l` 仍报「无语法错误」（换行在双引号内合法）但语义已变；我还在受损文件上继续叠加 Edit。
+还原后干净重建：**两者都通过**（14/14、20/20）。
+教训：注入诊断代码后必须真正跑一遍再下结论；`php -l` 通过 ≠ 语义正确。
+
+### 教训
+"上次还好好的"不等于代码回归 —— 也可能是**环境解析**选到了另一条供给路线。
+两条 tpc 路线的运行时来源完全不同，混用必炸。已记入 `findings.md` F24。
 
 ---
 

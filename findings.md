@@ -792,3 +792,37 @@ macOS 侧复验没回归：`php -l`、`test` 112/183、`lint` 契约一致、`do
 **保持原语义**：这些一律 `warning`，不进 `$allOk` —— `doctor` 的 rc 只由 error 级项决定，
 Linux 前置缺失不该让 `qtphp doctor` 变成失败退出（`build`/`package` 会在真正需要时报错并给同一条 apt 提示）。
 Linux 上因此多一行 `[OK] Linux 构建前置: 齐全`（7 行检查项 + 汇总）；macOS 侧输出与行数不变。
+
+## F24. 两条 tpc 供给路线不能混用（Session 14）
+
+系统里可能同时存在**两个** tpc，它们的运行时来源完全不同，选错就编不过：
+
+| | 原生发行包 | composer 驱动 |
+|---|---|---|
+| 位置 | 解压目录，如 `tpc_v0.9.4_windows_x64/tpc.exe` | `vendor/bin/tpc.php` → `vendor/swoole/typephp/bin/tpc.php` |
+| 运行时 | **自包含**：`phpx.dll`/`SDK/` 就在可执行文件旁边 | 依赖 `vendor/swoole/phpx` **源码树** |
+| 可用性 | 解压即用 | 源码树**不含** `build/phpx.dll`、`lib/phpx.lib`，需 phpx 工具链自建 |
+
+**症状**：composer 驱动被选中时报
+`Fatal error: The PHPX runtime library was not found at: ...\phpx\build\phpx.dll`
+（`vendor/swoole/phpx` 只有 `CMakeLists.txt`/`src`/`include`，没有编译产物）。
+
+**定位链**：`Windows.php` 的 `getBuildLibraryWarnings()` 检查
+`<phpxDir>\build\phpx.dll` 与 `<phpxDir>\lib\phpx.lib`；`<phpxDir>` 来自
+`PhpxLocator::resolve()` —— 它找的是 **`vendor/swoole/phpx`**（受 `PHPX_HOME` 覆盖）。
+
+**修法**：不做「谁优先」的硬性排序 —— 两条路线在各自平台上都是对的（macOS/Linux 全链路
+本来就建立在 composer 驱动 + tpc 自建私有运行时之上，见 F11.3）。改成**按运行时体检**：
+选中的候选若旁边没有运行时，而候选表里另有带运行时的，就改用后者。
+
+`tpcHasRuntime()` 的判据与 `findRuntimeLibDir()` 的标记集保持一致（`phpx/`、`SDK/`
+目录或 php 运行时 DLL/静态库）；**`.php` 驱动一律返回 false** —— 它的运行时在
+`~/.typephp/php-builder`，可能尚未构建，正是本次故障来源。`TPC`/`TPC_DIR` 显式指定时
+不做体检，照用。
+
+顺带删掉了原先硬编码的 `D:/git/php/tpc_v0.9.4_windows_x64/tpc.exe`，改为
+`nativeTpcSearchDirs()`（`~/tpc*`、`~/.typephp/tpc`、`/opt/tpc` 等惯例位置）+
+`whichAll()`（Windows 的 `where` 可能返回多个，全部纳入候选）。
+
+**未测**：macOS / Linux 上「无原生发行包、只有 composer 驱动」的退回路径 ——
+逻辑上仍走原顺序，但本窗口无 mac/Linux 环境复验。

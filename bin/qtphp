@@ -162,27 +162,120 @@ function cmdDoctor(): int
     return $allOk ? 0 : 1;
 }
 
+/**
+ * 定位 tpc 编译器。
+ *
+ * 优先级沿用 composer 驱动优先（macOS/Linux 的完整链路都建立在 tpc 自建私有运行时之上，
+ * 见 F11.3），但加两个 Windows 专属的逃生口 —— 那里 composer 驱动可能**装得出却跑不通**：
+ *
+ * composer 只发 `vendor/bin/tpc.php` 这个驱动，它依赖同仓库的 `vendor/swoole/phpx`
+ * **源码树**，而该源码树不含编译产物（`build/phpx.dll`、`lib/phpx.lib` 要 phpx 工具链自建）。
+ * 原生 tpc.exe 发行包则是自包含的，运行时就在它旁边。两路线混用会直接死在
+ * `The PHPX runtime library was not found at: ...\phpx\build\phpx.dll`。
+ *
+ * 所以：选中的候选若**缺运行时**而候选表里另有**带运行时**的，就改用后者。
+ * `TPC` / `TPC_DIR` 可显式指定，用于 CI 与多版本共存。
+ */
 function findTpc(): ?string
 {
+    // 显式指定的一律照用，不做运行时体检（用户知道自己在做什么）
+    $envTpc = getenv('TPC');
+    if ($envTpc && is_file($envTpc)) {
+        return $envTpc;
+    }
+
     // composer 装的包只带 bin/tpc.php（bin/tpc 是各平台的预编译二进制，不会随包发布）
-    $candidates = [
-        $GLOBALS['rootDir'] . '/vendor/bin/tpc',
+    $candidates = [$GLOBALS['rootDir'] . '/vendor/bin/tpc'];
+
+    $envDir = getenv('TPC_DIR');
+    if ($envDir) {
+        $candidates[] = rtrim($envDir, '/\\') . '/tpc' . (PHP_OS_FAMILY === 'Windows' ? '.exe' : '');
+    }
+
+    $candidates = array_merge($candidates, [
         $GLOBALS['rootDir'] . '/vendor/bin/tpc.php',
         $GLOBALS['rootDir'] . '/vendor/swoole/typephp/bin/tpc',
         $GLOBALS['rootDir'] . '/vendor/swoole/typephp/bin/tpc.php',
-        'D:/git/php/tpc_v0.9.4_windows_x64/tpc.exe',
-    ];
-    foreach ($candidates as $path) {
-        if (is_file($path)) return $path;
+    ]);
+
+    // PATH 与发行包惯例位置排在 composer 之后，仅在需要时兜底
+    $exe = PHP_OS_FAMILY === 'Windows' ? 'tpc.exe' : 'tpc';
+    foreach (array_merge(nativeTpcSearchDirs(), whichAll($exe)) as $path) {
+        $candidates[] = $path;
     }
-    // 尝试 PATH
-    $probe = PHP_OS_FAMILY === 'Windows' ? 'where tpc 2>nul' : 'command -v tpc 2>/dev/null';
+
+    $existing = array_values(array_filter($candidates, 'is_file'));
+    if (!$existing) {
+        return null;
+    }
+
+    // 优先选带运行时的；都没有则退回原来的「第一个存在的」
+    foreach ($existing as $path) {
+        if (tpcHasRuntime($path)) {
+            return $path;
+        }
+    }
+    return $existing[0];
+}
+
+/** 原生 tpc 发行包的候选安装目录（未设 TPC_DIR 时按惯例猜测）。 */
+function nativeTpcSearchDirs(): array
+{
+    $dirs = [];
+    $envDir = getenv('TPC_DIR');
+    if ($envDir) {
+        $dirs[] = $envDir;
+    }
+    $home = getenv('HOME') ?: getenv('USERPROFILE');
+    if ($home) {
+        foreach (glob(rtrim($home, '/\\') . '/tpc*', GLOB_ONLYDIR) ?: [] as $dir) {
+            $dirs[] = $dir;
+        }
+        $dirs[] = rtrim($home, '/\\') . '/.typephp/tpc';
+    }
+    foreach (['/opt/tpc', '/usr/local/tpc', 'C:/tpc', 'D:/tpc'] as $dir) {
+        $dirs[] = $dir;
+    }
+    $exe = PHP_OS_FAMILY === 'Windows' ? '/tpc.exe' : '/tpc';
+    return array_map(fn(string $d): string => rtrim($d, '/\\') . $exe, $dirs);
+}
+
+/**
+ * 这个 tpc 旁边有没有它需要的运行时？
+ *
+ * 判据与 `findRuntimeLibDir()` 的标记集保持一致：原生发行包的 SDK/phpx 目录、
+ * 或 php 运行时 DLL/静态库。composer 驱动（`.php`）永远返回 false ——
+ * 它的运行时在 `~/.typephp/php-builder`，可能**尚未构建**，正是本次故障的来源。
+ */
+function tpcHasRuntime(string $tpcPath): bool
+{
+    if (strtolower(pathinfo($tpcPath, PATHINFO_EXTENSION)) === 'php') {
+        return false;
+    }
+    $dir = dirname($tpcPath);
+    if (is_dir($dir . '/phpx') || is_dir($dir . '/SDK')) {
+        return true;
+    }
+    foreach (['phpx.dll', 'php8ts.dll', 'libphp.a', 'libphp.dylib', 'libphp.so'] as $marker) {
+        if (is_file($dir . '/' . $marker)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** PATH 上所有同名可执行文件（Windows 的 `where` 可返回多个）。 */
+function whichAll(string $name): array
+{
+    $probe = PHP_OS_FAMILY === 'Windows'
+        ? 'where ' . escapeshellarg($name) . ' 2>nul'
+        : 'command -v ' . escapeshellarg($name) . ' 2>/dev/null';
     $output = shell_exec($probe);
-    if ($output && trim($output)) {
-        $lines = explode("\n", trim($output));
-        return trim($lines[0]);
+    if (!$output || !trim($output)) {
+        return [];
     }
-    return null;
+    $lines = preg_split('/\r?\n/', trim($output)) ?: [];
+    return array_values(array_filter(array_map('trim', $lines), 'is_file'));
 }
 
 /** tpc 的 shell 命令词：PHP 脚本入口必须交给解释器，不能直接执行。 */
