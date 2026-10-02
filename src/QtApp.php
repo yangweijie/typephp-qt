@@ -264,6 +264,11 @@ final class QtApp
 
     public function notify(string $title, string $message): void
     {
+        // 没有系统托盘时 Qt 会把 showMessage 回退成**模态**消息框（offscreen/Linux 均如此），
+        // 无头环境下就永久阻塞，所以和对话框一样绕开。
+        if ($this->headless) {
+            return;
+        }
         \qt_window_notify($this->handle(), $title, $message);
     }
 

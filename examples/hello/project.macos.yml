@@ -1,0 +1,50 @@
+# macOS 入口：qtphp build 在 Darwin 上用它（Windows 仍用 project.yml）。
+#
+# flag 的组织方式对齐 typephp-compiler 的 examples/qt-taskboard/project.macos.yml：
+# Qt 的 -F / -I / -D 全放 cxx-flags，framework 用 -Wl,-framework 形式。
+#
+# Homebrew 的 qtbase 是 **framework 布局**：include/ 下没有 QtCore/QtGui/QtWidgets 目录，
+# 模块头在 `<prefix>/lib/Qt<Module>.framework/Headers/`。桥接源码写的是裸
+# `#include <QApplication>`，而该转发头里又是 `#include <QtWidgets/qapplication.h>`
+# ⇒ `-I`（解裸名）和 `-F`（解限定名）必须同时给，缺一必失败。
+#
+# 注意：include 的合并里 **列表是整体替换、不是追加**，所以下面 include-paths
+# 要把 project.yml 的两条仓库内路径一并写全。
+# 前缀按 Apple Silicon 的 keg-only 路径写死；Intel Mac 换成 /usr/local 同名路径。
+include:
+  - project.yml
+
+include-paths:
+  - ../../cpp-src
+  - ../../php-src
+  - /opt/homebrew/opt/qtbase/lib/QtCore.framework/Headers
+  - /opt/homebrew/opt/qtbase/lib/QtGui.framework/Headers
+  - /opt/homebrew/opt/qtbase/lib/QtWidgets.framework/Headers
+
+# 覆盖掉 MSVC 的 .lib 名词法与 /EHsc 等开关：mac 走 framework，且 cxx-std 由公共段给。
+link-libs: []
+link-paths: []
+
+cxx-flags:
+  - -F/opt/homebrew/opt/qtbase/lib
+  - -DQT_CORE_LIB
+  - -DQT_GUI_LIB
+  - -DQT_WIDGETS_LIB
+
+ld-flags:
+  - -F/opt/homebrew/opt/qtbase/lib
+  - -Wl,-framework,QtWidgets
+  - -Wl,-framework,QtGui
+  - -Wl,-framework,QtCore
+  # 私有 PHP 链的是 brew libiconv（keg-only，不软链到 /opt/homebrew/lib），
+  # 所以搜索路径和 rpath 都要显式给。
+  - -L/opt/homebrew/opt/libiconv/lib
+  - -liconv
+  - -Wl,-rpath,/opt/homebrew/opt/libiconv/lib
+  - -Wl,-rpath,/opt/homebrew/opt/qtbase/lib
+
+# 宿主的 Homebrew PHP 只有 cli SAPI（无 libphp），所以让 tpc 从 php-src 现编一个
+# 私有 embed 运行时；缓存在 $HOME/.typephp，第二次构建起就复用。
+php-builder:
+  extensions: []
+  zts: false

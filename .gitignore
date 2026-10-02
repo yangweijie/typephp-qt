@@ -9,7 +9,10 @@ examples/hello/dist/
 *.lib
 *.exp
 
-# Generated per-project files (produced by `qtphp build`)
+# Scratch —— 只排仓库根：这两个规则都不带文件名前缀路径，`examples/hello/` 下的编译入口
+# （project.yml / project.macos.yml）与 bundle 描述 Info.macos.plist 都是**必须入库的源码**，
+# `git check-ignore` 对它们返回非忽略。`qtphp build` 与 tpc 均不生成这两个文件，保留仅作
+# 本地实验产物（在仓库根手搓一份入口 yml / Qt 部署配置）的兜底。
 /project.yml
 /qt.conf
 

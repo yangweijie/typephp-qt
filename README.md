@@ -8,7 +8,7 @@
 - **状态驱动** — 事件处理器只改状态，`view()` 注册的构建函数每帧按新状态重新描述界面
 - **PHP 主循环** — Qt 事件泵由 PHP 驱动，业务逻辑全部留在 PHP 里，可单测
 - **源码内联** — 桥接 C++ 直接参与应用编译，不依赖预编译二进制，永远不会和 Qt/PHPX 版本脱节
-- **一键打包** — `qtphp package` 组装自包含 `dist/`（windeployqt + PHP/PHPX 运行时 + 平台插件）并自检
+- **一键打包** — `qtphp package` 组装自包含产物并自检：Windows 出 `dist/` 目录（windeployqt + PHP/PHPX 运行时 + 平台插件），macOS 出 `dist/<Name>.app`（macdeployqt + ad-hoc 签名，PHP 侧全静态无需搬运行时）
 - **无头测试** — 纯 PHP 桥接替身，不需要 Qt 或编译器；`--shot` 模式可出 PNG 做视觉验收
 
 ## 5 分钟上手
@@ -73,10 +73,16 @@ function main(int $argc, array $argv): void
 ### 4. 构建 / 运行 / 打包
 
 ```bash
-build.bat     # 编译 + 自动部署运行时 DLL 到 build/
-run.bat       # 运行
-package.bat   # 生成自包含 dist/
+qtphp build .       # 编译（Windows 编译后自动部署运行时 DLL 到 build/）
+qtphp run .         # 运行；其后的参数原样透传给应用，如 `qtphp run . --selftest`
+qtphp package .     # 打包自包含产物：Windows → dist/，macOS → dist/MyApp.app
 ```
+
+`qtphp new` 生成的新项目同时带 `project.yml`（Windows 段）、`project.macos.yml`（mac 入口，
+`include` 前者再替换 Qt 段）与 `Info.macos.plist`（打包 `.app` 用），Windows 便捷脚本
+`build.bat` / `run.bat` / `package.bat` 也一并给出。macOS 上首次 `qtphp build` 会让 tpc 从
+php-src 现编私有 embed 运行时并缓存在 `~/.typephp`，之后所有构建复用（需要 brew 的
+`qtbase` 与 `libiconv`）。
 
 ## 项目结构
 
@@ -93,9 +99,14 @@ typephp-qt/
 │   ├── WidgetTree.php     # 声明式控件树构建器
 │   └── FakeBridge.php     # 纯 PHP 桥接替身（测试用）
 ├── tests/                 # 单元测试
-├── examples/hello/        # 示例应用
-└── project.yml            # 仅用于单独验证桥接 C++ 能否编译
+└── examples/hello/        # 示例应用
+    ├── project.yml        # Windows 编译入口（`build.bat` 直接用）
+    └── project.macos.yml  # macOS 入口：include 上面的公共段再整体替换 Qt 段
 ```
+
+桥接 C++ 的编译验证就是 `qtphp build examples/hello` —— 两个 `.cc` 是示例 `sources` 的一部分，
+Windows 与 macOS 各自走自己的入口 yml，没有单独的仓库根编译配置。
+契约（stub ↔ C++ 实现）层面用 `qtphp lint`，它直接读 `php-src/qt.stub.php` 与 `cpp-src/*.cc`。
 
 ## 架构
 
@@ -149,11 +160,11 @@ typephp-qt/
 
 | 命令 | 说明 |
 |------|------|
-| `qtphp doctor` | 检查工具链（Qt/MSVC/tpc/PHP） |
-| `qtphp new <name>` | 创建新项目 |
-| `qtphp build <path>` | 编译 + 自动部署运行时 DLL |
-| `qtphp run <path>` | 运行（缺 DLL 时给出可操作提示） |
-| `qtphp package <path>` | 打包自包含 `dist/` 并自检 |
+| `qtphp doctor` | 检查工具链（PHP / tpc / PHP 运行时库 / Qt / C++ 编译器 / PHPUnit） |
+| `qtphp new <name>` | 创建新项目（`project.yml` + `project.macos.yml` + `Info.macos.plist` + Windows 三个 `.bat`） |
+| `qtphp build <path>` | 编译。入口 yml 按平台挑选（`project.macos.yml` → 回落 `project.yml`）；Windows 编译后自动部署运行时 DLL |
+| `qtphp run <path> [应用参数…]` | 运行产物，其后的参数原样透传（`--selftest` / `--shot out.png`）；启动前做依赖自检（Windows 查 DLL，macOS 用 `otool -L` 查 bundle 外绝对路径） |
+| `qtphp package <path>` | 打包自包含产物并自检：Windows → `dist/` 目录，macOS → `dist/<Name>.app` |
 | `qtphp test` | 运行测试 |
 | `qtphp lint` | 校验 stub ⇄ C++ 符号一致 |
 
@@ -163,12 +174,13 @@ typephp-qt/
 qtphp test
 ```
 
-89 个测试全部走纯 PHP 桥接替身，**不需要 Qt 或编译器**。
+103 个测试全部走纯 PHP 桥接替身，**不需要 Qt 或编译器**。
 
-视觉验收用无头截图：
+视觉验收用无头截图（`qtphp run` 会把其后的参数原样透传给应用）：
 
 ```bash
-hello.exe --shot out.png     # 渲染几帧后存 PNG 退出
+qtphp run examples/hello --shot out.png    # Windows / macOS 通用
+./build/hello --shot out.png               # 或直接跑产物（macOS 无 .exe）
 ```
 
 ## AOT 注意事项
@@ -192,8 +204,8 @@ $app->headless(true);   // message() 返回 default，文件对话框返回空
 配合两个内置开关做自动化验收：
 
 ```bash
-myapp.exe --shot out.png   # 渲染几帧后存 PNG 退出（视觉验收）
-myapp.exe --selftest       # 逐个触发所有事件，验证每个 handler 可调用
+qtphp run <path> --shot out.png   # 渲染几帧后存 PNG 退出（视觉验收）
+qtphp run <path> --selftest       # 逐个触发所有事件，验证每个 handler 可调用
 ```
 
 `--selftest` 能在无头环境覆盖"闭包参数个数不匹配"这类只在 AOT 下暴露的问题。

@@ -4,21 +4,27 @@ output: build/hello
 
 # 桥接 C++ 源码直接参与本应用编译（源码内联方案）。
 # 不依赖预编译的 qtphp-bridge.lib —— 那样会和 Qt/PHPX 版本强绑定。
+#
+# 本文件是「公共段 + Windows 默认段」：
+#   - sources 用相对本文件的相对路径（tpc 按 project.yml 所在目录解析，两平台一致）
+#   - Qt 位置/链接方式/编译开关是平台相关的，macOS 由 project.darwin.yml 覆盖
+#     （qtphp build 按 PHP_OS_FAMILY 自动挑入口文件；Windows 仍直接用本文件，
+#      build.bat 的 `tpc.exe project.yml` 不受影响）
 sources:
   - src/main.php
-  - D:/git/php/typephp-qt/src/QtApp.php
-  - D:/git/php/typephp-qt/src/WidgetTree.php
-  - D:/git/php/typephp-qt/php-src/qt.stub.php
-  - D:/git/php/typephp-qt/cpp-src/qt_bridge.cc
-  - D:/git/php/typephp-qt/cpp-src/qt_widgets.cc
+  - ../../src/QtApp.php
+  - ../../src/WidgetTree.php
+  - ../../php-src/qt.stub.php
+  - ../../cpp-src/qt_bridge.cc
+  - ../../cpp-src/qt_widgets.cc
 
 build-dir: build
 
 cxx-std: c++20
 
 include-paths:
-  - D:/git/php/typephp-qt/cpp-src
-  - D:/git/php/typephp-qt/php-src
+  - ../../cpp-src
+  - ../../php-src
   - D:/tools/Qt/6.9.3/msvc2022_64/include
   - D:/tools/Qt/6.9.3/msvc2022_64/include/QtCore
   - D:/tools/Qt/6.9.3/msvc2022_64/include/QtGui

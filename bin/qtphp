@@ -92,6 +92,14 @@ function cmdDoctor(): int
         $allOk = false;
     }
 
+    // AOT 链接用的 PHP 运行时库（tpc 原生发行包附带，或由 php-builder 自建）
+    $runtimeDir = findRuntimeLibDir();
+    if ($runtimeDir) {
+        success("PHP 运行时库: $runtimeDir");
+    } else {
+        warning('PHP 运行时库: 未找到（首次 build 由 tpc 的 php-builder 自动编译，耗时较长）');
+    }
+
     // Qt
     $qtDir = findQt();
     if ($qtDir) {
@@ -100,12 +108,21 @@ function cmdDoctor(): int
         warning('Qt: 未找到（仅影响真实编译/运行，不影响测试）');
     }
 
-    // MSVC
-    $vcvars = findVcvars();
-    if ($vcvars) {
-        success("MSVC: $vcvars");
+    // C++ 工具链
+    if (PHP_OS_FAMILY === 'Windows') {
+        $vcvars = findVcvars();
+        if ($vcvars) {
+            success("MSVC: $vcvars");
+        } else {
+            warning('MSVC: 未找到（仅影响真实编译）');
+        }
     } else {
-        warning('MSVC: 未找到（仅影响真实编译）');
+        $cxx = trim((string) shell_exec('command -v clang++ 2>/dev/null'));
+        if ($cxx !== '') {
+            success("C++: $cxx");
+        } else {
+            warning('C++: 未找到 clang++（macOS 需先 xcode-select --install）');
+        }
     }
 
     // PHPUnit
@@ -128,21 +145,34 @@ function cmdDoctor(): int
 
 function findTpc(): ?string
 {
+    // composer 装的包只带 bin/tpc.php（bin/tpc 是各平台的预编译二进制，不会随包发布）
     $candidates = [
         $GLOBALS['rootDir'] . '/vendor/bin/tpc',
+        $GLOBALS['rootDir'] . '/vendor/bin/tpc.php',
         $GLOBALS['rootDir'] . '/vendor/swoole/typephp/bin/tpc',
+        $GLOBALS['rootDir'] . '/vendor/swoole/typephp/bin/tpc.php',
         'D:/git/php/tpc_v0.9.4_windows_x64/tpc.exe',
     ];
     foreach ($candidates as $path) {
-        if (file_exists($path)) return $path;
+        if (is_file($path)) return $path;
     }
     // 尝试 PATH
-    $output = shell_exec('where tpc 2>nul');
+    $probe = PHP_OS_FAMILY === 'Windows' ? 'where tpc 2>nul' : 'command -v tpc 2>/dev/null';
+    $output = shell_exec($probe);
     if ($output && trim($output)) {
         $lines = explode("\n", trim($output));
         return trim($lines[0]);
     }
     return null;
+}
+
+/** tpc 的 shell 命令词：PHP 脚本入口必须交给解释器，不能直接执行。 */
+function tpcCommand(string $tpc): string
+{
+    if (strtolower(pathinfo($tpc, PATHINFO_EXTENSION)) === 'php') {
+        return escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($tpc);
+    }
+    return escapeshellarg($tpc);
 }
 
 function findQt(): ?string
@@ -151,6 +181,11 @@ function findQt(): ?string
         'D:/tools/Qt/6.9.3/msvc2022_64',
         'C:/Qt/6.9.3/msvc2022_64',
         'D:/Qt/6.9.3/msvc2022_64',
+        // Homebrew keg-only 前缀（qtbase 提供 QtCore/QtGui/QtWidgets）
+        '/opt/homebrew/opt/qtbase',
+        '/usr/local/opt/qtbase',
+        '/opt/homebrew/opt/qt',
+        '/usr/local/opt/qt',
     ];
     foreach ($candidates as $path) {
         if (is_dir($path)) return $path;
@@ -158,6 +193,19 @@ function findQt(): ?string
     $env = getenv('QT_DIR');
     if ($env && is_dir($env)) return $env;
     return null;
+}
+
+/**
+ * 选择编译入口：平台文件 `project.macos.yml` / `project.windows.yml` / `project.linux.yml` 优先，
+ * 它 `include` 公共的 project.yml 再覆盖平台段（Qt 位置、链接法、编译开关）。
+ * 后缀用上游 typephp-compiler 示例的约定，不是 PHP_OS_FAMILY 的原值（Darwin ≠ macos）。
+ * 没有平台文件时回落到 project.yml —— Windows 的行为与 build.bat 都不变。
+ */
+function resolveProjectYaml(string $path): string
+{
+    $suffix = ['Darwin' => 'macos', 'Windows' => 'windows', 'Linux' => 'linux'][PHP_OS_FAMILY] ?? 'linux';
+    $platform = rtrim($path, '/\\') . '/project.' . $suffix . '.yml';
+    return is_file($platform) ? $platform : rtrim($path, '/\\') . '/project.yml';
 }
 
 function findVcvars(): ?string
@@ -189,7 +237,6 @@ function cmdNew(string $name): int
     mkdir($targetDir . '/assets', 0755, true);
 
     $qtDir = findQt() ?? 'D:/tools/Qt/6.9.3/msvc2022_64';
-    $tpcDir = findTpcDir() ?? 'D:/git/php/tpc_v0.9.4_windows_x64';
     // 框架根目录（composer 包位置）：由 CLI 自身位置推导
     $pkgDir = $GLOBALS['rootDir'];
 
@@ -233,6 +280,97 @@ cxx-flags:
   - /EHsc
 YML;
     file_put_contents($targetDir . '/project.yml', $projectYml);
+
+    // project.macos.yml —— macOS 入口。brew 前缀按生成机实测推导：
+    // Apple Silicon 是 /opt/homebrew/opt，Intel 是 /usr/local/opt，Windows 上生成时取默认值。
+    $brewOpt = '/opt/homebrew/opt';
+    if (preg_match('#^(.*)/opt/(?:qtbase|qt)$#', str_replace('\\', '/', $qtDir), $m)) {
+        $brewOpt = $m[1] . '/opt';
+    }
+    $macQt = $brewOpt . '/qtbase';
+
+    $macYml = <<<YML
+# macOS 编译入口：`qtphp build` 在 Darwin 上用它（Windows 仍用 project.yml）。
+# 组织方式对齐 typephp-compiler 的 examples/qt-taskboard/project.macos.yml。
+#
+# Homebrew 的 qtbase 是 framework 布局：include/ 下没有 QtCore/QtGui/QtWidgets 目录，
+# 模块头在 lib/Qt<Module>.framework/Headers/。桥接源码写裸 include，而 QtWidgets 的转发头
+# 内部又是限定 include，所以 -I（解裸名）与 -F（解限定名）必须同时给，缺一必失败。
+#
+# include 合并时列表是**整体替换、不是追加**，故框架内两条 include 路径要在下面重写一遍。
+include:
+  - project.yml
+
+include-paths:
+  - {$pkgDir}/cpp-src
+  - {$pkgDir}/php-src
+  - {$macQt}/lib/QtCore.framework/Headers
+  - {$macQt}/lib/QtGui.framework/Headers
+  - {$macQt}/lib/QtWidgets.framework/Headers
+
+# 清掉 MSVC 的 .lib 名词法与链接目录：mac 走 framework，链接开关全在 ld-flags 里。
+link-libs: []
+link-paths: []
+
+cxx-flags:
+  - -F{$macQt}/lib
+  - -DQT_CORE_LIB
+  - -DQT_GUI_LIB
+  - -DQT_WIDGETS_LIB
+
+ld-flags:
+  - -F{$macQt}/lib
+  - -Wl,-framework,QtWidgets
+  - -Wl,-framework,QtGui
+  - -Wl,-framework,QtCore
+  # brew 的 libiconv 是 keg-only，不会软链进 brew 的 lib，搜索路径与 rpath 都得显式给。
+  - -L{$brewOpt}/libiconv/lib
+  - -liconv
+  - -Wl,-rpath,{$brewOpt}/libiconv/lib
+  - -Wl,-rpath,{$macQt}/lib
+
+# 宿主 PHP 通常只有 cli SAPI（无 libphp），让 tpc 从 php-src 现编私有 embed 运行时。
+# 缓存在 ~/.typephp/php-builder 下，之后所有构建复用；首次构建会慢（要编译整个 php-src）。
+php-builder:
+  extensions: []
+  zts: false
+YML;
+    file_put_contents($targetDir . '/project.macos.yml', $macYml);
+
+    // Info.macos.plist —— `qtphp package` 在 mac 上要往 dist/<Name>.app/Contents/Info.plist
+    // 放一份；CFBundleExecutable 必须等于产物文件名（= 项目名）。
+    $display = ucfirst($name);
+    $plist = <<<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>zh_CN</string>
+    <key>CFBundleExecutable</key>
+    <string>{$name}</string>
+    <key>CFBundleIdentifier</key>
+    <string>org.typephp.qt.{$name}</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>{$display}</string>
+    <key>CFBundleDisplayName</key>
+    <string>TypePHP Qt {$display}</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>
+PLIST;
+    file_put_contents($targetDir . '/Info.macos.plist', $plist);
 
     // main.php —— 状态驱动的声明式示例
     $mainPhp = <<<'PHP'
@@ -390,18 +528,36 @@ BAT;
 
 基于 TypePHP (AOT) + Qt 6 的原生桌面应用。
 
+编译入口按平台挑选：`project.yml` 是 Windows 段，`project.macos.yml` 通过 `include` 继承它
+再整体替换 Qt 相关段（brew 的 framework 布局 + 私有 embed 运行时）。`qtphp build` 会自动选对。
+
 ## 构建
+
+Windows：
 
 ```bat
 build.bat
 ```
 
-编译并自动部署 Qt / PHP 运行时 DLL 到 `build/`。
+macOS（或任意平台，走 CLI）：
+
+```bash
+qtphp build .
+```
+
+Windows 编译后会自动把 Qt / PHP 运行时 DLL 部署到 `build/`；macOS 的依赖来自 brew，
+PHP 侧是静态链入，无需部署。
 
 ## 运行
 
 ```bat
 run.bat
+```
+
+```bash
+qtphp run .                # 图形界面
+qtphp run . --selftest     # 无头自检：逐个触发所有事件
+qtphp run . --shot out.png # 渲染几帧后存 PNG 退出
 ```
 
 ## 打包
@@ -410,7 +566,12 @@ run.bat
 package.bat
 ```
 
-组装自包含的 `dist/` 目录，可直接分发给用户。
+```bash
+qtphp package .
+```
+
+Windows 组装自包含的 `dist/` 目录；macOS 产出 `dist/{$display}.app`
+（macdeployqt 搬 Qt framework 与链接库 + ad-hoc 签名 + 自检）。两者都可直接分发。
 
 ## 写代码
 
@@ -425,27 +586,63 @@ MD;
     file_put_contents($targetDir . '/README.md', $readme);
 
     success("项目已创建: $targetDir");
-    info("下一步: cd $name && build.bat");
+    info(PHP_OS_FAMILY === 'Windows'
+        ? "下一步: cd $name && build.bat"
+        : "下一步: cd $name && qtphp build . && qtphp run . --selftest");
 
     return 0;
 }
 
-/** 定位 tpc 安装目录（含 phpx/ 与运行时 DLL）。 */
-function findTpcDir(): ?string
+/**
+ * 定位「PHP/PHPX 运行时库目录」—— 跟「tpc 可执行文件在哪」不是同一回事。
+ *
+ * composer 只发布纯 PHP 驱动（vendor/bin/tpc.php），它旁边一个运行时库都没有，
+ * 拿它的 dirname 去找 phpx.dll 必然空手而归。库的真正来源只有两个：解发型发行包
+ * （native tpc.exe 同目录），以及 tpc 用 php-builder 自建的私有运行时
+ * ~/.typephp/php-builder/php-<版本>-<指纹>/install/lib。
+ */
+function findRuntimeLibDir(): ?string
 {
+    $markers = ['phpx.dll', 'php8ts.dll', 'libphp.a', 'libphp.dylib'];
+
+    $candidates = [];
     $tpc = findTpc();
-    return $tpc ? dirname($tpc) : null;
+    // 只有 native 发行包才把运行时放在可执行文件旁边
+    if ($tpc && strtolower(pathinfo($tpc, PATHINFO_EXTENSION)) !== 'php') {
+        $candidates[] = dirname($tpc);
+    }
+    $env = getenv('TPC_RUNTIME_DIR');
+    if ($env && is_dir($env)) {
+        $candidates[] = $env;
+    }
+
+    // 私有运行时可能有多份（换过 PHP 版本就换一个指纹目录），取最近构建的
+    $home = getenv('HOME') ?: getenv('USERPROFILE');
+    if ($home) {
+        $built = glob(rtrim($home, '/\\') . '/.typephp/php-builder/php-*/install/lib') ?: [];
+        usort($built, fn(string $a, string $b): int => (filemtime($b) ?: 0) <=> (filemtime($a) ?: 0));
+        $candidates = array_merge($candidates, $built);
+    }
+
+    foreach ($candidates as $dir) {
+        foreach ($markers as $marker) {
+            if (is_file($dir . '/' . $marker)) {
+                return $dir;
+            }
+        }
+    }
+    return null;
 }
 
 function cmdBuild(string $path): int
 {
-    $projectYml = $path . '/project.yml';
+    $projectYml = resolveProjectYaml($path);
     if (!file_exists($projectYml)) {
-        error("未找到 project.yml: $projectYml");
+        error("未找到 project.yml: " . rtrim($path, '/\\') . '/project.yml');
         return 1;
     }
 
-    info("编译项目: $path");
+    info('编译项目: ' . $path . '（入口 ' . basename($projectYml) . '）');
 
     $tpc = findTpc();
     if (!$tpc) {
@@ -458,7 +655,19 @@ function cmdBuild(string $path): int
     // 避免依赖用户事先开好 "Developer Command Prompt"。
     $vcvars = findVcvars();
     $projectAbs = realpath($projectYml) ?: $projectYml;
-    $tpcCmd = '"' . $tpc . '" "' . $projectAbs . '" -O2';
+    $tpcCmd = tpcCommand($tpc) . ' ' . escapeshellarg($projectAbs) . ' -O2';
+
+    // Homebrew 的 include/lib 得靠环境变量递给 clang：phpx 的 sapi-static/CMakeLists.txt
+    // 没有根 CMakeLists 那段 brew 前缀探测，而 tpc 调 cmake 的参数是写死的、注入不了 flag。
+    if (PHP_OS_FAMILY !== 'Windows') {
+        $brewPrefix = trim((string) shell_exec('brew --prefix 2>/dev/null'));
+        if ($brewPrefix !== '' && is_dir($brewPrefix)) {
+            foreach (['CPATH' => '/include', 'LIBRARY_PATH' => '/lib'] as $var => $suffix) {
+                $current = getenv($var);
+                putenv($var . '=' . $brewPrefix . $suffix . ($current ? ':' . $current : ''));
+            }
+        }
+    }
 
     if ($vcvars && !msvcEnvironmentReady()) {
         $bat = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'qtphp-build-' . getmypid() . '.bat';
@@ -480,8 +689,10 @@ function cmdBuild(string $path): int
         return $exitCode;
     }
 
-    // 编译成功后自动部署运行时 DLL，否则双击 exe 会报"找不到 DLL"
-    deployRuntimeDlls($path);
+    if (PHP_OS_FAMILY === 'Windows') {
+        // 编译成功后自动部署运行时 DLL，否则双击 exe 会报"找不到 DLL"
+        deployRuntimeDlls($path);
+    }
 
     return 0;
 }
@@ -512,7 +723,7 @@ function deployRuntimeDlls(string $projectPath): void
         return;
     }
 
-    $tpcDir = findTpcDir();
+    $runtimeDir = findRuntimeLibDir();
     $qtDir = findQt();
 
     $copied = 0;
@@ -526,11 +737,16 @@ function deployRuntimeDlls(string $projectPath): void
         'gmp-10.dll',
         'mpfr-6.dll',
     ];
-    foreach ($runtimeDlls as $dll) {
-        $src = $tpcDir . '/' . $dll;
-        if (file_exists($src)) {
-            copy($src, $buildDir . '/' . $dll);
-            $copied++;
+    if ($runtimeDir === null) {
+        warning('未找到 PHP 运行时库目录，跳过 phpx/php8ts 等 DLL 的部署');
+        info('请安装 tpc 原生发行包，或设置 TPC_RUNTIME_DIR 指向含 phpx.dll 的目录');
+    } else {
+        foreach ($runtimeDlls as $dll) {
+            $src = $runtimeDir . '/' . $dll;
+            if (file_exists($src)) {
+                copy($src, $buildDir . '/' . $dll);
+                $copied++;
+            }
         }
     }
 
@@ -612,26 +828,84 @@ function findVcRedistDir(): ?string
     return null;
 }
 
-function cmdRun(string $path): int
+/**
+ * 规范化项目目录。
+ *
+ * `qtphp run .` / `qtphp package .` 是 README 和生成的 package.bat 里的写法，而 PHP 的
+ * `basename('.')` 返回 `.`，产物会被算成 `./build/.` —— 那是个目录，`file_exists()` 还为真，
+ * 于是错误被推迟到更看不懂的地方。路径不存在时原样返回，让下游报「未找到」。
+ */
+function projectDir(string $path): string
 {
-    $name = basename(rtrim($path, '/\\'));
-    $exe = rtrim($path, '/\\') . '/build/' . $name . '.exe';
+    $dir = rtrim($path, '/\\');
+    $real = realpath($dir);
+    return $real !== false ? $real : $dir;
+}
+
+function cmdRun(string $path, array $args = []): int
+{
+    $dir = projectDir($path);
+    $name = basename($dir);
+    $exe = $dir . '/build/' . $name . (PHP_OS_FAMILY === 'Windows' ? '.exe' : '');
     if (!file_exists($exe)) {
         error("未找到可执行文件: $exe");
         info("请先运行: qtphp build $path");
         return 1;
     }
 
-    // 缺 DLL 时给出可操作的提示，而不是让 Windows 弹一个看不懂的错误框
-    $missing = checkRuntimeDlls(dirname($exe));
+    // 缺依赖时给出可操作的提示，而不是让系统弹一个看不懂的错误框
+    $missing = PHP_OS_FAMILY === 'Windows'
+        ? checkRuntimeDlls(dirname($exe))
+        : checkSharedLibraryDeps($exe);
     if ($missing) {
-        warning('以下 DLL 缺失，exe 可能无法启动：' . implode(', ', $missing));
-        info("运行 'qtphp build $path' 可自动部署；或执行 'qtphp package $path' 生成自包含目录。");
+        warning('以下运行时依赖缺失，可能无法启动：' . implode(', ', $missing));
+        if (PHP_OS_FAMILY === 'Windows') {
+            info("运行 'qtphp build $path' 可自动部署；或执行 'qtphp package $path' 生成自包含目录。");
+        } else {
+            info('macOS 的依赖来自 brew（qtbase/libiconv/gmp/mpfr）与 ~/.typephp 私有运行时，重新 build 会重建链接。');
+        }
     }
 
-    info("运行: $exe");
-    passthru('"' . $exe . '" 2>&1', $exitCode);
+    // 其余参数原样透传给应用（--selftest / --shot 这些无头验收开关靠这一步才可用）
+    $cmd = escapeshellarg($exe);
+    foreach ($args as $arg) {
+        $cmd .= ' ' . escapeshellarg($arg);
+    }
+    info('运行: ' . $exe . ($args ? ' ' . implode(' ', $args) : ''));
+    passthru($cmd . ' 2>&1', $exitCode);
     return $exitCode;
+}
+
+/**
+ * macOS/Linux：问动态链接器要依赖清单，逐条确认文件是否存在。
+ *
+ * 比"照着名单复制 DLL"可靠 —— brew 前缀、keg-only 路径、私有运行时的绝对路径
+ * 都已经写在二进制的加载命令里了。@rpath 形式交给 dyld 解析，静态检查无意义。
+ *
+ * 系统库必须跳过：macOS 11 起 /usr/lib 下的 dylib 只存在于 dyld shared cache，
+ * 磁盘上没有文件但加载正常，按 file_exists 判会全部误报。
+ */
+function checkSharedLibraryDeps(string $exe): array
+{
+    $output = shell_exec('otool -L ' . escapeshellarg($exe) . ' 2>/dev/null');
+    if (!$output) {
+        return [];
+    }
+
+    $missing = [];
+    foreach (explode("\n", $output) as $line) {
+        if (!preg_match('/^\s*(\/\S+\.dylib)\s+\(compatibility/', $line, $m)) {
+            continue;
+        }
+        $path = $m[1];
+        if (str_starts_with($path, '/usr/lib/') || str_starts_with($path, '/System/Library/')) {
+            continue;
+        }
+        if (!file_exists($path)) {
+            $missing[] = $path;
+        }
+    }
+    return $missing;
 }
 
 /** 检查 exe 同目录下缺失的运行时 DLL。 */
@@ -657,9 +931,9 @@ function checkRuntimeDlls(string $dir): array
 
 function cmdPackage(string $path): int
 {
-    $path = rtrim($path, '/\\');
+    $path = projectDir($path);
     $name = basename($path);
-    $exe = $path . '/build/' . $name . '.exe';
+    $exe = $path . '/build/' . $name . (PHP_OS_FAMILY === 'Windows' ? '.exe' : '');
     if (!file_exists($exe)) {
         error("未找到可执行文件: $exe");
         info("请先运行: qtphp build $path");
@@ -669,6 +943,10 @@ function cmdPackage(string $path): int
     $distDir = $path . '/dist';
     if (!is_dir($distDir)) {
         mkdir($distDir, 0755, true);
+    }
+
+    if (PHP_OS_FAMILY !== 'Windows') {
+        return packageAppBundle($path, $name, $exe, $distDir);
     }
 
     info("打包到: $distDir");
@@ -710,6 +988,207 @@ function cmdPackage(string $path): int
 
     // 自检：验证关键文件齐全
     return verifyPackage($distDir, $name);
+}
+
+/**
+ * macOS 打包：产出 dist/<Name>.app，把 Qt framework、cocoa 插件和 brew 链接库都塞进 bundle。
+ *
+ * 流程对齐 typephp-compiler 的 examples/qt-taskboard/package-macos-app.sh：
+ * 搭 bundle 骨架 → macdeployqt → 补搬它不管的非 Qt 依赖 → ad-hoc 签名 → 校验。
+ * 我们的 PHP/PHPX 是静态链进二进制的（--enable-embed=static），所以没有 libphp.dylib 要搬。
+ */
+function packageAppBundle(string $path, string $name, string $exe, string $distDir): int
+{
+    $qtDir = findQt();
+    if (!$qtDir) {
+        error('未找到 Qt，无法部署 Qt 依赖');
+        return 1;
+    }
+    $deploy = $qtDir . '/bin/macdeployqt';
+    if (!is_executable($deploy)) {
+        error("未找到 macdeployqt: $deploy");
+        return 1;
+    }
+    $plist = $path . '/Info.macos.plist';
+    if (!file_exists($plist)) {
+        error("未找到 bundle 描述文件: $plist");
+        return 1;
+    }
+
+    $bundle = $distDir . '/' . ucfirst($name) . '.app';
+    $contents = $bundle . '/Contents';
+    $frameworks = $contents . '/Frameworks';
+    $appBinary = $contents . '/MacOS/' . $name;
+
+    // 旧 bundle 的 install name 已经被改写过，留着会污染这一轮判断，整棵重建
+    if (is_dir($bundle)) {
+        deleteTree($bundle);
+    }
+    mkdir($contents . '/MacOS', 0755, true);
+    mkdir($frameworks, 0755, true);
+
+    info("打包到: $bundle");
+    copy($plist, $contents . '/Info.plist');
+    copy($exe, $appBinary);
+    chmod($appBinary, 0755);
+
+    if (is_dir($path . '/assets')) {
+        copyDir($path . '/assets', $contents . '/Resources/assets');
+    }
+
+    info('运行 macdeployqt（部署 Qt framework、cocoa 插件与链接库）...');
+    passthru(escapeshellarg($deploy) . ' ' . escapeshellarg($bundle) . ' -always-overwrite -no-codesign 2>&1', $qtExit);
+    if ($qtExit !== 0) {
+        warning("macdeployqt 返回 $qtExit，继续检查产物");
+    }
+
+    $vendored = vendorBundleDeps($appBinary, $frameworks);
+    if ($vendored) {
+        info('已搬进 bundle：' . implode(', ', $vendored));
+    }
+
+    // 本地自测 ad-hoc 签名够用；分发给别人的机器需要正经签名 + 公证
+    info('ad-hoc 签名...');
+    passthru('codesign --force --deep --sign - ' . escapeshellarg($bundle) . ' 2>&1', $signExit);
+    if ($signExit !== 0) {
+        warning("codesign 返回 $signExit");
+    }
+
+    return verifyAppBundle($bundle, $appBinary);
+}
+
+/** 读 Mach-O 的依赖清单（otool -L 的路径列）；@rpath 等形式原样返回。 */
+function machODeps(string $binary): array
+{
+    $output = shell_exec('otool -L ' . escapeshellarg($binary) . ' 2>/dev/null');
+    if (!$output) {
+        return [];
+    }
+
+    $deps = [];
+    foreach (explode("\n", $output) as $line) {
+        if (preg_match('/^\s*(\S+)\s+\(compatibility/', $line, $m)) {
+            $deps[] = $m[1];
+        }
+    }
+    return $deps;
+}
+
+/**
+ * 系统库要跳过：macOS 11 起 /usr/lib 下的 dylib 只存在于 dyld shared cache，
+ * 磁盘上没有文件却加载正常，按 file_exists 判会全部误报。
+ */
+function isSystemDepPath(string $path): bool
+{
+    return str_starts_with($path, '/usr/lib/') || str_starts_with($path, '/System/Library/');
+}
+
+/**
+ * 把仍指向 brew / 私有运行时的绝对路径依赖复制进 Frameworks 并改写引用。
+ *
+ * macdeployqt 只管 Qt 自己的东西，libiconv/gmp/mpfr/onig 这些得自己搬。
+ * 队列里既放主二进制也放每个刚搬进来的 dylib —— 它们自身的依赖同样要改。
+ */
+function vendorBundleDeps(string $appBinary, string $frameworks): array
+{
+    $vendored = [];
+    $queue = [$appBinary];
+    $done = [];
+
+    while ($queue) {
+        $target = array_shift($queue);
+        if (isset($done[$target])) {
+            continue;
+        }
+        $done[$target] = true;
+
+        foreach (machODeps($target) as $dep) {
+            if (!str_starts_with($dep, '/') || isSystemDepPath($dep) || !file_exists($dep)) {
+                continue;
+            }
+            $base = basename($dep);
+            $dst = $frameworks . '/' . $base;
+            $newName = '@executable_path/../Frameworks/' . $base;
+
+            if (!file_exists($dst)) {
+                copy($dep, $dst);
+                chmod($dst, 0644);
+                exec('install_name_tool -id ' . escapeshellarg($newName) . ' ' . escapeshellarg($dst) . ' 2>&1', $out, $rc);
+                if ($rc !== 0) {
+                    warning("改写 $base 的 install name 失败：" . implode(' ', $out));
+                    continue;
+                }
+                $queue[] = $dst;
+                $vendored[] = $base;
+            }
+
+            exec('install_name_tool -change ' . escapeshellarg($dep) . ' ' . escapeshellarg($newName)
+                . ' ' . escapeshellarg($target) . ' 2>&1', $out2, $rc2);
+            if ($rc2 !== 0) {
+                warning("改写 $target 对 $base 的引用失败：" . implode(' ', $out2));
+            }
+        }
+    }
+
+    return array_values(array_unique($vendored));
+}
+
+/** 自检 .app：依赖是否全部落进 bundle、plist 是否合法、签名是否可验。 */
+function verifyAppBundle(string $bundle, string $appBinary): int
+{
+    echo PHP_EOL;
+    info('自检打包产物...');
+    $ok = true;
+
+    $external = [];
+    foreach (machODeps($appBinary) as $dep) {
+        if (str_starts_with($dep, '/') && !isSystemDepPath($dep)) {
+            $external[] = $dep;
+        }
+    }
+    if ($external) {
+        error('仍指向 bundle 之外：');
+        foreach ($external as $dep) {
+            echo "  - $dep" . PHP_EOL;
+        }
+        $ok = false;
+    }
+
+    exec('plutil -lint ' . escapeshellarg($bundle . '/Contents/Info.plist') . ' 2>&1', $lint, $lintRc);
+    if ($lintRc !== 0) {
+        error('Info.plist 不合法：' . implode(' ', $lint));
+        $ok = false;
+    }
+
+    exec('codesign --verify --deep --strict ' . escapeshellarg($bundle) . ' 2>&1', $verify, $verifyRc);
+    if ($verifyRc !== 0) {
+        warning('codesign 校验未通过：' . implode(' ', $verify));
+    }
+
+    if (!$ok) {
+        return 1;
+    }
+
+    success(sprintf('打包完成: %s (%.1f MB)', $bundle, dirSize($bundle) / 1048576));
+    info('启动: open ' . escapeshellarg($bundle));
+    return 0;
+}
+
+/** 递归删目录树（只用于重建自己生成的 bundle）。 */
+function deleteTree(string $dir): void
+{
+    foreach (scandir($dir) ?: [] as $item) {
+        if ($item === '.' || $item === '..') {
+            continue;
+        }
+        $path = $dir . '/' . $item;
+        if (is_dir($path) && !is_link($path)) {
+            deleteTree($path);
+        } else {
+            @unlink($path);
+        }
+    }
+    @rmdir($dir);
 }
 
 /** 自检打包产物：关键 DLL、平台插件、可执行文件是否齐全。 */
@@ -875,7 +1354,7 @@ function main(array $argv): int
         echo '  qtphp doctor            检查工具链' . PHP_EOL;
         echo '  qtphp new <name>        创建新项目' . PHP_EOL;
         echo '  qtphp build <path>      编译项目' . PHP_EOL;
-        echo '  qtphp run <path>        运行项目' . PHP_EOL;
+        echo '  qtphp run <path> [app参数…]  运行项目，其后的参数原样透传给应用' . PHP_EOL;
         echo '  qtphp package <path>    打包项目' . PHP_EOL;
         echo '  qtphp test              运行测试' . PHP_EOL;
         echo '  qtphp lint              校验桥接契约' . PHP_EOL;
@@ -904,7 +1383,8 @@ function main(array $argv): int
                 error('请指定项目路径');
                 return 1;
             }
-            return cmdRun($argv[2]);
+            // 第 3 个参数起全部透传给应用（--selftest / --shot 等）
+            return cmdRun($argv[2], array_slice($argv, 3));
         case 'package':
             if (!isset($argv[2])) {
                 error('请指定项目路径');
