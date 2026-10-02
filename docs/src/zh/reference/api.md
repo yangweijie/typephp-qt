@@ -50,7 +50,7 @@
 | `setMenu(array $items): void` | 菜单栏 |
 | `setStatus(array $segments): void` | 状态栏分段文本 |
 | `resize(int $width, int $height): void` | 窗口尺寸 |
-| `setTray(array $spec): void` | 系统托盘 |
+| `setTray(array $spec): void` | 系统托盘。`$spec` 支持 `icon` `tooltip` `visible` `menu` |
 | `setTimer(string $id, int $intervalMs): void` | 定时器；间隔 `<= 0` 即停 |
 
 ### 对话框
@@ -139,7 +139,7 @@ WidgetTree::tree(array $nodes, array $props = [])
 | `tab` | tabs, stack | 索引 | `index` |
 | `menu` | 菜单项 | — | `checked` |
 | `timer` | 定时器 | — | — |
-| `tray` | 系统托盘 | — | — |
+| `tray` | 系统托盘 | `left` / `right` / `double` / `middle` | — |
 
 事件对象：
 

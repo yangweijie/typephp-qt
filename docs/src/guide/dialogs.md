@@ -134,11 +134,17 @@ The menu is **not in the widget tree**, so call `setMenu()` again whenever the s
 $app->setTray([
     'tooltip' => 'MyApp · click me',
     'visible' => true,
-    // 'icon' => 'assets/icon.png',   // optional
+    'icon' => 'assets/icon.png',      // optional but recommended (see the warning below)
+    'menu' => [                        // optional: right-click menu
+        ['type' => 'item', 'id' => 'tray.show', 'text' => 'Show window'],
+        ['type' => 'item', 'id' => 'tray.quit', 'text' => 'Quit'],
+    ],
 ]);
 ```
 
-- A left click emits `['type' => 'tray']` with **no id**, so it can only be caught with `onAny('tray', …)`.
+- An activation emits `['type' => 'tray']` with **no id**, so it can only be caught with `onAny('tray', …)`.
+  `value` carries the gesture: `left` / `right` / `double` / `middle`. See [Events](/guide/events.md#tray).
+- `menu` is optional. With it, right-click pops the menu and its items fire `menu` events (id-prefixed by convention, e.g. `tray.`).
 - `icon` is optional — the bridge falls back to the window icon, and to a standard system icon when the window has none either.
   **On macOS / Linux a tray item with no icon does not show up at all**, so that fallback is a usability requirement, not decoration.
 - A relative `icon` path resolves against the **executable's directory** (then the working directory), so `'assets/icon.png'` works from both `build/` and `dist/`.

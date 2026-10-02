@@ -54,6 +54,12 @@ function main(int $argc, array $argv): void
         'icon' => 'assets/icon.png',
         'tooltip' => 'Hello TypePHP-Qt · 左键点一下',
         'visible' => true,
+        'menu' => [
+            ['type' => 'item', 'id' => 'tray.show', 'text' => '显示主窗口'],
+            ['type' => 'item', 'id' => 'tray.hello', 'text' => '打个招呼'],
+            ['type' => 'separator'],
+            ['type' => 'item', 'id' => 'tray.quit', 'text' => '退出'],
+        ],
     ]);
 
     // ── 视图：每帧按 $state 重新描述界面 ──
@@ -180,10 +186,23 @@ function main(int $argc, array $argv): void
     // ── 托盘 / 定时器 / 副窗口 ──
 
     // 托盘事件不带 id（点的是托盘项本身），所以只能挂 onAny。
-    $app->onAny('tray', function () use ($app, &$state) {
+    // 托盘激活：$event['value'] 是激活方式（left / right / double / middle）。
+    // 注意绑了 'menu' 之后，右击由 Qt 弹菜单，不再发 right 事件。
+    $app->onAny('tray', function (array $event) use ($app, &$state) {
         $state['tray'] = (int) $state['tray'] + 1;
-        $app->setStatus(['托盘点击 ' . $state['tray'] . ' 次']);
-        log_append($state['log'], 'tray click');
+        $kind = (string) ($event['value'] ?? '');
+        $app->setStatus(['托盘 ' . $kind . ' × ' . $state['tray']]);
+        log_append($state['log'], 'tray ' . $kind);
+    });
+
+    // 托盘右键菜单项：和菜单栏一样走 menu 事件，id 用 'tray.' 前缀区分。
+    $app->on('tray.hello', 'menu', function () use ($app, &$state) {
+        $state['greeting'] = 'Hello, World!';
+        $app->setStatus(['托盘菜单：已重置问候语']);
+    });
+
+    $app->on('tray.quit', 'menu', function () use ($app) {
+        $app->close();
     });
 
     $app->on('clock', 'timer', function () use ($app, &$state) {
@@ -504,7 +523,10 @@ function self_test(QtApp $app): void
         ['menu', 'menu.about'],
         ['click', 'open_log_btn'],
         ['timer', 'clock'],
-        ['tray', ''],
+        ['tray', '', 'left'],
+        ['tray', '', 'double'],
+        ['menu', 'tray.hello'],
+        ['menu', 'tray.show'],
         ['click', 'close_log_btn'],
     ];
 

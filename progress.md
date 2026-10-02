@@ -1,5 +1,63 @@
 # Progress Log — typephp-qt
 
+## Session 20 — 2026-10-02（「Qt 不支持托盘右击吗？」）
+
+### 用户的问题很准
+> 「文档上只写了托盘左击事件，qt 不支持右击事件吗？」
+
+**Qt 支持，是我们只转发了 5 种激活方式里的 1 种。** 实测拿到硬数据：
+
+```
+REASON=3  ← 左击 Trigger
+REASON=1  ← 右击 Context      ← Qt 确实上报了，但桥接没往外传
+REASON=2  ← 双击 DoubleClick
+（中键 MiddleClick=4 未测到：这台机器的鼠标没有中键）
+```
+
+枚举：`Unknown=0, Context=1, DoubleClick=2, Trigger=3, MiddleClick=4`。
+
+### 改动
+
+**桥接（`qt_bridge.cc`）**
+- `activated` 回调从「只认 Trigger」改为**全部转发**，手势放在 `$event['value']`：
+  `left` / `right` / `double` / `middle`（沿用 link 用 value 报 href 的既有约定）。
+- 新增**托盘右键菜单**：`setTray([... 'menu' => [...]])`。
+  复用了菜单栏那套 `parseMenuItems` / `buildMenu`，菜单项点击走同样的 `menu` 事件。
+- 语义细节：**绑了菜单后右击由 Qt 接管，不再发 `right` 事件**（实测确认：绑菜单后
+  日志里只剩 left）。这是 Qt 自身行为，已在文档写明。
+- `trayMenu_` 成员 + `cleanup()` 里释放（先删托盘再删菜单，避免悬垂的 contextMenu 指针）。
+
+**测试 / 示例 / 脚手架**
+- `tests/QtAppTest.php` +2 例：激活手势透传、托盘菜单项按 menu 事件分发。**114 tests**。
+- 示例 `--selftest` 从 14 例增到 **17 例**（补 left / double / tray.hello / tray.show）。
+- 示例与 `qtphp new` 模板都加了托盘菜单演示（`tray.hello` / `tray.quit`）。
+
+**文档（中英双语）**
+- `guide/events.md`：托盘小节从「左键点击」改写为四种手势的表格 + 绑菜单的语义说明。
+- `guide/dialogs.md`：`setTray` 示例补 `icon` 与 `menu`；说明行同步更新。
+- `reference/api.md`：`tray` 事件行的 `value` 列填上四种手势；`setTray` 注明支持的字段。
+
+### 验证
+```
+真实鼠标点击（hello）→ left / right / double 三种手势都到达 PHP（日志确认）
+绑菜单后            → 右击不再发 right 事件（Qt 接管），符合设计
+右键菜单渲染         → 截图确认「显示主窗口 / --- / 退出」正常弹出
+示例 --selftest     → 17/17，exit 0
+qtphp new→build→selftest → 全通过
+qtphp test / lint   → 114 tests · 契约一致
+docs 构建           → 59 页，链接与锚点全过（含新增的 #tray / #托盘）
+```
+
+### 教训
+用户「文档只写了 X」的提问，往往不是文档疏漏，而是**功能真的只有 X**。
+这次先去读 Qt 的枚举定义、再用真实点击验证，才发现桥接把 4/5 的激活方式丢掉了 ——
+**文档写得没错，是能力不完整**。这类问题值得当成缺陷修，而不是改文档描述。
+
+（中途踩了个小坑：用 python 字符串写 C++ 的 `"\n"` 时被解释成真换行，编译报
+「常量中有换行符」；改用 Edit 工具直接改就好。）
+
+---
+
 ## Session 19 — 2026-10-02（「hello 示例里没看到托盘」）
 
 ### 先查事实，再下结论

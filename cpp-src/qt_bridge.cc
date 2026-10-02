@@ -217,6 +217,12 @@ void QtWindowBox::cleanup() {
         delete tray_;
         tray_ = nullptr;
     }
+    if (trayMenu_) {
+        // 先摘掉引用再删：托盘已删，但菜单还挂在 window_ 下，
+        // 不摘干净会留下一个指向已销毁对象的 contextMenu 指针。
+        delete trayMenu_;
+        trayMenu_ = nullptr;
+    }
     qDeleteAll(timers_);
     timers_.clear();
     qDeleteAll(statusWidgets_);
@@ -663,7 +669,26 @@ void QtWindowBox::setTray(const Array &spec) {
     if (!tray_) {
         tray_ = new QSystemTrayIcon(window_);
         QObject::connect(tray_, &QSystemTrayIcon::activated, window_, [this](QSystemTrayIcon::ActivationReason reason) {
-            if (reason == QSystemTrayIcon::Trigger) enqueue(QStringLiteral("tray"));
+            // Qt 会区分 5 种激活方式，全部转给 PHP —— 只转发左击会让
+            // 「右击/双击没反应」看起来像框架不支持，其实只是没往外传。
+            switch (reason) {
+                case QSystemTrayIcon::Trigger:
+                    enqueue(QStringLiteral("tray"), QString(), QStringLiteral("left"));
+                    break;
+                case QSystemTrayIcon::Context:
+                    // 右击：绑了托盘菜单就由 Qt 弹菜单（并抑制这个事件），
+                    // 没绑菜单时才把它当普通事件交给 PHP。
+                    if (!trayMenu_) enqueue(QStringLiteral("tray"), QString(), QStringLiteral("right"));
+                    break;
+                case QSystemTrayIcon::DoubleClick:
+                    enqueue(QStringLiteral("tray"), QString(), QStringLiteral("double"));
+                    break;
+                case QSystemTrayIcon::MiddleClick:
+                    enqueue(QStringLiteral("tray"), QString(), QStringLiteral("middle"));
+                    break;
+                default:
+                    break;
+            }
         });
     }
 
@@ -684,6 +709,16 @@ void QtWindowBox::setTray(const Array &spec) {
         icon = windowIcon.isNull() ? window_->style()->standardIcon(QStyle::SP_ComputerIcon) : windowIcon;
     }
     if (!icon.isNull()) tray_->setIcon(icon);
+
+    // 托盘右键菜单：给了 menu 就交给 Qt 托管（右击时 Qt 自己弹，
+    // 于是上面 Context 分支不再往 PHP 发事件）。菜单项点击照旧走 "menu" 事件。
+    const Variant menuSpec = spec.get("menu");
+    if (qtHasProp(spec, "menu")) {
+        if (!trayMenu_) trayMenu_ = new QMenu(window_);
+        trayMenu_->clear();
+        buildMenu(trayMenu_, parseMenuItems(menuSpec), this);
+        tray_->setContextMenu(trayMenu_);
+    }
 
     if (!tooltip.isEmpty()) tray_->setToolTip(tooltip);
     if (visible) tray_->show();

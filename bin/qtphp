@@ -638,14 +638,32 @@ function main(int $argc, array $argv): void
     // macOS/Linux 上根本不显示，所以 assets/ 里放了一个默认图标。
     $app->setTray([
         'icon' => 'assets/icon.png',
-        'tooltip' => 'My App · 左键点一下',
+        'tooltip' => 'My App · 左键点一下，右键出菜单',
         'visible' => true,
+        // 右键菜单（可省略）。绑了之后右击由 Qt 弹菜单，不再发 right 事件。
+        'menu' => [
+            ['type' => 'item', 'id' => 'tray.hello', 'text' => '打个招呼'],
+            ['type' => 'separator'],
+            ['type' => 'item', 'id' => 'tray.quit', 'text' => '退出'],
+        ],
     ]);
 
-    // 托盘点击不带 id（点的是托盘项本身），只能用 onAny 接。
-    $app->onAny('tray', function () use ($app, &$state) {
+    // 托盘激活不带 id（点的是托盘项本身），只能用 onAny 接。
+    // $event['value'] 是手势：left / right / double / middle。
+    $app->onAny('tray', function (array $event) use ($app, &$state) {
         $state['tray'] = (int) $state['tray'] + 1;
-        $app->setStatus(['托盘点击 ' . $state['tray'] . ' 次']);
+        $kind = (string) ($event['value'] ?? '');
+        $app->setStatus(['托盘 ' . $kind . ' × ' . $state['tray']]);
+    });
+
+    // 托盘菜单项和菜单栏一样走 menu 事件，按惯例用 'tray.' 前缀区分。
+    $app->on('tray.hello', 'menu', function () use ($app, &$state) {
+        $state['greeting'] = 'Hello, World!';
+        $app->setStatus(['托盘菜单：已重置问候语']);
+    });
+
+    $app->on('tray.quit', 'menu', function () use ($app) {
+        $app->close();
     });
 
     // 视图函数每帧按 $state 重新描述界面，控件状态（光标/选中）由 diff 保留
@@ -695,6 +713,9 @@ function main(int $argc, array $argv): void
         $app->run(1);
         $app->dispatch(['type' => 'click', 'id' => 'greet_btn']);
         $app->dispatch(['type' => 'submit', 'id' => 'name_input', 'value' => 'Ada']);
+        $app->dispatch(['type' => 'tray', 'value' => 'left']);
+        $app->dispatch(['type' => 'tray', 'value' => 'double']);
+        $app->dispatch(['type' => 'menu', 'id' => 'tray.hello']);
 
         if ($app->lastError() !== '') {
             echo "selftest failed: ", $app->lastError(), "\n";

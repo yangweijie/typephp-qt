@@ -73,6 +73,7 @@
 | 17 | 搜索插件 + 中英双语 | ✅ done：接入官方 `plugin-search`（索引内联，按语言配占位）；站点改为**英文默认（根）+ 中文 /zh/**，各 29 页共 59 页。中文页 52 处站内链接改写为 `/zh/` 前缀。**顺带查实**：theme 内置的 links-check 只验目标文件、**不校验锚点**（注入坏锚点仍构建成功），故保留自建 `check-anchors.py`，`check-links.py` 改定位为产物级复核 —— 形成源码/产物/锚点三层防护。中英文件名一一对应，语言切换与双语言搜索均实测可用 |
 | 18 | 修 docs CI（node 版本 + lock 不同步） | ✅ done：CI 日志里是两个独立问题 —— ① workflow 用 node 20，而 vuepress rc.31 要求 `>=22.18.0`（改 22）；② `sass` 是 theme 的**可选 peer**、未显式声明，npm 10 与 11 落位不同导致 CI 报 `Missing: sass@1.105.1 from lock file`（显式声明 + 用 npm 10 重生成 lock）。另加 `engines` 护栏把 node 要求变显式契约。**npm 10 与 npm 11 下 `npm ci` 均 rc=0** |
 | 19 | 「hello 看不到托盘」排查与修复 | ✅ done：插桩 + 真实鼠标点击证明**托盘机制正常**（3 次点击 → 3 次 Trigger → UI 计数 3）；用户看不到的真因是 **Windows 默认把新图标收进溢出区**（注册表 `IsPromoted` 空）。排查中揪出并修掉 4 个静默缺陷：① 图标路径按 cwd 而非 exe 目录解析（文档承诺 exe 目录）→ 加 `qtResolvePath()`；② 显式路径加载失败静默变空图标致托盘不显示 → 逐级兜底 + 警告；③ `build` 不拷 `assets/`（且 macOS/Linux 分支连部署都没有）→ 加 `deployAssets()`；④ 示例与脚手架都无图标资源 → 各补一个。文档中英双语补「看不到图标」的排查小节 |
+| 20 | 托盘只转发左击 → 补齐四种手势 + 右键菜单 | ✅ done：Qt 的 `ActivationReason` 有 5 种，桥接原先只转 `Trigger`。实测确认 Qt 会上报 `Context`(右击)/`DoubleClick`，遂全部转发，手势放 `$event['value']`（left/right/double/middle）。新增**托盘右键菜单**（`setTray([...'menu'=>[...]])`，复用菜单栏的 `parseMenuItems`/`buildMenu`，菜单项走 `menu` 事件）；绑菜单后右击由 Qt 接管、不再发 `right`（实测确认，已写入文档）。测试 +2（114 tests）、示例 selftest 14→17 例、示例与脚手架都加菜单演示、文档中英双语同步 |
 
 ### Phase 10 分解（macOS）
 

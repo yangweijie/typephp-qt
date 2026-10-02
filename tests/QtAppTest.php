@@ -118,6 +118,53 @@ final class QtAppTest extends TestCase
         $this->assertSame(1000, \TypePHP\Qt\Fake\FakeState::$timers[$this->app->handle()]['clock']);
     }
 
+    /**
+     * 托盘激活方式放在 $event['value'] 里（left / right / double / middle）。
+     * Qt 的 QSystemTrayIcon 会区分这几种，桥接全部转给 PHP —— 只转发左击
+     * 会让「右击没反应」看起来像框架不支持。
+     */
+    public function testTrayEventCarriesActivationKind(): void
+    {
+        $kinds = [];
+        $this->app->onAny('tray', function (array $event) use (&$kinds): void {
+            $kinds[] = (string) ($event['value'] ?? '');
+        });
+
+        foreach (['left', 'right', 'double', 'middle'] as $kind) {
+            $this->app->dispatch(['type' => 'tray', 'value' => $kind]);
+        }
+
+        $this->assertSame(['left', 'right', 'double', 'middle'], $kinds);
+    }
+
+    /** 托盘右键菜单项走与菜单栏相同的 menu 事件，靠 id 区分。 */
+    public function testTrayMenuItemsDispatchAsMenuEvents(): void
+    {
+        $fired = [];
+        $this->app->setTray([
+            'tooltip' => 't',
+            'visible' => true,
+            'menu' => [
+                ['type' => 'item', 'id' => 'tray.show', 'text' => '显示主窗口'],
+                ['type' => 'item', 'id' => 'tray.quit', 'text' => '退出'],
+            ],
+        ]);
+        $this->app->on('tray.show', 'menu', function () use (&$fired): void {
+            $fired[] = 'show';
+        });
+        $this->app->on('tray.quit', 'menu', function () use (&$fired): void {
+            $fired[] = 'quit';
+        });
+
+        $this->app->dispatch(['type' => 'menu', 'id' => 'tray.show']);
+        $this->app->dispatch(['type' => 'menu', 'id' => 'tray.quit']);
+
+        $this->assertSame(['show', 'quit'], $fired);
+        // 菜单 spec 原样存进假桥，便于断言「菜单确实被登记了」
+        $tray = test_window($this->app->handle())['tray'];
+        $this->assertCount(2, $tray['menu']);
+    }
+
     public function testDestroyClearsHandle(): void
     {
         $this->app->destroy();

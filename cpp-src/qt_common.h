@@ -342,6 +342,7 @@ class QtWindowBox : public Box {
     QHash<QString, QTimer *> timers_;                       // 定时器 id -> QTimer
     QList<QWidget *> statusWidgets_;                         // 状态栏上我们自己加的标签
     QSystemTrayIcon *tray_ = nullptr;
+    QMenu *trayMenu_ = nullptr;                             // 托盘右键菜单（没设过就是 nullptr）
     QSet<QString> seen_;                                    // 本帧见过的 id
     std::deque<Array> events_;
 };

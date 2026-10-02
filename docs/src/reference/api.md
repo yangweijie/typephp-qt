@@ -50,7 +50,7 @@ A handler may declare 0 or 1 parameters (`array $event`) — the framework probe
 | `setMenu(array $items): void` | Menu bar |
 | `setStatus(array $segments): void` | Status-bar segments |
 | `resize(int $width, int $height): void` | Window size |
-| `setTray(array $spec): void` | System tray |
+| `setTray(array $spec): void` | System tray. `$spec` supports `icon` `tooltip` `visible` `menu` |
 | `setTimer(string $id, int $intervalMs): void` | Timer; interval `<= 0` stops it |
 
 ### Dialogs
@@ -139,7 +139,7 @@ WidgetTree::tree(array $nodes, array $props = [])
 | `tab` | tabs, stack | the index | `index` |
 | `menu` | menu item | — | `checked` |
 | `timer` | timer | — | — |
-| `tray` | system tray | — | — |
+| `tray` | system tray | `left` / `right` / `double` / `middle` | — |
 
 The event object:
 

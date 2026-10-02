@@ -134,11 +134,17 @@ $app->on('menu.wrap', 'menu', function (array $event) use ($state) {
 $app->setTray([
     'tooltip' => 'MyApp · 左键点一下',
     'visible' => true,
-    // 'icon' => 'assets/icon.png',   // 可省略
+    'icon' => 'assets/icon.png',      // 可省略，但强烈建议给（见下方警告）
+    'menu' => [                        // 可省略：右键菜单
+        ['type' => 'item', 'id' => 'tray.show', 'text' => '显示主窗口'],
+        ['type' => 'item', 'id' => 'tray.quit', 'text' => '退出'],
+    ],
 ]);
 ```
 
-- 左键点击发**不带 id** 的 `['type' => 'tray']`，只能用 `onAny('tray', …)` 接。
+- 托盘激活发**不带 id** 的 `['type' => 'tray']`，只能用 `onAny('tray', …)` 接。
+  `value` 里是手势：`left` / `right` / `double` / `middle`。见[事件](/zh/guide/events.md#托盘)。
+- `menu` 可省略。绑了之后右击弹出菜单，菜单项发 `menu` 事件（按惯例用 `tray.` 前缀区分）。
 - `icon` 可以不传 —— 桥接会兜底用窗口图标，窗口也没图标时用系统标准图标。
   **macOS / Linux 上无图标的托盘项根本不显示**，所以兜底不是美化，是可用性。
 - 相对路径的 `icon` 按**可执行文件所在目录**解析（其次才是工作目录），

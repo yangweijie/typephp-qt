@@ -139,13 +139,30 @@ $app->on('clock', 'timer', function () use ($state) {
 
 ### Tray
 
-A tray left-click emits an event with **no id**, so it can only be caught with `onAny`:
+A tray activation emits an event with **no id**, so it can only be caught with `onAny`. The
+activation kind arrives in `value`:
 
 ```php
-$app->onAny('tray', function () use ($state) {
-    $state->trayClicks++;
+$app->onAny('tray', function (array $event) use ($state) {
+    $state->lastTrayKind = (string) $event['value'];   // 'left' | 'right' | 'double' | 'middle'
 });
 ```
+
+| `value` | Gesture |
+|---|---|
+| `left` | left click (`Trigger`) |
+| `right` | right click (`Context`) — **only when no tray menu is set** |
+| `double` | double click |
+| `middle` | middle click (needs a mouse that has one) |
+
+::: tip Right click with a menu attached
+If `setTray([... 'menu' => [...]])` is set, Qt owns the right click and pops the menu — no `right`
+event is emitted (that is Qt's own behaviour). Menu items then fire ordinary `menu` events:
+
+```php
+$app->on('tray.quit', 'menu', function () use ($app) { $app->close(); });
+```
+:::
 
 ## Wildcards: `onAny`
 

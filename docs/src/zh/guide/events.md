@@ -139,13 +139,29 @@ $app->on('clock', 'timer', function () use ($state) {
 
 ### 托盘
 
-托盘左键点击发的是**不带 id** 的事件，只能用 `onAny`：
+托盘激活发的是**不带 id** 的事件，只能用 `onAny`。激活方式在 `value` 里：
 
 ```php
-$app->onAny('tray', function () use ($state) {
-    $state->trayClicks++;
+$app->onAny('tray', function (array $event) use ($state) {
+    $state->lastTrayKind = (string) $event['value'];   // 'left' | 'right' | 'double' | 'middle'
 });
 ```
+
+| `value` | 手势 |
+|---|---|
+| `left` | 左键单击（`Trigger`） |
+| `right` | 右键单击（`Context`）—— **仅在没绑托盘菜单时** |
+| `double` | 双击 |
+| `middle` | 中键单击（需要鼠标有中键） |
+
+::: tip 绑了菜单的右击
+如果 `setTray([... 'menu' => [...]])` 绑了菜单，右击由 Qt 接管并弹出菜单，
+**不再发 `right` 事件**（这是 Qt 自身的行为）。菜单项随后发普通的 `menu` 事件：
+
+```php
+$app->on('tray.quit', 'menu', function () use ($app) { $app->close(); });
+```
+:::
 
 ## 通配：`onAny`
 
