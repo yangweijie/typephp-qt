@@ -632,7 +632,7 @@ void qtApplyProp(QtWindowBox *box, QWidget *widget, const QString &type, const Q
     }
     if (key == QLatin1String("path")) {
         if (auto *label = qobject_cast<QLabel *>(widget)) {
-            const QPixmap pixmap(toQString(value));
+            const QPixmap pixmap(qtResolvePath(toQString(value)));
             if (!pixmap.isNull()) label->setPixmap(pixmap);
         }
         return;
@@ -674,7 +674,7 @@ void qtApplyProp(QtWindowBox *box, QWidget *widget, const QString &type, const Q
 
     // ── 按钮 ──
     if (key == QLatin1String("icon")) {
-        if (auto *button = qobject_cast<QPushButton *>(widget)) button->setIcon(QIcon(toQString(value)));
+        if (auto *button = qobject_cast<QPushButton *>(widget)) button->setIcon(QIcon(qtResolvePath(toQString(value))));
         return;
     }
     if (key == QLatin1String("flat")) {

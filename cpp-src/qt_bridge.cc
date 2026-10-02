@@ -173,7 +173,7 @@ QtWindowBox::QtWindowBox(const QString &title, const Array &options) {
     window_->setCentralWidget(central_);
 
     const QString iconPath = optString(options, "icon");
-    if (!iconPath.isEmpty()) window_->setWindowIcon(QIcon(iconPath));
+    if (!iconPath.isEmpty()) window_->setWindowIcon(QIcon(qtResolvePath(iconPath)));
 
     const QString stylesheet = optString(options, "stylesheet");
     if (!stylesheet.isEmpty()) window_->setStyleSheet(stylesheet);
@@ -666,16 +666,25 @@ void QtWindowBox::setTray(const Array &spec) {
             if (reason == QSystemTrayIcon::Trigger) enqueue(QStringLiteral("tray"));
         });
     }
+
+    // 图标解析顺序：显式路径 → 窗口图标 → 系统标准图标。
+    //
+    // **关键是每一步都要验空**：路径拼错、文件缺失时 QIcon 会得到空图标，
+    // 而空图标的托盘项在 Windows 上直接不显示（macOS/Linux 同理）——
+    // 于是「托盘没反应」的真实原因往往是「图标没加载上」，且完全静默。
+    QIcon icon;
     if (!iconPath.isEmpty()) {
-        tray_->setIcon(QIcon(iconPath));
-    } else if (window_) {
-        // 没给图标时必须兜底：macOS/Linux 上**无图标的托盘项根本不显示**，
-        // 「托盘演示」就变成看不见也点不到的空壳。
-        const QIcon windowIcon = window_->windowIcon();
-        tray_->setIcon(windowIcon.isNull()
-                           ? window_->style()->standardIcon(QStyle::SP_ComputerIcon)
-                           : windowIcon);
+        icon = QIcon(qtResolvePath(iconPath));
+        if (icon.isNull()) {
+            qWarning("tray icon could not be loaded: %s", qPrintable(iconPath));
+        }
     }
+    if (icon.isNull() && window_) {
+        const QIcon windowIcon = window_->windowIcon();
+        icon = windowIcon.isNull() ? window_->style()->standardIcon(QStyle::SP_ComputerIcon) : windowIcon;
+    }
+    if (!icon.isNull()) tray_->setIcon(icon);
+
     if (!tooltip.isEmpty()) tray_->setToolTip(tooltip);
     if (visible) tray_->show();
     else tray_->hide();
@@ -797,7 +806,7 @@ Variant php_qt_app_create(Array options) {
         const QString org = optString(options, "organization");
         if (!org.isEmpty()) qt_application->setOrganizationName(org);
         const QString iconPath = optString(options, "icon");
-        if (!iconPath.isEmpty()) qt_application->setWindowIcon(QIcon(iconPath));
+        if (!iconPath.isEmpty()) qt_application->setWindowIcon(QIcon(qtResolvePath(iconPath)));
         if (optBool(options, "quit_on_last_window_closed", true)) {
             qt_application->setQuitOnLastWindowClosed(true);
         } else {

@@ -50,7 +50,11 @@ function main(int $argc, array $argv): void
 
     // 系统托盘：不传 icon 时桥接会兜底用窗口图标/标准图标 —— macOS、Linux 上
     // **没有图标的托盘项根本不显示**，传不传都得能看见、能点。
-    $app->setTray(['tooltip' => 'Hello TypePHP-Qt · 左键点一下', 'visible' => true]);
+    $app->setTray([
+        'icon' => 'assets/icon.png',
+        'tooltip' => 'Hello TypePHP-Qt · 左键点一下',
+        'visible' => true,
+    ]);
 
     // ── 视图：每帧按 $state 重新描述界面 ──
     // 控件状态（输入光标、表格选中、滚动位置）由 C++ 侧的 id diff 保留。

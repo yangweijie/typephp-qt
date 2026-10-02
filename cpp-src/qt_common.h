@@ -23,6 +23,7 @@
 #include <QDoubleSpinBox>
 #include <QEventLoop>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFont>
 #include <QFormLayout>
 #include <QFrame>
@@ -94,6 +95,36 @@ inline QString toQString(const Variant &value) {
 inline String toPhpString(const QString &value) {
     const QByteArray utf8 = value.toUtf8();
     return String(utf8.constData(), static_cast<size_t>(utf8.size()));
+}
+
+/**
+ * 把应用给的资源路径解析成绝对路径。
+ *
+ * 契约（README / 文档里承诺的）：**相对路径相对于可执行文件所在目录**，
+ * 而不是进程 cwd —— 因为用户可能在仓库根、build/、或 dist/ 里启动，
+ * 三处的 cwd 各不相同，按 cwd 解析会让同一句 'assets/icon.png' 时灵时不灵。
+ *
+ * 解析顺序：
+ *   1. 空路径 → 原样返回（调用方据此走兜底逻辑）
+ *   2. 绝对路径 → 归一化后直接用
+ *   3. 相对路径 → 先试 exe 目录，再试 cwd（开发期从仓库根跑时有用）
+ */
+inline QString qtResolvePath(const QString &path) {
+    if (path.isEmpty()) return path;
+    const QString normalized = QDir::fromNativeSeparators(path);
+    if (QFileInfo(normalized).isAbsolute()) return normalized;
+
+    const QString fromExe = QDir::fromNativeSeparators(
+        QCoreApplication::applicationDirPath() + QLatin1Char('/') + normalized);
+    if (QFileInfo::exists(fromExe)) return fromExe;
+
+    // 回退到 cwd：`qtphp run` 不 chdir，用户可能从项目目录启动
+    const QString fromCwd = QDir::fromNativeSeparators(
+        QDir::currentPath() + QLatin1Char('/') + normalized);
+    if (QFileInfo::exists(fromCwd)) return fromCwd;
+
+    // 都不存在时给 exe 目录版本：路径拼得对、只是文件缺失，报错信息更有指向性
+    return fromExe;
 }
 
 /** 取一个"签名"字符串。数组递归展开，用于跨调用比对属性是否变化。 */

@@ -141,6 +141,29 @@ $app->setTray([
 - A left click emits `['type' => 'tray']` with **no id**, so it can only be caught with `onAny('tray', …)`.
 - `icon` is optional — the bridge falls back to the window icon, and to a standard system icon when the window has none either.
   **On macOS / Linux a tray item with no icon does not show up at all**, so that fallback is a usability requirement, not decoration.
+- A relative `icon` path resolves against the **executable's directory** (then the working directory), so `'assets/icon.png'` works from both `build/` and `dist/`.
+
+::: warning "I called setTray but I cannot see the icon"
+On Windows the notification area **hides newly appearing icons by default** — a brand-new app's icon lands in the overflow panel behind the `^` chevron, not on the visible taskbar. That is Windows' own behaviour, not the framework's.
+
+Confirm the tray really exists by checking the registry entry Windows creates for it:
+
+```powershell
+Get-ChildItem 'HKCU:\Control Panel\NotifyIconSettings' | ForEach-Object {
+  $p = Get-ItemProperty $_.PSPath
+  if ($p.ExecutablePath -like '*<yourapp>*') {
+    "$($p.ExecutablePath)  IsPromoted=[$($p.IsPromoted)]"
+  }
+}
+```
+
+An empty `IsPromoted` means "in the overflow area". Click the `^` chevron, or drag the icon onto the taskbar to promote it.
+
+Two other causes worth ruling out, both silent:
+
+- **The icon failed to load.** A wrong path yields a null `QIcon`, and an icon-less tray item is not shown at all. The bridge now falls back step by step (explicit path → window icon → system icon) and logs `tray icon could not be loaded: <path>` to stderr.
+- **`assets/` never reached `build/`.** `qtphp build` copies it for you; if you placed the file after building, rebuild.
+:::
 - When the tray is unavailable (a CI box with no desktop session) `setTray` is a no-op and does not error.
 
 ## Timers

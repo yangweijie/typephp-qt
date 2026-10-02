@@ -1,5 +1,71 @@
 # Progress Log — typephp-qt
 
+## Session 19 — 2026-10-02（「hello 示例里没看到托盘」）
+
+### 先查事实，再下结论
+用临时插桩（`QSystemTrayIcon` 的 `activated` 回调写日志）+ 真实鼠标点击，
+拿到了硬证据：
+
+```
+TRAY-DIAG available=1 visible=1 iconNull=0 supportsMsg=1     ← 托盘建出来了、show 了、图标非空
+ACTIVATED reason=3                                            ← 真实点击 → Trigger（枚举 Trigger=3）
+UI 显示「心跳 12 跳 · 托盘点击 3 次」                          ← 点 3 次，计数 3
+```
+
+**结论：托盘机制完全正常。** 那用户为什么看不到？查注册表找到答案：
+
+```
+hello.exe    IsPromoted = 1     ← 曾被提升，常驻任务栏
+newapp2.exe  IsPromoted = (空)  ← 在溢出区，要点 ^ 箭头才看得到
+```
+
+**Windows 默认把新出现的托盘图标收进溢出面板**，不是框架的问题。
+
+### 但排查过程揪出 4 个真实缺陷（都已修）
+
+1. **图标路径按 cwd 解析，而不是 exe 目录** —— 文档明确承诺「相对于可执行文件」，
+   实现却没做。用户从仓库根启动时 `'assets/icon.png'` 必然失效。
+   新增 `qtResolvePath()`（放在 `qt_common.h`，两处 .cc 共用）：绝对路径直用；
+   相对路径先试 exe 目录、再试 cwd。顺带发现 `cleanPath()` 是**死代码**（定义后从未调用）。
+2. **显式图标路径加载失败时静默变成空图标** —— 而空图标的托盘项在 Windows 上**直接不显示**。
+   实测：把路径改成不存在的文件，蓝色图标从任务栏消失（对比截图确认）。
+   改为逐级兜底：显式路径 → 窗口图标 → 系统标准图标，并在加载失败时打警告。
+3. **`build` 阶段不拷 `assets/`** —— `copyDir` 只在 `package` 里调用。
+   于是开发期相对路径必失效、打包后才正常，属于「打包才暴露」的坑。
+   新增 `deployAssets()`，并接到 **macOS/Linux 分支**（原先那两支连运行时都不部署，
+   assets 自然也没人管）。
+4. **示例与脚手架都没有图标资源** —— 示例连 `assets/` 目录都没有；
+   `qtphp new` 只建空目录。已给示例加一个 64×64 蓝色「T」图标（入 git，
+   `.gitignore` 里本来就有 `!examples/**/assets/*.png` 的例外规则），
+   并让脚手架**内嵌**同一份图标 + 一个托盘演示（含 `onAny('tray')` 计数）。
+
+### 文档
+中英双语的托盘小节都补了 `::: warning「我调了 setTray 但看不到图标」`：
+Windows 溢出区行为 + 查 `NotifyIconSettings` 注册表的命令 + 另两个静默原因。
+（写这段时踩了个小坑：PowerShell 路径里的 `\N` 在 Python 普通字符串里是转义，
+改用 raw string。）
+
+### 验证
+```
+托盘功能（真实鼠标点击）→ hello：3 次点击 → 3 次 Trigger → UI 计数 3
+                        newapp2：注册表条目 + 图标快照齐全
+坏图标路径反证            → 修复前图标消失；修复后回落到系统标准图标（对比截图）
+qtphp build              → 自动拷 assets（Windows 与 macOS/Linux 两支都改了）
+示例 --selftest          → 14/14，exit 0
+脚手架 new→build→selftest → 全通过，图标与托盘演示都在
+qtphp test / lint        → 112 tests · 契约一致
+docs 构建                → 59 页，链接与锚点全过
+```
+
+### 教训
+**「看不到」不等于「没工作」。** 这次如果直接去改托盘代码，就会在正确的实现上乱动。
+先用插桩 + 真实点击把「机制是否工作」和「用户看到什么」分开验证，
+才发现真正的问题是 ① Windows 的溢出区默认行为 ② 图标路径解析这一串静默失败。
+**静默失败最贵**：路径错了不报错、图标空了不报错、assets 没拷也不报错 ——
+三处叠加起来，表现就是「托盘不见了」。
+
+---
+
 ## Session 18 — 2026-10-02（修 CI：node 版本 + lock 不同步）
 
 ### 任务

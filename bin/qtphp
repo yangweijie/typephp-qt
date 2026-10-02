@@ -626,12 +626,27 @@ use TypePHP\Qt\WidgetTree;
 function main(int $argc, array $argv): void
 {
     /** @var array<string, mixed> $state 应用状态：事件改它，视图读它。 */
-    $state = ['name' => 'World', 'greeting' => 'Hello, World!', 'clicks' => 0];
+    $state = ['name' => 'World', 'greeting' => 'Hello, World!', 'clicks' => 0, 'tray' => 0];
 
     $app = new QtApp();
     $app->create(['name' => 'MyApp', 'version' => '1.0']);
     $app->createWindow('My App', ['width' => 720, 'height' => 480, 'centered' => true]);
     $app->setStatus(['就绪']);
+
+    // 系统托盘：图标路径相对**可执行文件目录**解析（build/ 与 dist/ 都成立）。
+    // 不传 icon 时桥接会兜底用窗口图标/标准图标 —— 无图标的托盘项在
+    // macOS/Linux 上根本不显示，所以 assets/ 里放了一个默认图标。
+    $app->setTray([
+        'icon' => 'assets/icon.png',
+        'tooltip' => 'My App · 左键点一下',
+        'visible' => true,
+    ]);
+
+    // 托盘点击不带 id（点的是托盘项本身），只能用 onAny 接。
+    $app->onAny('tray', function () use ($app, &$state) {
+        $state['tray'] = (int) $state['tray'] + 1;
+        $app->setStatus(['托盘点击 ' . $state['tray'] . ' 次']);
+    });
 
     // 视图函数每帧按 $state 重新描述界面，控件状态（光标/选中）由 diff 保留
     $app->view(function () use (&$state): array {
@@ -644,7 +659,7 @@ function main(int $argc, array $argv): void
                 WidgetTree::lineEdit((string) $state['name'], ['id' => 'name_input', 'placeholder' => '输入名字']),
                 WidgetTree::button('打招呼', ['id' => 'greet_btn']),
             ]),
-            WidgetTree::label('点击次数：' . $state['clicks'], ['id' => 'clicks']),
+            WidgetTree::label('点击次数：' . $state['clicks'] . ' · 托盘点击 ' . $state['tray'] . ' 次', ['id' => 'clicks']),
             WidgetTree::spacer(1),
         ]);
     });
@@ -718,6 +733,11 @@ function shot_path(array $argv): string
 }
 PHP;
     file_put_contents($targetDir . '/src/main.php', $mainPhp);
+
+    // 默认图标：托盘项没有图标在 macOS/Linux 上根本不显示，
+    // 所以脚手架直接给一个可用的，而不是留空目录让人踩坑。
+    $defaultIcon = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAANLSURBVHhe7VsrkBQxED2JRCKRSCQSicTAzWCWqp0cSCRyBVVIJPIk8sxVnVyJpFAnT3HJFOJwJxBDvcwudfNms/PZznQW9lU9tUkm/SbpTndmj44OOOAADRzP7VPmbHZ1j9vtPV7MygdZcf02N+4iN9bmxlVdzIy7yY1bZoV7l5/8eMRjJo/jN/ahn7yxX9m4McwKd5kbu0heDBieG3fKBghz+aooH/OzVYFlnpvyU2bc7YYJR2FWlGcQnOcyObA0V3u2NclpWH5WcZ6z2c19vIX2hKZnZty3SVfDysld8kR0ae3Lwj3huYoD8Vp3yYdZ+yCb8ZzFAOP5oWkyggh+2Sf65plYCaLboXZ4qe35Llor5hjrYyw/IMDT2yoOflfnHzY8bwsRHXYOkZlxH3ngrUxIADAr3Be2qTd8IjP0dJeYAODoozOOtzxYJxMUAPkD29YJZF6D3z6YpgBVfuKes41bEe+Y+7M6d2xcVVXff21oK0c4RLYxCLx9HkCOOgJ49l0FvvjAncWoJ0DviIDlwp3lqCiAcTed54JVVafVWY56AoDZ/PoZ29xAPrfvuZMsdQVAAYVtbkCqkBmmtgDWss0NxM/4tAVwFZI7ttsDDoIby1NfgGB5Pb4DBPUFQGGHbfeYpuKTgACFfc22e6CUxI3lqS8AIh3b7rG6w2t3EGUCAhi7YNs9sDTajaWZsgD/vQ+ImgWuqS9A8DiMAwI3lqe+AFtLZKOqQIOoLwBqnWz3X8Sv/+sKgBfMNjcwuAw+mMoCFOUZ29xA/EigK0AwAtxF34+ZxlFXgGAmeBcoGnBHOaoK0O9+IO42UBQglANsQtzC6PREoWdr+GOghs6D7DPx3SLb2Il/ZxVY21kO3wQcGduD7R97hb4Q4t0RTsNBd4Kb4L8CLdwVD7wP9BXuUAF0CLAV4idJ8gymvWOwb1FhlNfvQvxrMyl2XH/tgrhX5xKMaPwa2A4p+oQoyz4Ef0ZIJDrA24s6vL5Y1RCXPKEp6StYEqFuF/gtEb2UxrQWFzk8F1XUN0sxiynrf5TZxaiz/RTAxOp/jMlujToxs4tBKa024COQiODrrJFR4wKrSuyrb23AWa3/JVqfJ5qEJ8dvWy8uDjhAFH8AwOcOrNkF73MAAAAASUVORK5CYII=');
+    file_put_contents($targetDir . '/assets/icon.png', $defaultIcon);
 
     // build.bat —— 编译 + 部署运行时 DLL
     $vcvars = findVcvars() ?? 'D:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat';
@@ -932,6 +952,10 @@ function cmdBuild(string $path): int
     if (PHP_OS_FAMILY === 'Windows') {
         // 编译成功后自动部署运行时 DLL，否则双击 exe 会报"找不到 DLL"
         deployRuntimeDlls($path);
+    } else {
+        // macOS/Linux 的 PHP 运行时是静态链接/私有运行时，没有 DLL 要搬，
+        // 但 assets/ 同样要拷 —— 否则开发期相对路径失效、打包后才正常。
+        deployAssets($path);
     }
 
     return 0;
@@ -1041,6 +1065,25 @@ function deployRuntimeDlls(string $projectPath): void
     } else {
         warning('未能找到运行时 DLL，exe 可能无法直接运行');
     }
+
+    deployAssets($projectPath);
+}
+
+/**
+ * 把项目的 assets/ 拷进 build/。
+ *
+ * `package` 阶段本来就会拷，但开发期直接跑 build/<name>.exe 时不会 ——
+ * 于是 'assets/icon.png' 这类相对路径在开发期失效、打包后又能用，
+ * 属于「打包才暴露」的坑。这里让两边行为一致。
+ */
+function deployAssets(string $projectPath): void
+{
+    $src = rtrim($projectPath, '/\\') . '/assets';
+    $dst = rtrim($projectPath, '/\\') . '/build/assets';
+    if (!is_dir($src)) {
+        return;
+    }
+    copyDir($src, $dst);
 }
 
 /** 定位 VC 运行时 DLL 目录（msvcp140.dll 等）。 */
