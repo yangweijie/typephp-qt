@@ -1,0 +1,21 @@
+name: <APP>
+version: 0.1.0
+mode: bin
+cxx-std: c++17
+sources:
+  - main.php
+  - app
+  - php-src
+  - cpp-src
+
+# Debian/Ubuntu qt6-base-dev paths. Adjust for your distro.
+cxx-flags:
+  - -fPIC
+  - -I/usr/include/x86_64-linux-gnu/qt6
+  - -I/usr/include/x86_64-linux-gnu/qt6/QtCore
+  - -I/usr/include/x86_64-linux-gnu/qt6/QtGui
+  - -I/usr/include/x86_64-linux-gnu/qt6/QtWidgets
+ld-flags:
+  - -lQt6Widgets
+  - -lQt6Gui
+  - -lQt6Core

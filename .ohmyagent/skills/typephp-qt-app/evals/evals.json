@@ -1,0 +1,41 @@
+{
+  "skill_name": "typephp-qt-app",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我想用 TypePHP 做一个桌面待办事项应用，界面用 Qt。要能列出任务、按关键词搜索、点一下把任务推进到下一个状态、还能删除。给我一个能直接编译跑起来的完整项目。",
+      "expected_output": "Should default to the typephp-qt package route (route 0): `composer require yangweijie/typephp-qt` + `qtphp new` scaffold, state in plain PHP, a `view()` closure returning a WidgetTree, handlers that only mutate state, and ids on every control it reads. Should NOT hand-write a .stub.php/C++ bridge unless the user asks for a custom widget. Should mention `qtphp build/run` and the `--selftest` verification switch.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "我有个 TaskStore.php，里面有 all() / advance() / delete() 三个方法，返回的数组每项有 id、title、status 三个字段。帮我把它接上一个 Qt 窗口：左边一个任务表格，上面一个搜索框，选中一行后能点按钮推进状态或删除。",
+      "expected_output": "Using the package: a QtApp with `view()` returning `WidgetTree::table(...)` + `WidgetTree::lineEdit(...)` + buttons, `on('tbl','select',...)` to capture the row id, handlers calling the store and updating state. If hand-writing the bridge instead, must include correct empty-body stubs, php_-prefixed symbols, QSignalBlocker around rebuilds, UTF-8 conversion, and a PHP run() loop draining events.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "用 typephp 编译 Qt 项目报错：error LNK2019: 无法解析的外部符号 \"php_board_create\"，界面根本起不来。windeployqt 我已经跑过了。这是什么问题？",
+      "expected_output": "Diagnosis that the PHP stub function name and the C++ php_-prefixed symbol are out of sync (or the C++ file is not in project.yml sources), plus the other likely causes ranked — missing runtime.ini/PHPRC, missing windeployqt plugins — and how to confirm each. Should note that if they are on the package route there is no bridge to mismatch.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "typephp 做 Qt 界面的话，想搞一个左边列表、右边详情的主从布局，再加个顶部工具栏和状态栏，应该用哪些 Qt 组件？",
+      "expected_output": "Concrete Qt Widgets choices from the catalog: QMainWindow + QToolBar + QStatusBar as the shell, QListWidget or QTableWidget for the list, QLabel/QFrame for the detail pane, layout classes for arrangement. On the package route, map these onto WidgetTree containers/controls (hbox/split/table/label) and the id-based diff implication (detail pane refreshed from the selected id).",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "我的 TypePHP Qt 应用编译通过了，界面也出来了，但是一点某个按钮就崩溃，报 stdClass::{closure}() expects exactly 0 arguments, 1 given。我的单元测试全是绿的。",
+      "expected_output": "Identify the AOT handler-arity trap (aot-pitfalls.md #1): AOT-compiled closures validate argument count exactly while the interpreter silently ignores extras, so a dispatcher calling `$handler($event)` breaks every `function () {}` handler. Must explain WHY the green unit tests are not evidence (FakeBridge runs on a tolerant interpreter) and prescribe probing arity via Reflection at registration, plus a `--selftest` switch that dispatches every event on the real binary.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "qtphp build 报错：The PHPX runtime library was not found at: D:\\git\\php\\tpc_v0.9.4_windows_x64\\phpx\\build\\phpx.dll。我什么都没改，上次还好好的。",
+      "expected_output": "Explain the two tpc supply routes (aot-pitfalls.md): a self-contained native release package vs the Composer driver that needs a swoole/phpx source tree with built artifacts. The message means the Composer driver was selected and its runtime is not built. Point at `qtphp doctor` (prints resolved tpc + runtime dir) and TPC/TPC_DIR overrides. Should recognize that 'it worked last time' points at environment resolution, not a code regression.",
+      "files": []
+    }
+  ]
+}

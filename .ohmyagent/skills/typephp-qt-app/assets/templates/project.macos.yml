@@ -1,0 +1,21 @@
+name: <APP>
+version: 0.1.0
+mode: bin
+cxx-std: c++17
+sources:
+  - main.php
+  - app
+  - php-src
+  - cpp-src
+
+# Apple Silicon Homebrew qtbase. Adjust for another Qt install
+# (e.g. an official installer under ~/Qt/6.x.x/macos).
+cxx-flags:
+  - -I/opt/homebrew/include/QtCore
+  - -I/opt/homebrew/include/QtGui
+  - -I/opt/homebrew/include/QtWidgets
+ld-flags:
+  - -L/opt/homebrew/lib
+  - -lQt6Widgets
+  - -lQt6Gui
+  - -lQt6Core

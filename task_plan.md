@@ -67,6 +67,8 @@
 | 11 | macOS 运行/打包链路（`cmdRun`/`cmdPackage`/`deployRuntimeDlls` 曾只认 `.exe`+DLL） | ✅ done：11.1 run ✅、11.2 package ✅、11.3 运行时库定位 ✅、11.4 证伪+文档修正 ✅、11.5 参数透传（顺带修 `basename('.')`）✅、11.6 `qtphp new` 双平台模板 ✅ —— 全新项目在 mac 上 new→build→run --selftest→package→`env -i` 全链实测通过 |
 | 12 | 控件行为验收（表格/树 diff 边界）+ `patch` 的 `call` 操作 + 多窗口/托盘/定时器示例 | ✅ done：12.1 表格/树 diff（揪出并修掉 4 个 C++ 真缺陷，新增 `--difftest`）、12.2 `call` 六个方法（含签名作废与鉴别力反证）、12.3 多窗口/托盘/定时器演示（补 `QtApp::isOpen()` + 托盘兜底图标）、12.4 bundle 自带 offscreen 插件（产物可无头验收）、12.5 Windows 分支同款幂等补拷（本机无环境，未实测）、12.6 Linux 打包不再冒充 macOS（显式三路 + 明确报错，F19）、12.7 Linux 首次在真机跑通（Apple Container + Debian 12 arm64 + Qt 6.4.2：build→run→offscreen 14/14 + 20/20 + 出图全 rc=0，F20+F21）、12.8 Linux `package` 真机实现并验收（`dist/<name>/` = ldd 闭包 + `patchelf` DT_RPATH + `qt.conf`，产物 `env -i` offscreen 下 14/14 + 20/20 + 出图全 rc=0，F22）、12.9 Linux 硬前置落到 `doctor`（`linuxMissingPackages()` 12 项，命令 + 多架构头文件两类探测，两条分支都真机逼验，F23）—— `--selftest` 14/14、`--difftest` 20/20、112 例单测全绿 |
 | 13 | tpc 供给路线解析（Windows 上 composer 驱动抢占原生发行包 → `build` 报缺 `phpx.dll`） | ✅ done：`findTpc()` 改按**运行时体检**选路，删掉硬编码路径（F24）。Windows 端到端复验：`build` → `--selftest` 14/14 → `--shot` 21KB PNG → `test` 112/183 → `lint` 契约一致 |
+| 14 | 更新 `typephp-qt-app` 技能为包优先 | ✅ done：技能原本只教手写桥接（源自 `qt-taskboard`），不知本包存在。改写为「路线 0 用包 / 路线 1 手写」双轨；新建 `references/aot-pitfalls.md` 收录 8 个 AOT 坑；SKILL.md 加 14 条硬规则；evals 4→6。逐项对照真实代码核实（22 方法 / 30 控件 / 10 事件 / 6 call / 7 子命令），`scaffold.sh` 实跑通过 |
+| 15 | 技能入库到仓库 `.ohmyagent/skills/` | ✅ done：复制 25 个文件并修掉入库才暴露的三处问题 —— `.sh` 的 CRLF（Linux 上 shebang 会坏）转 LF、`git update-index --chmod=+x` 补执行位（Windows 下 `git add` 记成 100644）、新增 `.gitattributes` 固化换行符规则（`*.sh`→LF / `*.bat`→CRLF / 图片→binary）。从 git 索引导出后逐字节验证 + 实跑通过。**未提交**（已暂存） |
 
 ### Phase 10 分解（macOS）
 

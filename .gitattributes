@@ -1,0 +1,19 @@
+# Later lines win in gitattributes, so the catch-all goes first and the
+# specific overrides follow.
+
+# Default: normalize to LF in the repo.
+* text=auto eol=lf
+
+# Shell scripts must be LF — a CRLF shebang is `bad interpreter: ...bash^M`
+# on Linux/macOS.
+*.sh text eol=lf
+
+# Batch files must be CRLF — cmd's parser fails on labels with bare LF
+# (enforced by .ohmyagent/skills/typephp-qt-app/scripts/lint-bats.sh).
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary-ish files git should not try to normalize.
+*.png binary
+*.ico binary
+*.b64 binary

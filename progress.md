@@ -1,5 +1,63 @@
 # Progress Log — typephp-qt
 
+## Session 15 — 2026-10-02（更新 typephp-qt-app 技能）
+
+### 任务
+> 「更新 typephp-qt-app 技能」
+
+### 起点
+技能（1285 行，位于 session 技能目录，非 git 跟踪）教的是**手写 C++ 桥接**路线，源自
+TypePHP 编译器仓库的 `examples/qt-taskboard`。它**完全不知道**我们已把同样的东西产品化成了
+`yangweijie/typephp-qt` 包 —— 全文零处提及 `qtphp` / `WidgetTree` / `QtApp` / FakeBridge，
+也缺了本项目验证出的一批 AOT 硬坑（`require_once`、闭包 arity、无头阻塞、tpc 供给路线）。
+
+### 用户决策
+- 方向：**全面改写为包优先**（包为主线，手写降为进阶路线）
+- 坑的归处：**SKILL.md 硬规则 + reference 详解**
+
+### 改动
+
+| 文件 | 变化 |
+|---|---|
+| `SKILL.md` | 161 → 258 行。重写为「路线 0 用包 / 路线 1 手写」双轨，包为默认；新增 14 条硬规则（1–6 为 AOT 专属、7–14 通用）；description 加入 `qtphp`/`WidgetTree` 触发词 |
+| `references/aot-pitfalls.md` | **新建**（193 行）。8 个 AOT 坑（症状/成因/修法）+ 两条 tpc 供给路线 + 调试纪律 |
+| `references/bridge-pattern.md` | 247 → 274 行。顶部加「包路线不用读」指路；第 8 节截图模式改用 argv 并补 `--selftest`；**新增第 9 节**声明式 diff；checklist 补 3 条 |
+| `references/build-and-deploy.md` | 271 → 340 行。顶部加 `qtphp` 一键链；版本 0.9.3→0.9.4；macOS 补静态链接与 offscreen 插件；Linux 补 ldd 闭包/`patchelf --force-rpath`/per-plugin `ldd`；截图段重写为 `--shot`+`--selftest` 双开关 |
+| `evals/evals.json` | 4 → 6 个用例，补「闭包 arity 崩溃」与「PHPX runtime not found」两个真实报障场景 |
+| `scripts/scaffold.sh` | 默认 `PHP_HOME_DIR` 版本号 0.9.3→0.9.4（4 处） |
+
+### 验证
+- `evals.json` JSON 合法（6 用例）
+- SKILL.md 引用的 7 个 reference、11 个 template、2 个 script **全部存在**
+- **逐项对照真实代码**（防文档写错误导）：QtApp 22 个公开方法、WidgetTree 30 个控件、
+  10 个事件类型、6 个 `patch` call 方法、7 个 CLI 子命令、3 个无头开关、包名 —— 全部一致
+- `scaffold.sh` 实跑：生成 11 个文件，`lint: all .bat files clean`，版本号正确注入
+
+### 说明
+技能位于 session 目录，不在 git 仓库内，故本项目的 `git status` 不含这些改动。
+
+### 补充：技能同时入库到仓库（`.ohmyagent/skills/typephp-qt-app/`）
+用户要求仓库里也放一份。放置位置选 `.ohmyagent/skills/`（本工具的原生项目技能目录）。
+复制 25 个文件，并修掉入库才会暴露的三个问题：
+
+1. **shell 脚本是 CRLF** —— 源目录在 Windows 上创建，两个 `.sh` 全是 `\r\n`。
+   在 Linux/macOS 上会报 `bad interpreter: /usr/bin/env bash^M`。已转 LF（两份同步）。
+   注意 `grep -c $'\r'` 在 Git Bash 下会误报行数，验字节要用 `od` 或 python 数 `\r`。
+2. **git 记录为 `100644`** —— 文件系统上是可执行（`-rwxr-xr-x`），但 Windows 下
+   `git add` 不保留执行位。用 `git update-index --chmod=+x` 改成 `100755`。
+3. **没有 `.gitattributes`** —— 仓库此前无此文件、`autocrlf=false`，意味着换行符原样入库。
+   新增之，把规则固化：`*.sh` → LF、`*.bat`/`*.cmd` → CRLF、`*.png`/`*.ico`/`*.b64` → binary。
+   **踩坑**：gitattributes 是**后面的规则优先**，通配兜底 `* text=auto eol=lf` 必须写在最前，
+   否则会覆盖掉 `*.bat` 的 crlf 设置（首次写反了，`git check-attr` 验出来的）。
+
+验证：从 git 索引 `git archive` 导出后逐字节比对（含二进制模板哈希）、
+脚本仍为 `100755` 且纯 LF、导出副本实跑 `scaffold.sh` + `lint-bats.sh` 均 rc=0。
+
+**未做**：未提交（`git add` 已暂存，等你确认）。中途 `git add --renormalize .` 顺带改了
+`examples/hello/.gitignore` 的行尾，已还原——不属于本次范围。
+
+---
+
 ## 当前状态（Session 14：Phase 1–11 完成，Phase 12.1–12.9 完成）
 
 | 项 | 状态 |

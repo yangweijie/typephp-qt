@@ -1,0 +1,29 @@
+name: <APP>
+version: 0.1.0
+mode: bin
+cxx-std: c++17
+sources:
+  - main.php
+  - app          # PHP domain layer
+  - php-src      # .stub.php bridge declarations
+  - cpp-src      # C++ bridge implementation
+
+# Replace <QT_ROOT> with the real Qt 6 MSVC x64 install, e.g.
+#   D:/tools/Qt/6.9.3/msvc2022_64
+cxx-flags:
+  - '/Zc:__cplusplus'      # required by the Qt MSVC SDK
+  - '/permissive-'         # required by the Qt MSVC SDK
+  - '/I"<QT_ROOT>/include"'
+  - '/I"<QT_ROOT>/include/QtCore"'
+  - '/I"<QT_ROOT>/include/QtGui"'
+  - '/I"<QT_ROOT>/include/QtWidgets"'
+  # add more modules, e.g.:
+  # - '/I"<QT_ROOT>/include/QtSql"'
+  # - '/DQT_SQL_LIB'
+ld-flags:
+  - '/LIBPATH:"<QT_ROOT>/lib"'
+  - Qt6Widgets.lib
+  - Qt6Gui.lib
+  - Qt6Core.lib
+  # add more modules, e.g.:
+  # - Qt6Sql.lib
