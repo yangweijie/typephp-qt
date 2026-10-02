@@ -117,11 +117,30 @@ function cmdDoctor(): int
             warning('MSVC: 未找到（仅影响真实编译）');
         }
     } else {
-        $cxx = trim((string) shell_exec('command -v clang++ 2>/dev/null'));
+        // macOS 上是 clang++，Debian/Ubuntu 的 Qt 包配套的是 g++，两个都认。
+        $cxx = '';
+        foreach (['clang++', 'g++'] as $probe) {
+            $found = trim((string) shell_exec('command -v ' . $probe . ' 2>/dev/null'));
+            if ($found !== '') {
+                $cxx = $found;
+                break;
+            }
+        }
         if ($cxx !== '') {
             success("C++: $cxx");
         } else {
-            warning('C++: 未找到 clang++（macOS 需先 xcode-select --install）');
+            warning('C++: 未找到 clang++/g++（macOS 需先 xcode-select --install，Linux 需 apt install g++）');
+        }
+    }
+
+    // Linux 的前置不止 Qt：tpc 的 php-builder 要现编 PHP 源码，缺一个包就是一次失败编译（F21/F22）。
+    if (PHP_OS_FAMILY === 'Linux') {
+        $missing = linuxMissingPackages();
+        if (!$missing) {
+            success('Linux 构建前置: 齐全');
+        } else {
+            warning('Linux 构建前置缺失: ' . implode('、', $missing));
+            info('  apt install -y ' . implode(' ', $missing));
         }
     }
 
@@ -175,8 +194,84 @@ function tpcCommand(string $tpc): string
     return escapeshellarg($tpc);
 }
 
+/**
+ * Debian 系的多架构三元组（x86_64-linux-gnu / aarch64-linux-gnu），非这种布局返回 null。
+ * 判定依据是 Qt6 的 CMake 配置目录存在，不是只猜 uname —— 发行版把 Qt 装在哪都能否决。
+ */
+function linuxMultiarchTriple(): ?string
+{
+    $triple = ['x86_64' => 'x86_64-linux-gnu', 'aarch64' => 'aarch64-linux-gnu',
+               'arm64' => 'aarch64-linux-gnu'][php_uname('m')] ?? null;
+    if ($triple === null || !is_dir('/usr/lib/' . $triple . '/cmake/Qt6')) {
+        return null;
+    }
+    return $triple;
+}
+
+/**
+ * Linux 编译/打包的硬前置缺了哪些 apt 包（返回值直接能拼成安装命令）。
+ *
+ * mac 上这些都是 brew 顺带装好的，Linux 得显式列：php-src 要 bison/re2c/autoconf 和
+ * libxml2/sqlite3/onig/zlib 头，phpx 要 gmp/mpfr 头（F21），`package` 要 patchelf（F22）。
+ * 头文件按 /usr/include 与 /usr/include/<三元组> 两处找 —— 实测 gmp.h 只在多架构目录下，
+ * 而 onigmo.h 在 Debian 上根本不存在（libonig-dev 给的是 oniguruma.h）。
+ */
+function linuxMissingPackages(): array
+{
+    $incDirs = ['/usr/include'];
+    $triple = linuxMultiarchTriple();
+    if ($triple !== null) {
+        $incDirs[] = '/usr/include/' . $triple;
+    }
+
+    $need = [
+        'bison' => ['cmd' => 'bison'],
+        're2c' => ['cmd' => 're2c'],
+        'autoconf' => ['cmd' => 'autoconf'],
+        'pkg-config' => ['cmd' => 'pkg-config'],
+        'xz-utils' => ['cmd' => 'xz'],
+        'patchelf' => ['cmd' => 'patchelf'],
+        'libgmp-dev' => ['headers' => ['gmp.h', 'gmpxx.h']],
+        'libmpfr-dev' => ['headers' => ['mpfr.h']],
+        'libonig-dev' => ['headers' => ['oniguruma.h']],
+        'libxml2-dev' => ['headers' => ['libxml2/libxml/parser.h']],
+        'libsqlite3-dev' => ['headers' => ['sqlite3.h']],
+        'zlib1g-dev' => ['headers' => ['zlib.h']],
+    ];
+
+    $missing = [];
+    foreach ($need as $pkg => $probe) {
+        if (isset($probe['cmd']) && trim((string) shell_exec('command -v ' . $probe['cmd'] . ' 2>/dev/null')) === '') {
+            $missing[] = $pkg;
+            continue;
+        }
+        foreach ($probe['headers'] ?? [] as $header) {
+            $hit = false;
+            foreach ($incDirs as $dir) {
+                if (file_exists($dir . '/' . $header)) {
+                    $hit = true;
+                    break;
+                }
+            }
+            if (!$hit) {
+                $missing[] = $pkg;
+                break;
+            }
+        }
+    }
+    return $missing;
+}
+
 function findQt(): ?string
 {
+    // Debian/Ubuntu 的 qt6-base-dev 是「前缀 /usr + 多架构子目录」布局，
+    // 与 brew/官方安装器的 include+lib+bin 同构，所以这里返回前缀 /usr。
+    if (PHP_OS_FAMILY === 'Linux') {
+        $triple = linuxMultiarchTriple();
+        if ($triple !== null && is_dir('/usr/include/' . $triple . '/qt6/QtCore')) {
+            return '/usr';
+        }
+    }
     $candidates = [
         'D:/tools/Qt/6.9.3/msvc2022_64',
         'C:/Qt/6.9.3/msvc2022_64',
@@ -336,6 +431,58 @@ php-builder:
   zts: false
 YML;
     file_put_contents($targetDir . '/project.macos.yml', $macYml);
+
+    // project.linux.yml —— Linux 入口。Debian/Ubuntu 是「多架构三元组」布局：
+    // 头在 /usr/include/<三元组>/qt6，库在 /usr/lib/<三元组>，mkspec 在 /usr/lib/<三元组>/qt6/mkspecs/linux-g++。
+    // 三元组按当前机器推导（dpkg-architecture 的约定），不一致时改这三处路径即可。
+    $triple = linuxMultiarchTriple() ?? (php_uname('m') . '-linux-gnu');
+    $linInc = '/usr/include/' . $triple . '/qt6';
+    $linLib = '/usr/lib/' . $triple;
+
+    $linYml = <<<YML
+# Linux 编译入口：`qtphp build` 在 Linux 上用它（Windows 用 project.yml，macOS 用 project.macos.yml）。
+#
+# Debian 系的 qt6-base-dev 是多架构布局，三元组 = `dpkg-architecture -qDEB_HOST_MULTIARCH`
+# （x86_64-linux-gnu / aarch64-linux-gnu）。非 Debian 布局（Arch、openSUSE 的 /usr/include/qt6）
+# 直接把下面的路径换成 `/usr/include/qt6` 与 `/usr/lib`。
+#
+# include 合并时列表是整体替换、不是追加，故框架内两条 include 路径要在下面重写一遍。
+include:
+  - project.yml
+
+include-paths:
+  - {$pkgDir}/cpp-src
+  - {$pkgDir}/php-src
+  - {$linInc}
+  - {$linInc}/QtCore
+  - {$linInc}/QtGui
+  - {$linInc}/QtWidgets
+  # Qt 头会引用 mkspec 里的 qplatformdefs.h
+  - {$linLib}/qt6/mkspecs/linux-g++
+
+# 清掉 MSVC 的 .lib 名词法；库搜索路径与链接开关全在 ld-flags 里。
+link-libs: []
+link-paths: []
+
+cxx-flags:
+  - -fPIC
+  - -DQT_CORE_LIB
+  - -DQT_GUI_LIB
+  - -DQT_WIDGETS_LIB
+
+ld-flags:
+  - -L{$linLib}
+  - -lQt6Widgets
+  - -lQt6Gui
+  - -lQt6Core
+
+# 宿主 PHP 通常只有 cli SAPI（无 libphp），让 tpc 从 php-src 现编私有 embed 运行时。
+# 缓存在 ~/.typephp/php-builder 下，之后所有构建复用；首次构建会慢（要编译整个 php-src）。
+php-builder:
+  extensions: []
+  zts: false
+YML;
+    file_put_contents($targetDir . '/project.linux.yml', $linYml);
 
     // Info.macos.plist —— `qtphp package` 在 mac 上要往 dist/<Name>.app/Contents/Info.plist
     // 放一份；CFBundleExecutable 必须等于产物文件名（= 项目名）。
@@ -861,6 +1008,8 @@ function cmdRun(string $path, array $args = []): int
         warning('以下运行时依赖缺失，可能无法启动：' . implode(', ', $missing));
         if (PHP_OS_FAMILY === 'Windows') {
             info("运行 'qtphp build $path' 可自动部署；或执行 'qtphp package $path' 生成自包含目录。");
+        } elseif (PHP_OS_FAMILY === 'Linux') {
+            info('Linux 的 Qt 依赖来自系统包：apt install qt6-base-dev（headless 验收还需 libqt6widgets6 的 platforms 插件）。');
         } else {
             info('macOS 的依赖来自 brew（qtbase/libiconv/gmp/mpfr）与 ~/.typephp 私有运行时，重新 build 会重建链接。');
         }
@@ -877,7 +1026,7 @@ function cmdRun(string $path, array $args = []): int
 }
 
 /**
- * macOS/Linux：问动态链接器要依赖清单，逐条确认文件是否存在。
+ * 非 Windows：问动态链接器要依赖清单，逐条确认能不能加载。
  *
  * 比"照着名单复制 DLL"可靠 —— brew 前缀、keg-only 路径、私有运行时的绝对路径
  * 都已经写在二进制的加载命令里了。@rpath 形式交给 dyld 解析，静态检查无意义。
@@ -887,6 +1036,10 @@ function cmdRun(string $path, array $args = []): int
  */
 function checkSharedLibraryDeps(string $exe): array
 {
+    if (PHP_OS_FAMILY === 'Linux') {
+        return checkLinuxLibraryDeps($exe);
+    }
+
     $output = shell_exec('otool -L ' . escapeshellarg($exe) . ' 2>/dev/null');
     if (!$output) {
         return [];
@@ -906,6 +1059,39 @@ function checkSharedLibraryDeps(string $exe): array
         }
     }
     return $missing;
+}
+
+/**
+ * Linux：`ldd` 的清单里只有两种真问题 —— `not found`（库里没有这个 .so），
+ * 以及指向构建树/私有目录又确实不存在的绝对路径。
+ * 系统前缀（/usr/lib、/lib、/usr/local/lib）直接放行：那是发行版该负责的部分。
+ */
+function checkLinuxLibraryDeps(string $exe): array
+{
+    $output = shell_exec('ldd ' . escapeshellarg($exe) . ' 2>/dev/null');
+    if ($output === null || $output === '') {
+        return [];
+    }
+
+    $missing = [];
+    foreach (explode("\n", $output) as $line) {
+        if (preg_match('/^\s*(\S+)\s+=>\s+not found/', $line, $m)) {
+            $missing[] = $m[1] . ' (not found)';
+            continue;
+        }
+        if (preg_match('/^\s*\S+\s+=>\s+(\/\S+)/', $line, $m)) {
+            $path = $m[1];
+            foreach (['/usr/lib', '/usr/local/lib', '/lib'] as $systemPrefix) {
+                if (str_starts_with($path, $systemPrefix . '/')) {
+                    continue 2;
+                }
+            }
+            if (!file_exists($path)) {
+                $missing[] = $path;
+            }
+        }
+    }
+    return array_values(array_unique($missing));
 }
 
 /** 检查 exe 同目录下缺失的运行时 DLL。 */
@@ -945,8 +1131,16 @@ function cmdPackage(string $path): int
         mkdir($distDir, 0755, true);
     }
 
-    if (PHP_OS_FAMILY !== 'Windows') {
+    if (PHP_OS_FAMILY === 'Darwin') {
         return packageAppBundle($path, $name, $exe, $distDir);
+    }
+    if (PHP_OS_FAMILY === 'Linux') {
+        return packageLinuxDir($path, $name, $exe, $distDir);
+    }
+    if (PHP_OS_FAMILY !== 'Windows') {
+        // 显式报错，别让 BSD 之类跑到 Windows 分支上去找 windeployqt
+        error('未实现 ' . PHP_OS_FAMILY . ' 平台的打包：目前只有 Windows 的 dist/ 目录、macOS 的 .app 与 Linux 的 dist/<name>/ 三条路线');
+        return 1;
     }
 
     info("打包到: $distDir");
@@ -986,6 +1180,8 @@ function cmdPackage(string $path): int
         warning("windeployqt 返回 $qtExit，继续检查产物");
     }
 
+    vendorWindowsOffscreenPlugin($qtDir, $distDir);
+
     // 自检：验证关键文件齐全
     return verifyPackage($distDir, $name);
 }
@@ -994,7 +1190,7 @@ function cmdPackage(string $path): int
  * macOS 打包：产出 dist/<Name>.app，把 Qt framework、cocoa 插件和 brew 链接库都塞进 bundle。
  *
  * 流程对齐 typephp-compiler 的 examples/qt-taskboard/package-macos-app.sh：
- * 搭 bundle 骨架 → macdeployqt → 补搬它不管的非 Qt 依赖 → ad-hoc 签名 → 校验。
+ * 搭 bundle 骨架 → macdeployqt → 补 offscreen 插件 → 补搬它不管的非 Qt 依赖 → ad-hoc 签名 → 校验。
  * 我们的 PHP/PHPX 是静态链进二进制的（--enable-embed=static），所以没有 libphp.dylib 要搬。
  */
 function packageAppBundle(string $path, string $name, string $exe, string $distDir): int
@@ -1042,7 +1238,15 @@ function packageAppBundle(string $path, string $name, string $exe, string $distD
         warning("macdeployqt 返回 $qtExit，继续检查产物");
     }
 
+    $headless = vendorHeadlessPlugin($qtDir, $contents);
+    if ($headless !== '') {
+        info('已补无头验收插件: ' . basename($headless));
+    }
+
     $vendored = vendorBundleDeps($appBinary, $frameworks);
+    if ($headless !== '') {
+        $vendored = array_merge($vendored, vendorBundleDeps($headless, $frameworks));
+    }
     if ($vendored) {
         info('已搬进 bundle：' . implode(', ', $vendored));
     }
@@ -1055,6 +1259,224 @@ function packageAppBundle(string $path, string $name, string $exe, string $distD
     }
 
     return verifyAppBundle($bundle, $appBinary);
+}
+
+/**
+ * Linux 打包：产出 dist/<name>/ —— 二进制 + Qt 插件 + ldd 依赖闭包。
+ *
+ * Linux 的加载器不搜可执行文件同目录（和 Windows 相反），所以依赖集中放 lib/，
+ * 再用 patchelf 把 rpath 改成 $ORIGIN/lib。这里必须是 DT_RPATH 而不是 DT_RUNPATH：
+ * RUNPATH 只对本对象自己的 NEEDED 生效，那样 libQt6Gui 的 libglib/libEGL 这些
+ * 二级依赖还是会回落到系统的 ld.so.cache，产物看着能跑其实没自包含。
+ */
+function packageLinuxDir(string $path, string $name, string $exe, string $distDir): int
+{
+    $patchelf = trim((string) shell_exec('command -v patchelf 2>/dev/null'));
+    if ($patchelf === '') {
+        error('未找到 patchelf，无法改写 rpath 做自包含打包');
+        info('请先运行: apt install patchelf');
+        return 1;
+    }
+    $qtDir = findQt();
+    if (!$qtDir) {
+        error('未找到 Qt，无法部署 Qt 插件与依赖');
+        return 1;
+    }
+    $pluginDirs = linuxQtPluginDirs($qtDir);
+    if (!$pluginDirs) {
+        error("未找到 Qt 平台插件目录（$qtDir/lib/*/qt6/plugins/platforms）");
+        return 1;
+    }
+
+    $root = $distDir . '/' . $name;
+    if (is_dir($root)) {
+        deleteTree($root);
+    }
+    $libDir = $root . '/lib';
+    mkdir($libDir, 0755, true);
+
+    info("打包到: $root");
+    copy($exe, $root . '/' . $name);
+    chmod($root . '/' . $name, 0755);
+    if (is_dir($path . '/assets')) {
+        copyDir($path . '/assets', $root . '/assets');
+    }
+
+    // 插件按产物内相对目录复刻一份，闭包用系统里的原件算（ldd 对插件同样给传递闭包）
+    $closureRoots = [$exe];
+    $plugins = [];
+    foreach ($pluginDirs as $rel => $srcDir) {
+        $dstDir = $root . '/plugins/' . $rel;
+        if (!is_dir($dstDir)) {
+            mkdir($dstDir, 0755, true);
+        }
+        foreach (glob($srcDir . '/*.so') ?: [] as $src) {
+            $dst = $dstDir . '/' . basename($src);
+            copy($src, $dst);
+            $closureRoots[] = $src;
+            $plugins[] = $dst;
+        }
+    }
+    // Qt 只从 qt.conf 或环境变量找插件目录，写死成产物内的相对路径才能脱离开发环境
+    file_put_contents($root . '/qt.conf', "[Paths]\nPlugins = plugins\n");
+
+    $libs = [];
+    foreach ($closureRoots as $object) {
+        foreach (elfDeps($object) as $soname => $abs) {
+            if (isset($libs[$soname]) || isSystemSoname($soname) || !file_exists($abs)) {
+                continue;
+            }
+            // 落地名用 soname（libQt6Core.so.6），不是 readlink 后的真名，否则按 soname 找不到
+            copy($abs, $libDir . '/' . $soname);
+            $libs[$soname] = true;
+        }
+    }
+    info('已搬入依赖: ' . count($libs) . " 个 .so，平台插件 " . count($plugins) . ' 个');
+
+    if (!setLinuxRpath($patchelf, $root . '/' . $name, '$ORIGIN/lib')) {
+        return 1;
+    }
+    foreach ($plugins as $plugin) {
+        setLinuxRpath($patchelf, $plugin, '$ORIGIN/../../lib');
+    }
+
+    return verifyLinuxPackage($root, $name, $patchelf);
+}
+
+/** Debian/Ubuntu 是 lib/<三元组>/qt6/plugins，上游 tarball 常是扁平 plugins。 */
+function linuxQtPluginDirs(string $qtDir): array
+{
+    $bases = [];
+    $triple = linuxMultiarchTriple();
+    if ($triple !== null) {
+        $bases[] = $qtDir . '/lib/' . $triple . '/qt6/plugins';
+    }
+    $bases[] = $qtDir . '/lib/qt6/plugins';
+    $bases[] = $qtDir . '/plugins';
+    $base = '';
+    foreach ($bases as $candidate) {
+        if (is_dir($candidate . '/platforms')) {
+            $base = $candidate;
+            break;
+        }
+    }
+    if ($base === '') {
+        return [];
+    }
+
+    // platforms 全量拷：offscreen 是无头验收的前提，xcb 是真实桌面，minimal 兜底
+    // xcbglintegrations 缺了 Qt 会退回 GLX 并告警，有就一起带上
+    $found = [];
+    foreach (['platforms', 'xcbglintegrations'] as $rel) {
+        if (is_dir($base . '/' . $rel)) {
+            $found[$rel] = $base . '/' . $rel;
+        }
+    }
+    return $found;
+}
+
+/** 动态加载的 ELF 依赖：ldd 的 `soname => /abs/path`；vdso 与解释器行没有 `=>`，天然过滤。 */
+function elfDeps(string $object): array
+{
+    $output = shell_exec('ldd ' . escapeshellarg($object) . ' 2>/dev/null');
+    $deps = [];
+    foreach (explode("\n", (string) $output) as $line) {
+        if (preg_match('/^\s*(\S+)\s+=>\s+(\/\S+)/', $line, $m)) {
+            $deps[$m[1]] = $m[2];
+        }
+    }
+    return $deps;
+}
+
+/**
+ * 这些留在目标系统上：glibc 家族的 ABI 由内核-用户态边界保证，搬了反而容易和
+ * 目标机的 ld.so 版本不匹配（libstdc++ 不在此列，它按 GLIBCXX 符号版本卡，必须搬）。
+ */
+function isSystemSoname(string $soname): bool
+{
+    foreach (['libc.', 'libm.', 'libdl.', 'librt.', 'libpthread.', 'libresolv.',
+              'libnsl.', 'libutil.', 'libgcc_s.', 'ld-linux-'] as $prefix) {
+        if (str_starts_with($soname, $prefix)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** 改写 rpath；--force-rpath 保证写的是可传递的 DT_RPATH。 */
+function setLinuxRpath(string $patchelf, string $object, string $rpath): bool
+{
+    exec($patchelf . ' --force-rpath --set-rpath ' . escapeshellarg($rpath)
+        . ' ' . escapeshellarg($object) . ' 2>&1', $out, $rc);
+    if ($rc !== 0) {
+        error('patchelf 改写 ' . basename($object) . ' 失败：' . implode(' ', $out));
+        return false;
+    }
+    return true;
+}
+
+/**
+ * 自检产物：依赖必须全在 dist/<name>/lib 内。
+ *
+ * ldd 会展开 $ORIGIN 并解析整张传递图，所以「每一行都落在产物里」就是自包含的实测证据；
+ * 有漏的会直接显示成系统绝对路径。
+ */
+function verifyLinuxPackage(string $root, string $name, string $patchelf): int
+{
+    echo PHP_EOL;
+    info('自检打包产物...');
+    $ok = true;
+
+    $exe = $root . '/' . $name;
+    $libReal = realpath($root . '/lib') ?: ($root . '/lib');
+    $leaked = [];
+    // 可执行文件的 ldd 已经含传递闭包，但插件不在那条链上：libqxcb.so 的十几个 xcb 库
+    // 只有对插件自己跑 ldd 才看得见，而它们恰恰是最容易漏搬的一批。
+    $objects = [$exe];
+    foreach (glob($root . '/plugins/*/*.so') ?: [] as $plugin) {
+        $objects[] = $plugin;
+    }
+    foreach ($objects as $object) {
+        foreach (elfDeps($object) as $soname => $abs) {
+            if (isSystemSoname($soname)) {
+                continue;
+            }
+            // $ORIGIN 是按传入路径的 dirname 文本展开的，可能带出 /./ 这种写法，先规范化再比
+            $realAbs = realpath($abs) ?: $abs;
+            if (!str_starts_with($realAbs, $libReal . '/')) {
+                $leaked[] = basename($object) . ' 的 ' . $soname . " => $abs";
+            }
+        }
+    }
+    if ($leaked) {
+        error('仍指向产物之外：');
+        foreach (array_unique($leaked) as $line) {
+            echo "  - $line" . PHP_EOL;
+        }
+        $ok = false;
+    }
+
+    if (!file_exists($root . '/plugins/platforms/libqoffscreen.so')) {
+        error('产物内没有 libqoffscreen.so，无法在无 GUI 会话的机器上验收');
+        $ok = false;
+    }
+
+    // DT_RUNPATH 一旦同时存在就会顶掉 DT_RPATH（patchelf 老版本踩过），直接读 dynamic 段确认
+    exec('readelf -d ' . escapeshellarg($exe) . ' 2>/dev/null', $lines, $rdRc);
+    $dynamic = implode("\n", $lines);
+    if ($rdRc !== 0 || !str_contains($dynamic, '(RPATH)') || str_contains($dynamic, '(RUNPATH)')) {
+        error("rpath 改写结果不是 DT_RPATH，二级依赖仍会回落系统库（patchelf: $patchelf）");
+        $ok = false;
+    }
+
+    if (!$ok) {
+        return 1;
+    }
+
+    success(sprintf('打包完成: %s (%.1f MB)', $root, dirSize($root) / 1048576));
+    info('启动: ' . escapeshellarg($exe));
+    info('无头验收: env -i QT_QPA_PLATFORM=offscreen ' . escapeshellarg($exe) . ' --selftest');
+    return 0;
 }
 
 /** 读 Mach-O 的依赖清单（otool -L 的路径列）；@rpath 等形式原样返回。 */
@@ -1081,6 +1503,73 @@ function machODeps(string $binary): array
 function isSystemDepPath(string $path): bool
 {
     return str_starts_with($path, '/usr/lib/') || str_starts_with($path, '/System/Library/');
+}
+
+/**
+ * 把 offscreen 平台插件拷进 bundle，并返回其路径（找不到就返回空串）。
+ *
+ * macdeployqt 只按目标平台拷 cocoa，产物因此**无法无头验收**：设了 QT_QPA_PLATFORM=offscreen
+ * 又找不到插件时 Qt 直接 abort（rc=134），CI 里没有 GUI 会话就测不了打包产物。
+ * 拷进来的 Qt 引用要改写成 @executable_path —— 原样的 @rpath 指向 `@loader_path/../../../../lib`，
+ * 在 bundle 里会算到 dist/lib 这种不存在的位置。
+ */
+function vendorHeadlessPlugin(string $qtDir, string $contents): string
+{
+    $src = '';
+    foreach (['/share/qt/plugins/platforms', '/plugins/platforms', '/lib/qt6/plugins/platforms'] as $rel) {
+        if (is_file($qtDir . $rel . '/libqoffscreen.dylib')) {
+            $src = $qtDir . $rel . '/libqoffscreen.dylib';
+            break;
+        }
+    }
+    if ($src === '') {
+        warning('未找到 libqoffscreen.dylib，产物只能在有 GUI 会话的机器上验收');
+        return '';
+    }
+
+    $dir = $contents . '/PlugIns/platforms';
+    if (!is_dir($dir)) {
+        mkdir($dir, 0755, true);
+    }
+    $dst = $dir . '/libqoffscreen.dylib';
+    copy($src, $dst);
+    chmod($dst, 0644);
+
+    foreach (['QtCore', 'QtGui', 'QtWidgets'] as $fw) {
+        exec('install_name_tool -change ' . escapeshellarg('@rpath/' . $fw . '.framework/Versions/A/' . $fw)
+            . ' ' . escapeshellarg('@executable_path/../Frameworks/' . $fw . '.framework/Versions/A/' . $fw)
+            . ' ' . escapeshellarg($dst) . ' 2>&1', $out, $rc);
+        if ($rc !== 0) {
+            warning("改写插件对 $fw 的引用失败：" . implode(' ', $out));
+        }
+    }
+
+    return $dst;
+}
+
+/**
+ * Windows 侧对齐 macOS 的 `vendorHeadlessPlugin()`：保证 `platforms/qoffscreen.dll` 在产物里。
+ *
+ * windeployqt 的默认插件清单没有权威结论，所以这里不依赖它 —— 已部署就跳过，没部署才补。
+ * 补拷是安全的：`qwindows.dll` 今天就是这样从 `platforms/` 加载、并解析到 exe 同目录的 Qt6*.dll 的。
+ * 本机没有 Windows 环境，这条路径**未实测**。
+ */
+function vendorWindowsOffscreenPlugin(string $qtDir, string $distDir): void
+{
+    $dst = $distDir . '/platforms/qoffscreen.dll';
+    if (file_exists($dst)) {
+        return;
+    }
+    $src = $qtDir . '/plugins/platforms/qoffscreen.dll';
+    if (!is_file($src)) {
+        warning("未找到 $src，产物只能在有桌面会话的机器上验收");
+        return;
+    }
+    if (!is_dir($distDir . '/platforms')) {
+        mkdir($distDir . '/platforms', 0755, true);
+    }
+    copy($src, $dst);
+    info('已补无头验收插件: qoffscreen.dll');
 }
 
 /**

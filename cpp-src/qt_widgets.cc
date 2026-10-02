@@ -347,10 +347,31 @@ void qtRebuildTable(QtWindowBox *box, QTableWidget *table, const Variant &node) 
         table->setColumnCount(columns.size());
         table->setHorizontalHeaderLabels(columns);
     }
-    table->setRowCount(0);
+    // 没给 rows 就不动内容：早先这里是无条件 setRowCount(0)，
+    // 于是一次只改标题的补丁会把整张表连选中一起清空。
     if (!rowsValue.isArray()) return;
 
+    // 记住选中行的**行 id**，重建后按 id 找回。选中是控件状态，重渲染不该丢；
+    // 按索引记则会在插行后错位到别的行上。
+    QString selectedId;
+    const int previousRow = table->currentRow();
+    if (previousRow >= 0 && table->item(previousRow, 0) != nullptr) {
+        selectedId = table->item(previousRow, 0)->data(Qt::UserRole).toString();
+    }
+
     const Array rows = rowsValue.toArray();
+
+    // 没给列名时列数由最宽的一行决定（构造时是 1 列，窄于行会丢单元格）。
+    if (columns.isEmpty()) {
+        int widest = 0;
+        for (size_t r = 0; r < rows.count(); ++r) {
+            const Variant rowValue = rows.get(r);
+            const int cells = rowValue.isArray() ? static_cast<int>(rowValue.toArray().count()) : 1;
+            if (cells > widest) widest = cells;
+        }
+        if (widest > table->columnCount()) table->setColumnCount(widest);
+    }
+
     table->setRowCount(static_cast<int>(rows.count()));
     for (size_t r = 0; r < rows.count(); ++r) {
         const Variant rowValue = rows.get(r);
@@ -363,13 +384,28 @@ void qtRebuildTable(QtWindowBox *box, QTableWidget *table, const Variant &node) 
             table->setItem(static_cast<int>(r), static_cast<int>(c), item);
         }
     }
+
+    if (selectedId.isEmpty()) return;
+    for (int r = 0; r < table->rowCount(); ++r) {
+        auto *first = table->item(r, 0);
+        if (first && first->data(Qt::UserRole).toString() == selectedId) {
+            table->selectRow(r);
+            return;
+        }
+    }
 }
 
 void qtRebuildTree(QtWindowBox *box, QTreeWidget *tree, const Variant &node) {
     const QStringList headers = toStringList(qtField(node, "headers"));
+    const Variant nodesValue = qtField(node, "nodes");
     QSignalBlocker blocker(tree);
-    tree->clear();
     if (!headers.isEmpty()) tree->setHeaderLabels(headers);
+    if (!nodesValue.isArray()) return;  // 同表格：没给结构就别清空
+
+    const QString selectedId =
+        tree->currentItem() ? tree->currentItem()->data(0, Qt::UserRole).toString() : QString();
+
+    tree->clear();
 
     // 递归建节点；lambda 里需要自引用，故用 std::function。
     std::function<void(QTreeWidgetItem *, const Variant &)> append = [&](QTreeWidgetItem *parent,
@@ -387,8 +423,63 @@ void qtRebuildTree(QtWindowBox *box, QTreeWidget *tree, const Variant &node) {
             if (qtHasProp(Variant(spec), "expanded")) item->setExpanded(spec.get("expanded").toBool());
         }
     };
-    append(nullptr, qtField(node, "nodes"));
+    append(nullptr, nodesValue);
+
+    if (selectedId.isEmpty()) return;
+    QTreeWidgetItemIterator it(tree);
+    while (*it) {
+        if ((*it)->data(0, Qt::UserRole).toString() == selectedId) {
+            tree->setCurrentItem(*it);
+            return;
+        }
+        ++it;
+    }
     Q_UNUSED(box);
+}
+
+void qtAppendTableRows(QTableWidget *table, const Variant &rows, const Variant &rowIds) {
+    if (!rows.isArray()) return;
+    const Array list = rows.toArray();
+    const QStringList ids = rowIds.isArray() ? toStringList(rowIds) : QStringList();
+
+    QSignalBlocker blocker(table);
+    for (size_t i = 0; i < list.count(); ++i) {
+        const Variant rowValue = list.get(i);
+        const Array cells = rowValue.isArray() ? rowValue.toArray() : Array();
+        const int r = table->rowCount();
+        const int cols = static_cast<int>(cells.count());
+        // 追加的行可能比声明的列更宽（列名没给的情况），和整表重建一样放宽列数。
+        if (cols > table->columnCount()) table->setColumnCount(cols);
+        table->insertRow(r);
+        const QString rowId =
+            i < static_cast<size_t>(ids.size()) ? ids.at(static_cast<int>(i)) : QString::number(r);
+        for (size_t c = 0; c < cells.count(); ++c) {
+            auto *item = new QTableWidgetItem(toQString(cells.get(c)));
+            if (c == 0) item->setData(Qt::UserRole, rowId);
+            table->setItem(r, static_cast<int>(c), item);
+        }
+    }
+}
+
+void qtClearContent(QWidget *widget, const QString &type) {
+    QSignalBlocker blocker(widget);
+    if (type == QLatin1String("table")) {
+        if (auto *table = qobject_cast<QTableWidget *>(widget)) table->setRowCount(0);
+        return;
+    }
+    if (type == QLatin1String("tree")) {
+        if (auto *tree = qobject_cast<QTreeWidget *>(widget)) tree->clear();
+        return;
+    }
+    if (type == QLatin1String("list")) {
+        if (auto *list = qobject_cast<QListWidget *>(widget)) list->clear();
+        return;
+    }
+    if (type == QLatin1String("combo")) {
+        if (auto *combo = qobject_cast<QComboBox *>(widget)) combo->clear();
+        return;
+    }
+    setTextValue(widget, QString());
 }
 
 // ────────────────────────────── 属性应用 ──────────────────────────────

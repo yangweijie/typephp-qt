@@ -359,6 +359,17 @@ final class QtApp
         \qt_window_close($this->handle());
     }
 
+    /**
+     * 窗口是否还开着。
+     *
+     * 多窗口应用要自己按帧轮流泵每个 QtApp（`run()` 只泵它自己那个窗口），
+     * 循环条件就得靠这个判断窗口是否已被用户关掉。
+     */
+    public function isOpen(): bool
+    {
+        return $this->window !== null && \qt_window_is_open($this->window);
+    }
+
     public function destroy(): void
     {
         if ($this->window === null) return;

@@ -64,8 +64,22 @@ function qt_window_render(mixed $window, array $tree): void {}
 /**
  * 增量补丁，用于避免整树重渲染的热路径。
  *
- * $ops 为操作数组，每项：['op'=>'set', 'id'=>'x', 'props'=>[...]]
- *                       ['op'=>'call','id'=>'x', 'method'=>'appendRows', 'args'=>[...]]
+ * $ops 为操作数组，每项两种形态之一：
+ *   ['op'=>'set',  'id'=>'x', 'props'=>['text'=>'…', ...]]   声明式改属性
+ *   ['op'=>'call', 'id'=>'x', 'method'=>'appendRows', 'args'=>[…]]  命令式调方法
+ *
+ * `call` 的 args 是**位置参数**。已实现的方法：
+ *   appendRows  args[0]=行列表（每行是单元格列表），args[1]=可选的行 id 列表。仅 table。
+ *   clear       表格去行 / 树、列表、下拉去条目 / 文本类置空。
+ *   setText     args[0]=文本。label、button、lineedit、textedit、checkbox、radio。
+ *   setValue    args[0]=值。进度条、滑块、数字框按数值；输入类按文本。
+ *   select      args[0]=行/节点 id 或索引，语义与该控件的 `current` 属性一致。
+ *   focus       args 忽略；把键盘焦点给这个控件。
+ *
+ * `call` 是声明式模型的旁路：它直接改控件，不改你的树。执行后该控件相关属性的
+ * diff 签名会被作废，下一次 `qt_window_render()` 一律以树为准重新同步 —— 也就是
+ * 说追加/清空只在下一次整树渲染前有效，想让它们长期存在就写回树里。
+ * 未知 method、未知 id 静默忽略（与未知属性一致）。
  */
 function qt_window_patch(mixed $window, array $ops): void {}
 

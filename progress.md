@@ -1,21 +1,27 @@
 # Progress Log — typephp-qt
 
-## 当前状态（Session 3 收尾，Phase 1–11 全部完成）
+## 当前状态（Session 13 收尾：Phase 1–11 完成，Phase 12.1–12.9 完成）
 
 | 项 | 状态 |
 |---|---|
 | 全部 9 个 Phase（Windows 路线） | ✅ done |
 | Phase 10（macOS 原生编译路线） | ✅ done：`qtphp build examples/hello` 在 mac 上产出真实 Mach-O arm64 可执行文件，`--selftest` 10/10、`--shot` 出图 |
 | Phase 11（macOS 运行/打包/脚手架） | ✅ done：11.1–11.6 全绿，见下三行 |
-| `qtphp test` | ✅ 103 tests / 162 assertions（Windows 与 macOS 双方言实测一致） |
+| `qtphp test` | ✅ 112 tests / 183 assertions（本轮 macOS 实测；Windows 未在本窗口复验） |
 | `qtphp lint` | ✅ 契约一致（24 个函数） |
 | 示例 `build` / `--shot` / `--selftest` / `package` | ✅ Windows 全部实测通过 |
-| 示例在 macOS 无头运行（FakeBridge） | ✅ `--selftest` 10/10、`--shot` 渲染出完整控件树 |
-| 示例在 macOS **真实 AOT 二进制 + Qt 6.11.2** | ✅ `QT_QPA_PLATFORM=offscreen`：`--selftest` 10/10 干净退出；`--shot` 760×560 PNG，菜单/分组/进度条/状态栏全对 |
+| 示例在 macOS 无头运行（FakeBridge） | ✅ 曾 `--selftest` 10/10、`--shot` 渲染出完整控件树（该 10 条为 12.3 之前的时点） |
+| 示例在 macOS **真实 AOT 二进制 + Qt 6.11.2** | ✅ `QT_QPA_PLATFORM=offscreen`：`--selftest` **14/14** 干净退出；`--shot` 760×560 PNG，状态栏与新增的「实时」分组已在图上（读图确认；菜单/分组/进度条的核对在 Phase 10–11 完成） |
+| 多窗口 / 托盘 / 定时器（12.3） | ✅ 示例演示双窗口按帧轮流泵 + `setTimer` 心跳 + 托盘点击写日志表；`QtApp::isOpen()` 与托盘兜底图标两处缺口已补；离屏 3 秒存活实测 |
+| 示例 `--difftest`（真实二进制，表格/树 diff + `patch` 的 `call`） | ✅ 12.1 新增 12 条、12.2 再加 8 条 = **20/20**；12.1 首轮曾 7/12 失败暴露 4 个 C++ 真缺陷（F13），12.2 用「临时禁用签名作废」反证断言有鉴别力（F14） |
 | `qtphp new` 模板 | ✅ 生成即可编译 + 自检通过；11.6 起同时给出 `project.macos.yml` + `Info.macos.plist`，全新项目在 mac 上 build→run→package 全链实测通过 |
-| `qtphp run` / `package`（macOS） | ✅ 11.1/11.2/11.5 完成：run 找无扩展名产物 + `otool -L` 自检 + 参数透传（`--selftest`/`--shot` 直接可用）；package 产出 `dist/Hello.app`，`env -i` 裸环境 `--selftest` 10/10 |
+| `qtphp run` / `package`（macOS） | ✅ 11.1/11.2/11.5 完成：run 找无扩展名产物 + `otool -L` 自检 + 参数透传；package 产出 `dist/Hello.app`，12.4 起 bundle 自带 offscreen 插件 ⇒ `env -i` + offscreen 下 `--selftest` 14/14、`--difftest` 20/20、cocoa 下 `--shot` 出图，均真 rc=0 |
+| bundle 的无头边界 | ✅ 已修（12.4）：`package` 在 macdeployqt 后补拷 `libqoffscreen.dylib` 并改写 Qt 引用 ⇒ 产物 `env -i QT_QPA_PLATFORM=offscreen` 可跑（F16→F17）。Windows 同款已写（12.5，**未实测**） |
 | `qtphp doctor`（macOS） | ✅ 6 项全 OK（含 11.3 新增的「PHP 运行时库」与按平台分派的 C++ 工具链检查） |
-| 代码规模 | 3879 行（C++ 1855 / PHP 框架 963 / CLI 924 / 契约 137） |
+| **Linux（Debian 12 arm64 + Qt 6.4.2）build→run→验收** | ✅ 12.7 真实测：tpc 自建 embed 运行时、产出 ELF PIE aarch64 58 MB，offscreen 下 `--selftest` 14/14、`--difftest` 20/20、`--shot` 760×560 PNG，全部 rc=0（F21） |
+| `qtphp test` / `lint` / `new` / `doctor`（Linux） | ✅ 112 tests / 183 assertions、契约一致、`project.linux.yml` 三元组推导正确、doctor 7 项全 OK（12.9 起含「Linux 构建前置」探测） |
+| `qtphp package`（Linux） | ✅ 12.8 真实测：`dist/hello/` = 二进制 + 85 个 `.so` + 10 个 Qt 插件 + `qt.conf`，140.3 MB；`readelf -d` 只剩 `(RPATH) [$ORIGIN/lib]`，`ldd`（含 `libqxcb.so` 自己那次）没有一行落在产物外；`env -i QT_QPA_PLATFORM=offscreen` 下 `--selftest` 14/14、`--difftest` 20/20、`--shot` 全 rc=0，且 PNG 与开发产物**逐字节一致**（F22） |
+| 代码规模 | 5128 行（C++ 2052 / PHP 框架 1032 / CLI 1893 / 契约 151） |
 
 **Phase 11 收尾复验（2026-10-02，无代码改动）**
 `php bin/qtphp test` → OK (103 tests / 162 assertions)；`lint` → 契约一致（24 个函数）；
@@ -23,9 +29,426 @@
 task_plan.md 的 macOS 环境段同步：私有 embed 运行时从「缺」改为「已建成并缓存」，标题改为「Phase 10–11 交付环境」。
 
 **下一步（可选，未开始）**
-- 更多控件行为测试（表格/树的 diff 边界）
-- `qt_window_patch` 的 `call` 操作实现（当前是预留）
-- 示例增加多窗口 / 托盘 / 定时器演示
+- Linux 产物的**跨发行版**验证：现在只有 Debian 12 → Debian 12，「glibc 家族留系统 + 其余全搬」在
+  Ubuntu 24.04 / Fedora 上成不成还没测；`xcb` 插件也只在**没有 X server** 的容器里验过依赖闭包，真实桌面未验
+- Windows 的 `vendorWindowsOffscreenPlugin()` 待有 Windows 环境时实测（12.5 写了但未跑过）
+- `FakeBridge::qt_fake_default_value()` 对 `table`/`tree`/`list`/`combo` 的返回值形态与真实桥接不一致（F13 尾部）
+- `--selftest`/`--difftest` 失败时退出码仍是 0，CI 里得靠 grep 判定
+- `call` 的方法表还可以长：`insertRow`/`removeRow`/`appendText`（日志流）目前都只能用整表重建绕
+
+---
+
+## Session 13 — 2026-10-02（12.9：Linux 硬前置落到 `doctor`）
+
+### 任务
+> 「继续」—— Session 12 记账时留下的「下一步」第一条：Linux 的构建/打包前置只在撞墙时才报，
+> 该让 `qtphp doctor` 提前查（F21 首轮死在 `mpfr.h`、F22 才发现 slim 镜像没 patchelf）。
+
+### 先实测探测点（不抄网上的路径）
+容器里 `dpkg -L` + `ls -l` 量出来的关键事实（全写进 F23 的表）：
+- **`gmp.h` 只在 `/usr/include/<三元组>/` 下**（`gmpxx.h` 在 `/usr/include`）⇒ 头文件搜索必须带多架构目录。
+- **`/usr/include/onigmo.h` 不存在**，Debian 的 `libonig-dev` 给的是 `oniguruma.h`
+  ⇒ 照 `--enable-mbstring` 的习惯探 `onigmo.h` 会永久误报缺失。
+- `libxml2` 的头是嵌套的 `/usr/include/libxml2/libxml/parser.h`；`xz-utils` 这个包对应的命令是 `xz`。
+
+### 代码改动（`bin/qtphp` 1828 → 1893 行）
+- 新增 `linuxMissingPackages()`：12 项前置（`bison`/`re2c`/`autoconf`/`pkg-config`/`xz-utils`/`patchelf`
+  按命令探测，`libgmp-dev`/`libmpfr-dev`/`libonig-dev`/`libxml2-dev`/`libsqlite3-dev`/`zlib1g-dev`
+  按头文件在 `/usr/include` 与 `/usr/include/<三元组>` 两处探测），返回**缺失的 apt 包名列表**。
+- `cmdDoctor()` 在 C++ 检查后加 Linux 专属一块：全齐 → `[OK] Linux 构建前置: 齐全`；
+  有缺 → `[WARN] Linux 构建前置缺失: …` + `[INFO]   apt install -y <一串包名>`（提示就是可直接粘贴的命令）。
+  **一律 warning、不进 `$allOk`** —— 保持「doctor 的 rc 只由 error 级项决定」的原语义，
+  `build`/`package` 在真正需要时仍会各自报错并给同一条 apt 提示。
+
+### 实测
+- 正向：Linux `doctor` rc=0，7 行检查项全 `[OK]`（含新增那行）。
+- **命令分支真机逼验**：`apt-get remove -y patchelf` → `[WARN] Linux 构建前置缺失: patchelf` +
+  `apt install -y patchelf`；装回来恢复齐全。（`.deb` 已不在 apt 缓存里，重装要先起 F20 的宿主代理。）
+- **头文件分支逼验**：往探测表塞一条 `definitely-not-here.h` → 报出该包名；还原后齐全。
+  多架构目录那条分支是隐式验的：`gmp.h` 只在 `<三元组>` 目录下而检查通过。
+- Linux 全套回归（`bin/qtphp` 与 mac 侧 `sha256 d6835d62…` 一致）：`doctor` 0、`test` 112/183、`lint` 0、
+  `package examples/hello` 0（140.3 MB 不变）。
+- macOS 回归：`php -l` 干净、`doctor` rc=0 且输出仍是原来 6 行（Linux 块不外溢）、`test` 112/183、`lint` 0。
+
+### 记账与收尾
+`findings.md` 新增 **F23**（探测点实测表 + 两条逼验 + 「warning 不影响 rc」的取舍）；
+`README.md` 的 `doctor` 行补 Linux 前置探测；`task_plan.md` 加 12.9、规模改 5128。
+本窗口为装卸 patchelf 重起的宿主代理收尾停掉；`tgl` 与已装好的 patchelf 保留。
+
+---
+
+## Session 12 — 2026-10-02（12.8：Linux `package` 在真机上实现并验收）
+
+### 任务
+> 「继续」—— `progress.md`「下一步」第一条：Linux 打包路线（F21 收尾时只剩它）。
+> 环境还是 F20/F21 那台 `tgl`（Debian 12 arm64 + Qt 6.4.2），宿主转发代理按 F20 的命令重起
+> （网关这次仍是 `192.168.65.1`，`/etc/apt/apt.conf.d/99hostproxy` 没改就通了）。
+
+### 先测再定方案
+1. `build/hello` 现状：`(RUNPATH) /root/.typephp/php-builder/php-8.5.11-142201d298b578e5/install/lib`，
+   NEEDED 11 个，`ldd` 传递闭包 51 行全解析到 `/lib/aarch64-linux-gnu`；**ELF 里没有 libgmp/libmpfr**
+   ⇒ 那两个 `-dev` 只是编译期头依赖，打包不用搬。
+2. `libqoffscreen.so` 自己没有 RPATH/RUNPATH，NEEDED 全在可执行文件闭包里（先被加载，dlopen 直接复用）；
+   `libqxcb.so` 另有 14 个 xcb 家族依赖**不在** exe 闭包 ⇒ 插件必须自己带 rpath，
+   「在 `project.linux.yml` 加链接期 `-Wl,-rpath`」这条路覆盖不到插件，遂放弃。
+3. 闭包尺寸：`du` 直接量软链只得 2.5 MB，`readlink -f` 后是 **89 个对象 / 83.2 MB**
+   （`libicudata.so.72.1` 单挑 29.8 MB）⇒ 决定 `platforms/` 整目录全拷不心疼。
+4. 新硬前置：slim 镜像没有 `patchelf`，`apt install patchelf` → `0.14.3-1+b1`。
+
+### 代码改动（`bin/qtphp` 1608 → 1828 行）
+- `cmdPackage()`：Linux 从「显式报错」改为派发 `packageLinuxDir()`；剩下非 Win/mac/BSD 仍显式报错。
+- 新增 `packageLinuxDir()` / `linuxQtPluginDirs()` / `elfDeps()` / `isSystemSoname()` /
+  `setLinuxRpath()` / `verifyLinuxPackage()`。产物布局
+  `dist/<name>/{<name>, lib/*.so, plugins/{platforms,xcbglintegrations}/*.so, qt.conf, assets/}`。
+- 两个关键点写进了注释与自检：**必须 DT_RPATH**（RUNPATH 不向二级依赖传递，`libQt6Gui` 的
+  `libglib/libEGL` 会回落系统库），所以 `patchelf --force-rpath` + `verifyLinuxPackage()` 里读
+  `readelf -d` 断言「有 `(RPATH)` 且无 `(RUNPATH)`」；**落地名用 soname** 而非 `readlink` 后的真名。
+- glibc 家族（libc/libm/libdl/librt/libpthread/libresolv/libnsl/libutil/libgcc_s/ld-linux）留系统，
+  **libstdc++ 搬**（GLIBCXX 符号版本卡 ABI）。
+
+### 实测（全部真 rc）
+```
+php bin/qtphp package examples/hello    → rc=0，85 个 .so + 10 个插件，dist/hello 140.3 MB
+readelf -d dist/hello/hello             → (RPATH) [$ORIGIN/lib]，无 RUNPATH
+ldd 落在产物外的行（glibc 家族除外）      → 空
+ldd plugins/platforms/libqxcb.so 同上    → 空（插件 RPATH=$ORIGIN/../../lib）
+cd dist/hello && env -i QT_QPA_PLATFORM=offscreen ./hello --selftest → 14 条 ok rc=0
+                                                       --difftest     → 20 条 ok rc=0
+                                                       --shot         → rc=0 31841 B
+```
+打包产物 PNG 与开发产物 PNG **逐字节一致**（sha256 `c79f6cc5cd4e…43a3` 两边相同）⇒ 搬库+改 rpath 没改渲染。
+自检的「仍指向产物之外」不是摆设：分支逼验（搬运循环故意漏 `libQt6XcbQpa.so.6`）逼出
+`libqxcb.so 的 libQt6XcbQpa.so.6 => /lib/aarch64-linux-gnu/…` + `rc=1`。第一次逼验（把 `libxcb.` 塞进跳过名单）
+**没触发** —— 搬运与自检共用 `isSystemSoname()`，跳过即免检；真正的漏检形态是「非 system 的 soname 不在 `lib/`」。
+重复 `package`（整棵重建）rc=0；项目目录内 `php ../../bin/qtphp package .` rc=0。
+macOS 侧无回归：`php -l`、`test` 112/183、`lint` 契约一致、`doctor` 全部 rc=0。
+
+### 记账与收尾
+`findings.md` 新增 **F22**（含 DT_RPATH/DT_RUNPATH 那条加载器规则的取舍、soname 落地名、`du` 软链坑，
+以及明确列出**未测**：真实 X 桌面、`eglfs/linuxfb/vnc` 运行、跨发行版）。
+`README.md`：平台矩阵 Linux 行改 ✅ + 实测数字、apt 行加 `patchelf`、命令表 `package` 行补 Linux 路线、
+无头验收段加 Linux 那条命令与自检语义。
+宿主侧本窗口自建的 `python3 proxy.py 192.168.65.1 3128` 收尾停掉；`tgl` 保留为 Linux 测试台。
+
+---
+
+## Session 11 — 2026-10-02（12.7：Linux 首次在真机跑通 —— Apple Container + Debian 12 arm64）
+
+### 任务
+> 「继续 linux 有 app container 应该可以模拟测试的」—— 把 F19 那句「Linux 是成建制缺口」
+> 换成真实环境证据：能在 Linux 上编译、能无头验收，就照实说；不能，就照实记。
+
+### 先解决容器网络（F20）
+容器 DNS 通但**任何出站 TCP 都不通**（`223.5.5.5:443/80`、`mirrors.aliyun.com:443`、路由器 `192.168.31.1:53`、
+甚至宿主自己的 LAN IP `192.168.31.96:19024` 全 FAIL），而容器 → 网关 `192.168.64.1:53/19022` 通。
+排除过程：全新机器同样 FAIL（不是单机坏）、`/proc/net/route` 默认路由正常、
+`--option mode=bridged` 拿到的还是 host-only 段、`container system stop/start` 无效、
+无特权助手也无网络系统扩展、应用防火墙 disabled。
+⇒ 绕行：在**宿主网关 IP** 上起只读转发代理（只放 `GET`/`HEAD`/`CONNECT`），apt/curl 指过去。
+`apt-get update` → `Fetched 9279 kB in 11s (808 kB/s)`，`https://packages.sury.org/php` 也通（CONNECT 有效）。
+副作用记两条：重启后 `default` 网段从 `192.168.64.0/24` 变成 `192.168.65.0/24`（代理要重绑），
+且一度两台机器同为 `.2` 造成 ARP 冲突（删掉探测机才恢复）。
+
+### 装出来的 Linux 环境
+`qt6-base-dev 6.4.2+dfsg-10`、`cmake 3.25.1`、`g++-12`、宿主 PHP 8.4.25 跑 CLI；
+PHP embed 源码构建依赖 `bison re2c autoconf pkg-config zlib1g-dev libxml2-dev libsqlite3-dev libonig-dev`。
+容器盘 `504G / 502G avail`，装完 Qt 后从 2.7 G 涨到 3.0 G（宿主启动卷 9.9 Gi 未受明显影响）。
+
+### 改动（`bin/qtphp` 1487 → 1608 行 + 一个新文件）
+1. **`examples/hello/project.linux.yml`（新增）**：Debian 多架构布局的编译入口 ——
+   `-I/usr/include/<三元组>/qt6{,/QtCore,/QtGui,/QtWidgets,/…/mkspecs/linux-g++}`、
+   `-fPIC -DQT_*_LIB`、`-L/usr/lib/<三元组> -lQt6Widgets -lQt6Gui -lQt6Core`（无 framework、无需 rpath）。
+2. **`linuxMultiarchTriple()` + `findQt()` 的 Linux 分支**：以 `/usr/lib/<三元组>/cmake/Qt6` 存在为判据，
+   命中才返回 `/usr`。Linux 上 `doctor` 从「Qt: 未找到」变成「Qt: /usr」。
+3. **`doctor` 的 C++ 探测**：`clang++` → `g++` 依次试（原来只认 clang++，Linux 必然误报缺工具链）。
+4. **`checkLinuxLibraryDeps()`**：`ldd` 版依赖自检，只认 `not found` 与不存在的非系统绝对路径；
+   `checkSharedLibraryDeps()` 按 `PHP_OS_FAMILY` 分派 —— F19 第 2 条（Linux 上静默返回 []）修掉。
+5. **`cmdNew()` 生成 `project.linux.yml`**：三元组在生成时按当前机器写死
+   （tpc 的 yml 只对 `sources` 支持 `PHP_OS_FAMILY` 条件，路径不插值；Debian 也没有 `/usr/include/qt6` 软链）。
+6. **`cmdRun()` 的缺依赖提示**按平台分三档，Linux 档指向 `apt install qt6-base-dev`。
+
+### 验收（全部真 rc，`out=$(…); rc=$?`）
+```
+Linux（Debian 12 arm64，Qt 6.4.2，offscreen）
+  tpc 自建 embed 运行时  → /root/.typephp/php-builder/php-8.5.11-142201d298b578e5（与 macOS 哈希不同 ⇒ 按平台分桶）
+  qtphp build examples/hello → rc=0，产物 ELF 64-bit PIE aarch64，58 MB；ldd 无 not found
+  --selftest → 14/14 rc=0        --difftest → 20/20 rc=0        --shot → 760×560 PNG rc=0（读图确认控件齐全）
+  qtphp run examples/hello --selftest → rc=0（走新的 ldd 自检）
+  qtphp test → OK (112 tests / 183 assertions)；qtphp lint → 契约一致
+  qtphp new probeapp → project.linux.yml 三元组 = aarch64-linux-gnu（正确）
+  qtphp doctor → 6 项全 OK
+  qtphp package → rc=1 +「未实现 Linux 平台的打包」（12.6 那条分支第一次在真 Linux 上跑到）
+
+macOS 回归（改完 CLI 立刻复验）
+  php -l bin/qtphp → 无语法错误；doctor → 6 项 OK（clang++ 仍排第一）
+  build examples/hello → rc=0；offscreen --selftest → rc=0
+  test → 112/183；lint → 契约一致
+```
+
+### 关键结论
+**Qt 6.4.2 与 6.11.2 上断言集完全一致**（14 + 20 全绿）⇒ 声明式 diff 引擎没踩到 6.4→6.11 的行为差。
+F19 说的「成建制缺口」现在收窄成一件事：**Linux 打包路线**（`package` 仍是显式未实现）。
+
+### 未做
+Linux 的 `dist/` 自包含打包；`doctor` 还没把 `libgmp-dev/libmpfr-dev` 这类 Linux 硬前置列成检查项；
+Windows 分支依旧未实测。
+
+### 收尾补验
+入库版 `project.linux.yml` 用的是相对路径（`../../cpp-src`、`../../php-src`），与最初在容器里手写的
+绝对路径版不同 ⇒ 用**入库文件**在容器里重跑一遍：`build` rc=0、offscreen `--selftest` 14/14 rc=0、
+`--difftest` 20/20 rc=0。容器 `tgl` 保持 running（Linux 测试台），宿主侧的转发代理与文件 HTTP 服务已停。
+
+---
+
+## Session 10 — 2026-10-02（12.6：Linux 打包不再冒充 macOS）
+
+### 任务
+> 「继续」—— 清单第一条：Linux 打包分支缺失（F18 推断出的那条）。
+
+### 结论先说
+查完的结论是 **Linux 支持是成建制的缺口，不是一行判断**（F19 列了三处），所以本轮**没有假装实现打包**，
+只修掉真正误导人的那一处：`cmdPackage()` 以前非 Windows 一律走 `packageAppBundle()`，
+Linux 上报出来的是「找不到 macdeployqt / Info.macos.plist」，指不到真正缺的东西。
+
+### 改动
+1. **`bin/qtphp`**：`cmdPackage()` 改成显式三路 —— Darwin → `.app`；Windows → `dist/`；其余 →
+   `未实现 <平台> 平台的打包` + rc=1。CLI 行数 1481 → 1487。
+2. **`README.md`**：命令表 `qtphp package` 行写明支持范围（Windows / macOS，Linux 明确报错未实现）。
+3. **`findings.md`**：F19（三处「非 Windows 即 macOS」假设：分派已修、`checkSharedLibraryDeps()` 是 Mach-O
+   专属且 Linux 静默返回 []、`cmdBuild()` 的 brew 注入与 Linux 链接方式）。
+
+### 验收（分支可达性用鉴别力反证，本机是 Darwin）
+```
+临时把 Darwin 条件改成 'TEMP-NEGATIVE-TEST' → php bin/qtphp package examples/hello
+  → [ERROR] 未实现 Darwin 平台的打包：…   rc=1   dist/ 未被改动
+还原 → grep -rn TEMP-NEGATIVE-TEST bin/qtphp src cpp-src examples → rc=1（干净）
+php -l bin/qtphp → 无语法错误
+重打包 → 99.7 MB；bundle env -i + offscreen --selftest → 14/14 ok, rc=0
+php bin/qtphp test → OK (112 tests, 183 assertions)
+```
+**边界**：这验的是新分支可达 + 退出码 + 不碰 dist，不是 Linux 上的真实行为（平台名取自 `PHP_OS_FAMILY`）。
+
+---
+
+## Session 9 — 2026-10-02（12.5：Windows 打包分支补 offscreen 插件）
+
+### 任务
+> 「继续」—— 清单第一条：Windows 侧同款（`windeployqt` 之后是否要补 `qoffscreen.dll`）。
+
+### 结论先说
+`windeployqt` 的默认插件清单**没查到权威结论**（Qt 文档只说"collects all required plugins"，
+源码 raw 抓取超时）⇒ 不押注它的行为，把补拷写成**幂等**：产物里已有 `platforms/qoffscreen.dll` 就直接返回。
+
+### 改动
+1. **`bin/qtphp`**：新 `vendorWindowsOffscreenPlugin(qtDir, distDir)`，在 `cmdPackage()` 的
+   windeployqt 之后调用；缺文件才拷、源也找不到只 warning。CLI 行数 1454 → 1481。
+2. **`findings.md`**：F18（windeployqt 结论不可得 → 幂等设计；以及顺带查到的 Linux 打包缺口）。
+
+### 验收
+- **macOS 回归（实测）**：`php -l bin/qtphp` 无语法错误；重打包 → 99.7 MB；
+  bundle `env -i` + offscreen `--selftest` → **14/14、真 rc=0**；`php bin/qtphp test` → OK (112 tests, 183 assertions)。
+- **Windows 分支：未实测**（本机无 Windows 环境）。逻辑安全性靠同构论证：`qwindows.dll` 今天就从
+  `platforms/` 加载并解析到 exe 同目录的 `Qt6*.dll`，新插件走同一套解析路径。
+
+### 顺带查到（未修）
+`cmdPackage()` 用 `PHP_OS_FAMILY !== 'Windows'` 一律走 `packageAppBundle()` ⇒ **Linux 打包走不通**
+（会去要 `macdeployqt` 与 `Info.macos.plist`）。按代码路径推断，未实测 Linux。已记为下一步候选。
+
+---
+
+## Session 8 — 2026-10-02（12.4：让 bundle 支持无头验收）
+
+### 任务
+> 「继续」—— 清单第一条：让打包产物也能 `QT_QPA_PLATFORM=offscreen` 无头验收（F16 的修法）。
+
+### 改动
+1. **`bin/qtphp`**：新增 `vendorHeadlessPlugin(qtDir, contents)` —— 拷 `libqoffscreen.dylib` 进
+   `Contents/PlugIns/platforms/`，并把 `@rpath/Qt*` 引用改写成 `@executable_path/../Frameworks/...`；
+   插件路径同时喂给 `vendorBundleDeps()` 兜绝对依赖。`packageAppBundle()` 在 macdeployqt 之后调它，
+   找不到插件只 warning（打包不该因缺测试插件而失败）。CLI 行数 1404 → 1454。
+2. **`README.md`**：无头验收段从「产物不能 offscreen」改成「package 会自动补插件」+ 两条验收命令；
+   命令表 `qtphp package` 行补注。
+3. **`findings.md`**：F17（含 macdeployqt 不修 `LC_RPATH` 这个关键点、为何不拷 minimal、全部实测数字）。
+
+### 验收（`env -i` 裸环境，真退出码）
+```
+package            → 「已补无头验收插件」，99.7 MB（比上一轮 +0.1 MB）
+bundle --selftest  (offscreen) → 14/14 ok, rc=0
+bundle --difftest  (offscreen) → 20/20 ok, rc=0
+bundle --shot      (cocoa)     → rc=0, 760×560 PNG 正常（读图确认，仅 F12 的 IMK 噪声）
+otool -L 插件       → 只剩 @executable_path/../Frameworks 与系统框架
+codesign --verify --deep --strict → OK
+php bin/qtphp lint → 契约一致；php bin/qtphp test → OK (112 tests, 183 assertions)；php -l bin/qtphp → 无语法错误
+```
+
+### 未做
+Windows 的 `windeployqt` 路径没动 —— 本机无 Windows 环境，`qoffscreen.dll` 是否随之部署未实测。
+
+---
+
+## Session 7 — 2026-10-02（12.3 之后复验打包链）
+
+### 任务
+> 「继续」—— `progress.md`「下一步」清单第一条：12.3 加了托盘/定时器后重跑 `package` → 裸环境自检。
+
+### 实测
+```
+php bin/qtphp package examples/hello
+  → 打包完成 dist/Hello.app（CLI 报 99.6 MB，du -sh 83M）
+env -i PATH=/usr/bin:/bin HOME=$HOME Hello.app/Contents/MacOS/hello --selftest   → 14 行 ok + "selftest passed"，rc=0
+env -i … --difftest   → 20 行 ok + "difftest passed"，rc=0
+env -i … --shot /tmp/qtphp-pkg.png   → rc=0，PNG 760×560，「实时」分组与状态栏在图上（读图确认）
+```
+
+### 新发现（详见 F16）
+**bundle 不能 offscreen**：`Contents/PlugIns/platforms/` 里只有 `libqcocoa.dylib`，
+所以 `env -i QT_QPA_PLATFORM=offscreen Hello.app/.../hello --selftest` 直接 SIGABRT（真 rc=134，
+stderr 是 `Available platform plugins are: cocoa.`）。build 目录那个二进制能 offscreen 是靠开发机的
+`/opt/homebrew/share/qt/plugins/platforms/libqoffscreen.dylib` —— 该能力不随 bundle 走。
+⇒ 对产物的裸环境验收必须走 cocoa（需 GUI 会话），上面三条就是这么跑的。
+
+### 仍未验证
+`--selftest` 里的 `tray` 用例是 `dispatch(['type'=>'tray'])` **合成事件**，只证明 handler 挂得上；
+真机上托盘图标是否出现、点得到点不到，本轮没看。
+
+### 自我纠正两处
+1. 一开始把 `headless(true)` 当成 QPA 平台开关读了 —— 实际它只绕开模态框（`src/QtApp.php:192`）。
+2. 第一次跑 offscreen 那条用了 `cmd 2>&1 | tail`，`$?` 拿到的是 `tail` 的 0，**差点把 SIGABRT 记成通过**；
+   改成先 `out=$(cmd 2>&1); rc=$?` 才看到真 rc=134。
+
+---
+
+## Session 6 — 2026-10-02（Phase 12.3：多窗口 / 托盘 / 定时器演示）
+
+### 任务
+> 「继续」—— 下一个计划项 12.3：示例补多窗口 / 托盘 / 定时器演示，同时 `--selftest`、`--shot`、`--difftest` 三者保持全绿。
+
+### 本轮改动
+1. **`src/QtApp.php`**：新增公开 `isOpen()`（`window !== null && qt_window_is_open(...)`）。
+2. **`cpp-src/qt_bridge.cc`**：`setTray()` 补**兜底图标** —— 原来只在 `icon` 非空时 `setIcon()`，
+   现依次回退「窗口图标 → `style()->standardIcon(QStyle::SP_ComputerIcon)`」。
+3. **`cpp-src/qt_common.h`**：`#include <QStyle>`。
+4. **`examples/hello/src/main.php`**：`$state` 增 `ticks`/`tray`/`log`；视图新增「实时」分组
+   （`live_count` label + `open_log_btn`）；`setTray()` + `onAny('tray')`、`setTimer('clock',1000)` +
+   `on('clock','timer')`；`open_log_btn` 懒建副窗口（`new QtApp()` + `createWindow` + 一次性 `render`，**不是 `view()`**，
+   否则每帧重渲染会把 `appendRows` 的行冲掉）；新全局 `log_append()` 走 `patch/call appendRows`；
+   `main()` 尾部由 `$app->run()` 换成**双窗口按帧轮流泵** + `$app->destroy()`。
+5. **`tests/QtAppTest.php`**：+4 例（`isOpen` 生命周期 / 未建窗口不抛 / 副窗口独立泵 / tray+timer 分派）。
+6. **`examples/hello/src/main.php`（验收）**：`self_test()` +4 条用例（open_log_btn / timer / tray / close_log_btn），
+   `--selftest` 分支补 `$state['log']->destroy()` 避免副窗口实例滞留。
+7. **`README.md`**：新增「多窗口 / 托盘 / 定时器」章节（泵循环片段、timer/tray 事件口径、托盘兜底理由、
+   托盘不可用与 `notify` 回退）；无头验收改为「三个内置开关」、断言数 20 条；测试数 108→112。
+8. **`task_plan.md` / `findings.md`**：Phase 12 收口（12.1/12.2/12.3 全 `[x]`）、F14、F15。
+
+### 两处真实缺口（不是美化）
+- **缺 `isOpen()`**：`QtApp::run()` 每帧只 `process_events` + `drainEvents` **自己那个窗口**的队列，
+  所以多窗口必须自己写轮流泵的外层循环，而循环条件需要「主窗口还开着吗」这个问法。
+- **托盘无图标不显示**：macOS/Linux 上空的 `QSystemTrayIcon` 根本不出现 ⇒ 「托盘演示」会是看不见也点不到的空壳。
+- **`tray` 事件不带 id**：`handleEvent` 的分支是 `if ($id !== '' && …)`，`enqueue("tray")` 无 id ⇒ 只能用 `onAny('tray', …)`。
+- **`appendRows` 前必须先泵一帧**：`patch` 查的是已存在的控件，`render()` 之后立刻追加会静默丢掉第一条日志。
+
+### 验收（本轮实测，`QT_QPA_PLATFORM=offscreen`）
+```
+php bin/qtphp build examples/hello   → Build successful: examples/hello/build/hello
+./build/hello --selftest             → 14 行 ok + "selftest passed"
+./build/hello --difftest             → 20 行 ok + "difftest passed"
+./build/hello --shot /tmp/qtphp-123.png → rc=0，PNG 760 x 560（「实时」分组已在图上，读图确认）
+php bin/qtphp test                   → OK (112 tests, 183 assertions)
+php bin/qtphp lint                   → [OK] 契约一致
+```
+离屏泵循环 + 真实 `QTimer` 后台跑 3 秒：`ALIVE after 3s (pid=74522)`，日志仅 1 行字体噪声、无 PHP 错误，进程已清理。
+**边界说明**：3 秒存活只证明不崩，不替 handler 可调用背书 —— 后者的证据是 `--selftest` 那 4 条新用例。
+
+### AOT 侧新验证
+`date('H:i:s')` 在编译产物里可调用；把 `QtApp` 实例存进 `array<string,mixed>` 的 `$state` 再用 `instanceof` 取出来用，可行（此前仓库无先例）。
+
+---
+
+## Session 5 — 2026-10-02（Phase 12.2：`patch()` 的 `call` 操作）
+
+### 任务
+> 「继续实现 12.2」—— 把 `qt_window_patch` 里那个 `Q_UNUSED` 预留桩变成真行为。
+
+### 本轮改动
+1. **`cpp-src/qt_bridge.cc`**：`call` 分支实现六个方法（`appendRows`/`clear`/`setText`/`setValue`/`select`/`focus`），
+   `args` 统一按位置参数取；新增 `QtWindowBox::forgetProps(id, keys)` 作废被命令式改过属性的 diff 签名。
+   `select` 复用 `qtApplyProp("current")`，`setValue` 在 `text`/`value` 间按控件类别分派 —— 两条路径共用一套口径。
+2. **`cpp-src/qt_widgets.cc`**：新 `qtAppendTableRows()`（尾部追加、不清空、不动选中，写 `Qt::UserRole` 行 id，
+   按最宽行扩列）与 `qtClearContent()`（按类型清：table 去行 / tree、list、combo 去条目 / 文本类置空）。
+3. **`cpp-src/qt_common.h`**：上述三者的声明。
+4. **`php-src/qt.stub.php`**：`qt_window_patch` docblock 从两行示例扩到完整方法表 + 位置参数约定 +
+   「命令式旁路、下一次 render 以树为准」的语义说明。
+5. **`src/FakeBridge.php`**：镜像六个方法，并加「未知 id 整条 `call` 跳过」守卫（真实桥接是 `if (!widget) continue;`）。
+6. **`tests/QtAppTest.php`**：+5 例（appendRows / clear 按类型 / setText+setValue / select+focus / 未知方法与未知 id）。
+7. **`examples/hello/src/main.php`**：`--difftest` +8 条真实 Qt 断言（含追加行按 id 可选中、`clear` 后置空、
+   **命令式改过后重渲染必须以树为准**、label/lineedit/progress 的 `setText`/`setValue`、`focus` 不改值）。
+8. **`README.md`**：新增「增量补丁」章节（`set` 与 `call` 两种形态 + 六个方法表 + 旁路语义）；
+   测试数 103→108、`--difftest` 断言数说明改 20 条。
+
+### 为什么需要 forgetProps（这轮的真正收获）
+`propSigs_` 记的是「上次应用过的值」，而命令式改控件不经过它。不作废就会：`clear` 清空表 →
+下一次 `render()` 同一棵树算出的 `rows` 签名与存储值**相等** → `structuralChanged()` false → 不重建 → **表永久为空**。
+摘掉键后比较的是 `""` vs 真实签名（连 undef 的签名都是 `"\x01"`），必然不等 ⇒ 下一次 render 重新同步。
+
+### 验收（本轮实测，`QT_QPA_PLATFORM=offscreen`）
+```
+build examples/hello                          → Build successful
+--difftest                                    → 20 行 ok + "difftest passed"
+--selftest                                    → "selftest passed"
+--shot /tmp/qtphp-122.png                     → PNG 760 x 560
+php bin/qtphp test                            → OK (108 tests, 173 assertions)
+php bin/qtphp lint                            → [OK] 契约一致
+```
+
+### 鉴别力反证（防止断言空跑）
+把 `forgetProps()` 临时改成 `return;` 重编译 → 第 16 条 `FAIL table 命令式改过后重渲染以树为准 -> {"row":-1,"value":""}`，
+正是预测的「永久空表」失效模式；删掉临时行重新编译后恢复 20/20，并 `grep TEMP-NEGATIVE-TEST cpp-src/*` 确认源码干净（rc=1）。
+
+---
+
+## Session 4 — 2026-10-02（Phase 12.1：表格/树 diff 边界验收）
+
+### 任务
+> 用户指定的三条里的第一条：「更多控件行为测试（表格/树的 diff 边界）」。
+
+### 结论先说
+在真实 AOT 二进制 + Qt 6.11.2 下新写的 12 条断言**首轮 7/12 失败** —— 也就是说 README 那句
+「表格选中/滚动位置在重渲染后保留」此前是**空头承诺**。四个根因都已修掉，现在 12/12。
+这类缺陷 FakeBridge 测不到：它不重建控件、不持有 Qt 选中状态。
+
+### 本轮改动
+1. **`cpp-src/qt_common.h`**：新增 `qtIsStructuralKey(type,key)` / `qtStructuralKeys(type)` —— 结构键按控件类型判定
+   （`table` → `columns`/`rows`/`row_ids`，`tree` → `headers`/`nodes`）；`QtWindowBox` 声明私有
+   `bool structuralChanged(id,node,type)`。
+2. **`cpp-src/qt_bridge.cc`**：
+   - `buildNode()` 里表格/树的重建**移到 `applyNodeProps()` 之前**，且只在 `structuralChanged()` 为真时执行；
+   - `applyNodeProps()` 跳过键改为 `id`/`type`/`children` + `qtIsStructuralKey(type,key)`
+     （顺带救活 `QTextEdit` 被误杀的 `rows` 属性）；
+   - 新 `structuralChanged()`：复用 `propSigs_[id]` 里的签名，不另建一套状态；
+   - `patch()` 的 `set` 分支原先把**操作数组**传给重建函数（`qtField(node,"rows")` 恒取不到 ⇒
+     `setRowCount(0)`/`clear()` 把控件清空），改为先按 `props` 重建、再跳过结构键。
+3. **`cpp-src/qt_widgets.cc`**：`qtRebuildTable`/`qtRebuildTree` 在数据非数组时**提前 return，不做任何破坏性调用**；
+   重建后按 `Qt::UserRole` 的**行 id / 节点 id** 恢复选中（`row_ids`/`id` 缺失才退化成索引），
+   恢复段包在 `QSignalBlocker` 内以免发出用户没做过的 `select` 事件；`columns` 为空时列数扩到最宽行
+   （控件默认构造是 `QTableWidget(0,1)`）。
+4. **`examples/hello/src/main.php`**：新增 `--difftest` 开关 + `diff_table_node()`/`diff_tree_node()`/`diff_test()`，
+   12 条断言。用独立窗口跑，避免主窗口 `view()` 的每帧重渲染把表格删掉。
+5. **`README.md`**：无头验收从「两个开关」改成「三个内置开关」并写明为何必须用真实二进制；
+   补 `current` 在 table/tree/list/combo/tabs/stack 上的各自语义与「按 id 跨帧保留选中」。
+
+### 验收（本轮实测，`QT_QPA_PLATFORM=offscreen`）
+```
+./examples/hello/build/hello --difftest   → 12 行 ok + "difftest passed"，rc=0
+./examples/hello/build/hello --selftest   → "selftest passed"
+./examples/hello/build/hello --shot …     → PNG 760 x 560
+php bin/qtphp test                        → OK (103 tests, 162 assertions)
+php bin/qtphp lint                        → [OK] 契约一致
+```
+
+### 踩坑
+- clang++：`no matching member function for call to 'get'` —— `php::Array::get` 只接 `const char*`/`size_t`，
+  不接 `QString`；`const QByteArray name = key.toUtf8(); spec.get(name.constData())`。
+- 结构键跳过表初版类型无关，直接把 `QTextEdit` 的 `rows` 属性判成表格结构键 ⇒ 属性静默失效。
 
 ---
 

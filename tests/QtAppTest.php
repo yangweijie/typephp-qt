@@ -69,6 +69,55 @@ final class QtAppTest extends TestCase
         $this->assertFalse(qt_window_is_open($this->app->handle()));
     }
 
+    public function testIsOpenReflectsWindowLifecycle(): void
+    {
+        $this->assertTrue($this->app->isOpen());
+        $this->app->close();
+        $this->assertFalse($this->app->isOpen());
+    }
+
+    public function testIsOpenFalseBeforeAnyWindow(): void
+    {
+        $this->assertFalse((new QtApp())->isOpen(), '没建过窗口的实例不该抛异常');
+    }
+
+    public function testSecondWindowPumpsIndependently(): void
+    {
+        // 示例里的多窗口泵循环就是这个形状：每个 QtApp 只泵自己那个窗口。
+        $extra = new QtApp();
+        $extra->createWindow('副窗口', []);
+        $extra->render(WidgetTree::vbox([WidgetTree::label('日志', ['id' => 'l1'])]));
+        $extra->runFrames(1);
+
+        $this->assertSame(1, $extra->frameCount());
+        $this->assertTrue($extra->isOpen());
+        $this->assertSame('日志', $extra->text('l1'));
+
+        $extra->close();
+        $this->assertFalse($extra->isOpen());
+        $this->assertTrue($this->app->isOpen(), '关副窗口不该影响主窗口');
+    }
+
+    public function testTrayAndTimerEventsDispatch(): void
+    {
+        $seen = [];
+        $this->app->setTray(['tooltip' => 't', 'visible' => true]);
+        $this->app->setTimer('clock', 1000);
+        // 托盘事件不带 id，只能由 onAny 接住。
+        $this->app->onAny('tray', function () use (&$seen): void {
+            $seen[] = 'tray';
+        });
+        $this->app->on('clock', 'timer', function () use (&$seen): void {
+            $seen[] = 'timer';
+        });
+
+        $this->app->dispatch(['type' => 'tray']);
+        $this->app->dispatch(['type' => 'timer', 'id' => 'clock']);
+
+        $this->assertSame(['tray', 'timer'], $seen);
+        $this->assertSame(1000, \TypePHP\Qt\Fake\FakeState::$timers[$this->app->handle()]['clock']);
+    }
+
     public function testDestroyClearsHandle(): void
     {
         $this->app->destroy();
@@ -514,6 +563,94 @@ final class QtAppTest extends TestCase
 
         $this->app->patch([['op' => 'set', 'id' => 'lbl', 'props' => ['text' => 'after']]]);
         $this->assertSame('after', $this->app->text('lbl'));
+    }
+
+    public function testPatchCallAppendRowsKeepsExistingRows(): void
+    {
+        $this->app->render(WidgetTree::vbox([
+            WidgetTree::table(['名称'], [['甲']], ['id' => 'tbl', 'row_ids' => ['r1']]),
+        ]));
+        $this->app->run(1);
+
+        $this->app->patch([[
+            'op' => 'call', 'id' => 'tbl', 'method' => 'appendRows',
+            'args' => [[['乙'], ['丙']], ['r2', 'r3']],
+        ]]);
+
+        $table = \TypePHP\Qt\Fake\FakeState::$props[$this->app->handle()]['tbl'];
+        $this->assertSame([['甲'], ['乙'], ['丙']], $table['rows']);
+        $this->assertSame(['r1', 'r2', 'r3'], $table['row_ids']);
+    }
+
+    public function testPatchCallClearEmptiesByType(): void
+    {
+        $this->app->render(WidgetTree::vbox([
+            WidgetTree::table(['名称'], [['甲']], ['id' => 'tbl', 'row_ids' => ['r1']]),
+            WidgetTree::label('文本', ['id' => 'lbl']),
+        ]));
+        $this->app->run(1);
+
+        $this->app->patch([
+            ['op' => 'call', 'id' => 'tbl', 'method' => 'clear'],
+            ['op' => 'call', 'id' => 'lbl', 'method' => 'clear'],
+        ]);
+
+        $props = \TypePHP\Qt\Fake\FakeState::$props[$this->app->handle()];
+        $this->assertSame([], $props['tbl']['rows'], '表格 clear 走 rows');
+        $this->assertSame('', $props['lbl']['text'], 'label clear 走 text');
+    }
+
+    public function testPatchCallSetTextAndValue(): void
+    {
+        $this->app->render(WidgetTree::vbox([
+            WidgetTree::label('before', ['id' => 'lbl']),
+            WidgetTree::lineEdit('old', ['id' => 'in']),
+            WidgetTree::progress(10, ['id' => 'pg']),
+        ]));
+        $this->app->run(1);
+
+        $this->app->patch([
+            ['op' => 'call', 'id' => 'lbl', 'method' => 'setText', 'args' => ['after']],
+            ['op' => 'call', 'id' => 'in', 'method' => 'setValue', 'args' => ['typed']],
+            ['op' => 'call', 'id' => 'pg', 'method' => 'setValue', 'args' => [66]],
+        ]);
+
+        $this->assertSame('after', $this->app->text('lbl'));
+        $this->assertSame('typed', $this->app->text('in'));
+        $this->assertSame(66, $this->app->value('pg'));
+    }
+
+    public function testPatchCallSelectAndFocus(): void
+    {
+        $this->app->render(WidgetTree::vbox([
+            WidgetTree::table(['名称'], [['甲'], ['乙']], ['id' => 'tbl', 'row_ids' => ['r1', 'r2']]),
+            WidgetTree::lineEdit('x', ['id' => 'in']),
+        ]));
+        $this->app->run(1);
+
+        $this->app->patch([
+            ['op' => 'call', 'id' => 'tbl', 'method' => 'select', 'args' => ['r2']],
+            ['op' => 'call', 'id' => 'in', 'method' => 'focus'],
+        ]);
+
+        $props = \TypePHP\Qt\Fake\FakeState::$props[$this->app->handle()];
+        $this->assertSame('r2', $props['tbl']['current'], 'select 写进 current，与声明式同义');
+        $this->assertTrue($props['in']['focused']);
+        $this->assertSame('x', $this->app->text('in'), 'focus 不该改值');
+    }
+
+    public function testPatchCallIgnoresUnknownMethodAndId(): void
+    {
+        $this->app->render(WidgetTree::vbox([WidgetTree::label('keep', ['id' => 'lbl'])]));
+        $this->app->run(1);
+
+        $this->app->patch([
+            ['op' => 'call', 'id' => 'lbl', 'method' => 'noSuchMethod', 'args' => ['x']],
+            ['op' => 'call', 'id' => 'ghost', 'method' => 'setText', 'args' => ['x']],
+            ['op' => 'call', 'id' => 'lbl'],
+        ]);
+
+        $this->assertSame('keep', $this->app->text('lbl'));
     }
 
     // ── 截图 ──

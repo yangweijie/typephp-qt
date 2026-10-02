@@ -23,6 +23,9 @@ function main(int $argc, array $argv): void
         'clicks' => 0,
         'dark' => false,
         'progress' => 0,
+        'ticks' => 0,
+        'tray' => 0,
+        'log' => null,
     ];
 
     $app = new QtApp();
@@ -44,6 +47,10 @@ function main(int $argc, array $argv): void
         ]],
     ]);
     $app->setStatus(['就绪']);
+
+    // 系统托盘：不传 icon 时桥接会兜底用窗口图标/标准图标 —— macOS、Linux 上
+    // **没有图标的托盘项根本不显示**，传不传都得能看见、能点。
+    $app->setTray(['tooltip' => 'Hello TypePHP-Qt · 左键点一下', 'visible' => true]);
 
     // ── 视图：每帧按 $state 重新描述界面 ──
     // 控件状态（输入光标、表格选中、滚动位置）由 C++ 侧的 id diff 保留。
@@ -87,6 +94,17 @@ function main(int $argc, array $argv): void
                     WidgetTree::button('重置', ['id' => 'reset_btn']),
                     WidgetTree::spacer(1),
                     WidgetTree::label('点击次数：' . $state['clicks'], ['id' => 'click_count']),
+                ]),
+            ]),
+
+            WidgetTree::group('实时', [
+                WidgetTree::hbox([
+                    WidgetTree::label(
+                        '心跳 ' . $state['ticks'] . ' 跳 · 托盘点击 ' . $state['tray'] . ' 次',
+                        ['id' => 'live_count']
+                    ),
+                    WidgetTree::button('打开日志窗口', ['id' => 'open_log_btn']),
+                    WidgetTree::spacer(1),
                 ]),
             ]),
 
@@ -155,6 +173,49 @@ function main(int $argc, array $argv): void
         $app->alert("TypePHP\\Qt 示例应用\n构建于 TypePHP AOT + Qt 6", '关于');
     });
 
+    // ── 托盘 / 定时器 / 副窗口 ──
+
+    // 托盘事件不带 id（点的是托盘项本身），所以只能挂 onAny。
+    $app->onAny('tray', function () use ($app, &$state) {
+        $state['tray'] = (int) $state['tray'] + 1;
+        $app->setStatus(['托盘点击 ' . $state['tray'] . ' 次']);
+        log_append($state['log'], 'tray click');
+    });
+
+    $app->on('clock', 'timer', function () use ($app, &$state) {
+        $state['ticks'] = (int) $state['ticks'] + 1;
+        $app->setStatus(['心跳 ' . $state['ticks'] . ' 跳']);
+        log_append($state['log'], 'tick 第 ' . $state['ticks'] . ' 跳');
+    });
+
+    // 副窗口就是第二个 QtApp 实例：qt_app_create 幂等，QApplication 全程只有一个。
+    $app->on('open_log_btn', 'click', function () use (&$state) {
+        if ($state['log'] instanceof QtApp) {
+            return;  // 已打开就不重复建
+        }
+        $log = new QtApp();
+        $log->createWindow('运行日志', ['width' => 560, 'height' => 300]);
+        $log->render(WidgetTree::vbox([
+            WidgetTree::table(['时间', '事件'], [], ['id' => 'log_tbl', 'stretch_last' => true]),
+            WidgetTree::hbox([
+                WidgetTree::button('关闭日志', ['id' => 'close_log_btn']),
+                WidgetTree::spacer(1),
+            ]),
+        ]));
+        $log->on('close_log_btn', 'click', function () use (&$state) {
+            if ($state['log'] instanceof QtApp) {
+                $state['log']->close();
+            }
+        });
+        $state['log'] = $log;
+        // 先泵一帧让控件建出来：patch 找的是已存在的控件，否则第一条日志会被丢掉。
+        $log->runFrames(1);
+        log_append($log, '日志窗口已打开');
+    });
+
+    // 定时器放在所有 handler 之后注册：到 run() 里才会真的开始跳。
+    $app->setTimer('clock', 1000);
+
     // 无头验收：--shot <path> 渲染几帧后存 PNG 退出。
     $shot = shot_path($argv);
     if ($shot !== '') {
@@ -168,12 +229,251 @@ function main(int $argc, array $argv): void
     // 这能在无头环境覆盖"闭包参数个数不匹配"这类只在 AOT 下暴露的问题。
     if (has_flag($argv, '--selftest')) {
         self_test($app);
+        // close_log_btn 只是关窗，实例还在 $state 里 —— 自检末尾补一次 destroy。
+        if ($state['log'] instanceof QtApp) {
+            $state['log']->destroy();
+        }
         $app->destroy();
         return;
     }
 
-    $app->run();
+    // 无头验收：--difftest 断言表格/树的差异更新边界（选中、行 id、列数变化）。
+    // 只有真 Qt 才谈得上「diff 边界」，所以这块不进 PHPUnit，走 AOT 二进制。
+    if (has_flag($argv, '--difftest')) {
+        diff_test($app);
+        $app->destroy();
+        return;
+    }
+
+    // GUI：每个 QtApp 只泵自己那个窗口，所以多窗口要自己按帧轮流泵。
+    // 副窗口被关掉（点按钮或标题栏 ×）就地销毁并从状态里摘掉，主窗口关闭时循环结束。
+    while ($app->isOpen()) {
+        $app->runFrames(1);
+
+        $log = $state['log'];
+        if ($log instanceof QtApp) {
+            if ($log->isOpen()) {
+                $log->runFrames(1);
+            } else {
+                $log->destroy();
+                $state['log'] = null;
+            }
+        }
+    }
+    $app->destroy();
 }
+
+/**
+ * 往日志副窗口追加一行：走 patch 的 call/appendRows 热路径。
+ *
+ * 不整树重渲染是因为 —— 命令式追加之后签名已作废，下一次 render 会以树为准
+ * 重建、把追加的行冲掉。日志这种「只增不改」的场景就该用 appendRows。
+ */
+function log_append(mixed $log, string $text): void
+{
+    if (!$log instanceof QtApp) {
+        return;
+    }
+    $log->patch([[
+        'op' => 'call',
+        'id' => 'log_tbl',
+        'method' => 'appendRows',
+        'args' => [[[date('H:i:s'), $text]]],
+    ]]);
+}
+
+/** 组一个表格节点：$rows 是「每行一组单元格」，$rowIds 与行一一对应（空则不传）。 */
+function diff_table_node(array $columns, array $rows, array $rowIds, array $props = []): array
+{
+    $node = WidgetTree::table($columns, $rows, array_merge(['id' => 'tbl'], $props));
+    if ($rowIds !== []) {
+        $node['row_ids'] = $rowIds;
+    }
+    return $node;
+}
+
+/** 组一个树节点。 */
+function diff_tree_node(array $nodes, array $props = []): array
+{
+    return WidgetTree::tree($nodes, array_merge(['id' => 'tr'], $props));
+}
+
+/**
+ * 表格/树 diff 边界验收。
+ *
+ * 用独立窗口：主窗口的 view() 每帧重画整棵树，表格不在那棵树里会被 diff 直接销毁。
+ */
+function diff_test(QtApp $app): void
+{
+    $app->headless(true);
+
+    $w = new QtApp();
+    $w->create(['name' => 'difftest']);
+    $w->createWindow('Diff Test', ['width' => 720, 'height' => 520]);
+
+    $failed = 0;
+
+    // 断言一条：失败时把实际值打出来（表格值是个数组）。
+    $check = function (string $label, bool $ok, string $got) use (&$failed): void {
+        if ($ok) {
+            echo "ok   {$label}\n";
+            return;
+        }
+        echo "FAIL {$label} -> {$got}\n";
+        $failed++;
+    };
+
+    // 渲染一帧并回读表格选中。
+    $frameTable = function (array $node) use ($w): array {
+        $w->render(WidgetTree::vbox([$node]));
+        $w->run(1);
+        $value = $w->value('tbl');
+        return is_array($value) ? $value : [];
+    };
+
+    $columns = ['名称', '数量', '备注'];
+    $rows = [['苹果', '1', ''], ['香蕉', '2', ''], ['橙子', '3', '']];
+    $ids = ['r1', 'r2', 'r3'];
+
+    // 1. 首次渲染带 current：声明式选中必须命中 row_ids 里的 id。
+    $got = $frameTable(diff_table_node($columns, $rows, $ids, ['current' => 'r2']));
+    $check('table current=r2 首次生效', ($got['value'] ?? '') === 'r2', json_encode($got, JSON_UNESCAPED_UNICODE));
+
+    // 2. 同一棵树原样再渲染：选中是控件状态，diff 不该把它抹掉。
+    $got = $frameTable(diff_table_node($columns, $rows, $ids));
+    $check('table 重渲染保留选中', ($got['value'] ?? '') === 'r2', json_encode($got, JSON_UNESCAPED_UNICODE));
+
+    // 3. 头部插一行：选中要跟着 **行 id** 走，而不是跟着索引走。
+    $grown = array_merge([['新行', '0', '']], $rows);
+    $got = $frameTable(diff_table_node($columns, $grown, array_merge(['r0'], $ids)));
+    $check('table 插行后选中跟随行 id', ($got['value'] ?? '') === 'r2', json_encode($got, JSON_UNESCAPED_UNICODE));
+
+    // 4. 列数变化（3 → 4）：行数与选中都不该被这次重排弄丢。
+    $wide = [];
+    foreach ($rows as $row) {
+        $wide[] = array_merge($row, ['ok']);
+    }
+    $got = $frameTable(diff_table_node(['名称', '数量', '备注', '状态'], $wide, $ids, ['current' => 'r2']));
+    $check('table 列数变化后仍命中行 id', ($got['value'] ?? '') === 'r2', json_encode($got, JSON_UNESCAPED_UNICODE));
+
+    // 5. 没有 row_ids 的边界：行 id 退化成索引，删掉一行后选中只能按索引找回，且不得越界。
+    $fewer = [['香蕉', '2', ''], ['橙子', '3', '']];
+    $got = $frameTable(diff_table_node($columns, $fewer, []));
+    $row = (int) ($got['row'] ?? -1);
+    $check('table 无 row_ids 时选中不越界', $row >= -1 && $row < count($fewer), json_encode($got, JSON_UNESCAPED_UNICODE));
+
+    // 回到三行并声明选中，给下面两条补丁用例一个已知起点。
+    $read = function () use ($w): array {
+        $value = $w->value('tbl');
+        return is_array($value) ? $value : [];
+    };
+    $got = $frameTable(diff_table_node($columns, $rows, $ids, ['current' => 'r2']));
+
+    // 6. 补丁只碰非结构属性时，行内容必须原样留着（早先这里是无条件 setRowCount(0)）。
+    $w->patch([['op' => 'set', 'id' => 'tbl', 'props' => ['enabled' => false]]]);
+    $got = $read();
+    $check('table 补丁改非结构属性不清空行', ($got['value'] ?? '') === 'r2' && (int) ($got['row'] ?? -1) === 1, json_encode($got, JSON_UNESCAPED_UNICODE));
+
+    // 7. 补丁换数据（rows 在 props 里，不在 op 顶层）：重建后按行 id 找回选中。
+    $w->patch([['op' => 'set', 'id' => 'tbl', 'props' => [
+        'rows' => [['乙', '2', ''], ['甲', '1', '']],
+        'row_ids' => ['r2', 'r1'],
+    ]]]);
+    $got = $read();
+    $check('table 补丁换 rows 后按行 id 保留选中', ($got['value'] ?? '') === 'r2' && (int) ($got['row'] ?? -1) === 0, json_encode($got, JSON_UNESCAPED_UNICODE));
+
+    // 8. 树：current 按节点 id 命中。
+    $nodes = [
+        ['id' => 'n1', 'text' => '第一组', 'expanded' => true, 'children' => [
+            ['id' => 'n1a', 'text' => '子项 A'],
+            ['id' => 'n1b', 'text' => '子项 B'],
+        ]],
+        ['id' => 'n2', 'text' => '第二组'],
+    ];
+    $w->render(WidgetTree::vbox([diff_tree_node($nodes, ['current' => 'n2'])]));
+    $w->run(1);
+    $gotTree = (string) $w->value('tr');
+    $check('tree current=n2 首次生效', $gotTree === 'n2', var_export($gotTree, true));
+
+    // 9. 树重渲染保留选中（clear() 会把 currentItem 抹掉，属同一类缺陷）。
+    $w->render(WidgetTree::vbox([diff_tree_node($nodes)]));
+    $w->run(1);
+    $gotTree = (string) $w->value('tr');
+    $check('tree 重渲染保留选中', $gotTree === 'n2', var_export($gotTree, true));
+
+    // 10. 树结构变化（给 n2 加子节点）后仍按 id 找回选中。
+    $nodes2 = $nodes;
+    $nodes2[1]['children'] = [['id' => 'n2a', 'text' => '子项 C']];
+    $w->render(WidgetTree::vbox([diff_tree_node($nodes2)]));
+    $w->run(1);
+    $gotTree = (string) $w->value('tr');
+    $check('tree 结构变化后选中跟随节点 id', $gotTree === 'n2', var_export($gotTree, true));
+
+    // 11. 树的补丁只碰非结构属性时不得 clear() —— clear 会把节点、展开态、选中一起抹掉。
+    $w->patch([['op' => 'set', 'id' => 'tr', 'props' => ['enabled' => false]]]);
+    $gotTree = (string) $w->value('tr');
+    $check('tree 补丁改非结构属性不清空节点', $gotTree === 'n2', var_export($gotTree, true));
+
+    // 12. 树的补丁换 nodes：重建后仍按节点 id 找回选中。
+    $w->patch([['op' => 'set', 'id' => 'tr', 'props' => ['nodes' => [
+        ['id' => 'n2', 'text' => '第二组'],
+        ['id' => 'n1', 'text' => '第一组'],
+    ]]]]);
+    $gotTree = (string) $w->value('tr');
+    $check('tree 补丁换 nodes 后保留选中', $gotTree === 'n2', var_export($gotTree, true));
+
+    // 13. call appendRows：只往尾部加行，已有行和选中都不该被动到。
+    $w->render(WidgetTree::vbox([diff_table_node($columns, $rows, $ids, ['current' => 'r2'])]));
+    $w->run(1);
+    $w->patch([['op' => 'call', 'id' => 'tbl', 'method' => 'appendRows',
+        'args' => [[['苹果汁', '4', ''], ['橙汁', '5', '']], ['r4', 'r5']]]]);
+    $got = $read();
+    $check('table call appendRows 不动已有行与选中',
+        ($got['value'] ?? '') === 'r2' && (int) ($got['row'] ?? -1) === 1, json_encode($got, JSON_UNESCAPED_UNICODE));
+
+    // 14. 追加行的行 id 必须真的写进 UserRole，否则按 id 选不中它。
+    $w->patch([['op' => 'call', 'id' => 'tbl', 'method' => 'select', 'args' => ['r5']]]);
+    $got = $read();
+    $check('table call select 命中追加行的 id',
+        ($got['value'] ?? '') === 'r5' && (int) ($got['row'] ?? -1) === 4, json_encode($got, JSON_UNESCAPED_UNICODE));
+
+    // 15. call clear：整表清空，取值退化到「无选中」。
+    $w->patch([['op' => 'call', 'id' => 'tbl', 'method' => 'clear']]);
+    $got = $read();
+    $check('table call clear 清空行',
+        ($got['value'] ?? '') === '' && (int) ($got['row'] ?? -1) === -1, json_encode($got, JSON_UNESCAPED_UNICODE));
+
+    // 16. 清空后原样重渲染必须把行建回来：appendRows/clear 作废了结构签名，
+    // diff 才会重建。没作废的话这里会是一张永久空表 —— 命令式改过的控件最常见的踩坑。
+    $w->render(WidgetTree::vbox([diff_table_node($columns, $rows, $ids)]));
+    $w->run(1);
+    $w->patch([['op' => 'call', 'id' => 'tbl', 'method' => 'select', 'args' => ['r3']]]);
+    $got = $read();
+    $check('table 命令式改过后重渲染以树为准',
+        ($got['value'] ?? '') === 'r3' && (int) ($got['row'] ?? -1) === 2, json_encode($got, JSON_UNESCAPED_UNICODE));
+
+    // 17. 文本/数值控件上的命令式调用。lineedit 的 setValue 走文本，progress 的走数值。
+    $w->render(WidgetTree::vbox([
+        WidgetTree::label('起点', ['id' => 'lb']),
+        WidgetTree::lineEdit('old', ['id' => 'in']),
+        WidgetTree::progress(10, ['id' => 'pg']),
+    ]));
+    $w->run(1);
+    $w->patch([
+        ['op' => 'call', 'id' => 'lb', 'method' => 'setText', 'args' => ['新标题']],
+        ['op' => 'call', 'id' => 'in', 'method' => 'setValue', 'args' => ['新值']],
+        ['op' => 'call', 'id' => 'pg', 'method' => 'setValue', 'args' => [66]],
+        ['op' => 'call', 'id' => 'in', 'method' => 'focus'],
+    ]);
+    $check('label call setText', $w->text('lb') === '新标题', var_export($w->text('lb'), true));
+    $check('lineedit call setValue 按文本', $w->text('in') === '新值', var_export($w->text('in'), true));
+    $check('progress call setValue 按数值', (int) $w->value('pg') === 66, var_export($w->value('pg'), true));
+    $check('call focus 不改控件值', $w->text('in') === '新值', var_export($w->text('in'), true));
+
+    $w->destroy();
+    echo $failed === 0 ? "difftest passed\n" : "difftest failed: $failed\n";
+}
+
 
 /**
  * 逐个触发所有已注册控件的事件，验证 handler 可调用。
@@ -198,6 +498,10 @@ function self_test(QtApp $app): void
         ['click', 'msg_btn'],
         ['click', 'doc_link', 'https://example.com'],
         ['menu', 'menu.about'],
+        ['click', 'open_log_btn'],
+        ['timer', 'clock'],
+        ['tray', ''],
+        ['click', 'close_log_btn'],
     ];
 
     $app->run(1);

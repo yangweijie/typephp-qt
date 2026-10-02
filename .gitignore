@@ -44,3 +44,4 @@ composer.lock
 *.png
 !docs/**/*.png
 !examples/**/assets/*.png
+.phpunit.cache

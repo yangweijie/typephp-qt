@@ -52,6 +52,7 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QStyle>
 #include <QStyleFactory>
 #include <QSystemTrayIcon>
 #include <QTabWidget>
@@ -120,6 +121,29 @@ inline bool qtHasProp(const Variant &node, const char *key) {
     return !(v.isUndef() || v.isNull());
 }
 
+/**
+ * 表格/树的**结构字段**：它们不能走逐属性应用，必须由整表/整树重建处理。
+ *
+ * 注意 `rows` 在这里有歧义 —— QTextEdit 的 `rows` 是可视行数（普通属性），
+ * QTableWidget 的 `rows` 是数据（结构）。所以判定要看类型，见 qtIsStructuralKey()。
+ */
+inline bool qtIsStructuralKey(const QString &type, const QString &key) {
+    if (type == QLatin1String("table")) {
+        return key == QLatin1String("columns") || key == QLatin1String("rows") || key == QLatin1String("row_ids");
+    }
+    if (type == QLatin1String("tree")) {
+        return key == QLatin1String("headers") || key == QLatin1String("nodes");
+    }
+    return false;
+}
+
+/** 该类型的结构字段清单（顺序稳定，用于算签名）。 */
+inline QStringList qtStructuralKeys(const QString &type) {
+    if (type == QLatin1String("table")) return {QStringLiteral("columns"), QStringLiteral("rows"), QStringLiteral("row_ids")};
+    if (type == QLatin1String("tree")) return {QStringLiteral("headers"), QStringLiteral("nodes")};
+    return {};
+}
+
 inline int qtPropInt(const Variant &node, const char *key, int fallback = 0) {
     const Variant v = node.toArray().get(key);
     return v.isUndef() || v.isNull() ? fallback : static_cast<int>(v.toInt());
@@ -178,6 +202,12 @@ QLayout *qtContainerLayout(QWidget *container);
 
 /** 整表重建（列/行/行 id），需要在节点上下文里调用。 */
 void qtRebuildTable(QtWindowBox *box, QTableWidget *table, const Variant &node);
+
+/** 往表格尾部追加行（不清空、不动已有行的选中）。`rowIds` 可为 undef。 */
+void qtAppendTableRows(QTableWidget *table, const Variant &rows, const Variant &rowIds);
+
+/** 清空控件内容：表格去行、树/列表/下拉去条目、文本类置空。 */
+void qtClearContent(QWidget *widget, const QString &type);
 
 /** 整树重建（nodes），需要在节点上下文里调用。 */
 void qtRebuildTree(QtWindowBox *box, QTreeWidget *tree, const Variant &node);
@@ -260,6 +290,10 @@ class QtWindowBox : public Box {
                        QList<ChildSlot> &siblings, const QString &path);
     QWidget *ensureWidget(const Variant &node, const QString &type, const QString &id);
     void applyNodeProps(QWidget *widget, const QString &type, const QString &id, const Variant &node);
+    /** 表格/树的结构字段是否变了（变了才整表/整树重建）。 */
+    bool structuralChanged(const QString &id, const Variant &node, const QString &type);
+    /** 摘掉这些键的签名，让下一次 render 必然重新应用（命令式 call 改过控件后用）。 */
+    void forgetProps(const QString &id, const QStringList &keys);
     void syncChildren(QWidget *container, const QString &type, const QList<ChildSlot> &desired);
     void forgetSubtree(QWidget *root);
     void removeStale();

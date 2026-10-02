@@ -103,17 +103,70 @@ namespace {
     {
         foreach ($ops as $op) {
             if (!is_array($op)) continue;
-            if (($op['op'] ?? '') !== 'set') continue;
-            if (!isset($op['props']) || !is_array($op['props'])) continue;
-
             $id = (string) ($op['id'] ?? '');
-            foreach ($op['props'] as $key => $value) {
-                FakeState::$props[$window][$id][$key] = $value;
-                if ($key === 'text' || $key === 'value') {
-                    FakeState::$values[$window][$id] = $value;
-                } elseif ($key === 'checked') {
-                    FakeState::$values[$window][$id] = (bool) $value;
+            $kind = (string) ($op['op'] ?? '');
+
+            if ($kind === 'set') {
+                if (!isset($op['props']) || !is_array($op['props'])) continue;
+                foreach ($op['props'] as $key => $value) {
+                    FakeState::$props[$window][$id][$key] = $value;
+                    if ($key === 'text' || $key === 'value') {
+                        FakeState::$values[$window][$id] = $value;
+                    } elseif ($key === 'checked') {
+                        FakeState::$values[$window][$id] = (bool) $value;
+                    }
                 }
+                continue;
+            }
+
+            if ($kind !== 'call') continue;
+            // 与真实桥接一致：控件不存在就整条跳过，而不是凭空造一份状态。
+            if (!isset(FakeState::$props[$window][$id])) continue;
+            $method = (string) ($op['method'] ?? '');
+            $args = array_values(array_slice((array) ($op['args'] ?? []), 0, 2));
+            $type = (string) (FakeState::$props[$window][$id]['type'] ?? '');
+
+            switch ($method) {
+                case 'appendRows':
+                    if ($type !== 'table') break;
+                    $rows = (array) (FakeState::$props[$window][$id]['rows'] ?? []);
+                    foreach ((array) ($args[0] ?? []) as $row) {
+                        $rows[] = $row;
+                    }
+                    FakeState::$props[$window][$id]['rows'] = $rows;
+                    if (isset($args[1])) {
+                        $ids = (array) (FakeState::$props[$window][$id]['row_ids'] ?? []);
+                        foreach ((array) $args[1] as $rowId) {
+                            $ids[] = $rowId;
+                        }
+                        FakeState::$props[$window][$id]['row_ids'] = $ids;
+                    }
+                    break;
+                case 'clear':
+                    $key = match ($type) {
+                        'table' => 'rows',
+                        'tree' => 'nodes',
+                        'list', 'combo' => 'items',
+                        default => 'text',
+                    };
+                    FakeState::$props[$window][$id][$key] = $key === 'text' ? '' : [];
+                    FakeState::$values[$window][$id] = $key === 'text' ? '' : null;
+                    break;
+                case 'setText':
+                    FakeState::$props[$window][$id]['text'] = $args[0] ?? '';
+                    FakeState::$values[$window][$id] = $args[0] ?? '';
+                    break;
+                case 'setValue':
+                    $prop = $type === 'lineedit' || $type === 'textedit' ? 'text' : 'value';
+                    FakeState::$props[$window][$id][$prop] = $args[0] ?? '';
+                    FakeState::$values[$window][$id] = $args[0] ?? '';
+                    break;
+                case 'select':
+                    FakeState::$props[$window][$id]['current'] = $args[0] ?? '';
+                    break;
+                case 'focus':
+                    FakeState::$props[$window][$id]['focused'] = true;
+                    break;
             }
         }
     }

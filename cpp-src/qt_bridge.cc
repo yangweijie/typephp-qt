@@ -282,6 +282,15 @@ QWidget *QtWindowBox::buildNode(const Variant &node, QWidget *parentWidget, cons
         return nullptr;
     }
 
+    // 重型重建：必须在 applyNodeProps **之前**。
+    // 顺序反过来的话，节点上的 current 先选中一行，紧接着 setRowCount(0)/clear()
+    // 就把选中抹了 —— 「表格选中重渲染后保留」这条承诺会整个失效。
+    if ((type == QLatin1String("table") || type == QLatin1String("tree"))
+        && structuralChanged(id, spec, type)) {
+        if (auto *table = qobject_cast<QTableWidget *>(widget)) qtRebuildTable(this, table, spec);
+        else if (auto *tree = qobject_cast<QTreeWidget *>(widget)) qtRebuildTree(this, tree, spec);
+    }
+
     applyNodeProps(widget, type, id, spec);
 
     // 记录 title/label 供容器使用
@@ -306,13 +315,6 @@ QWidget *QtWindowBox::buildNode(const Variant &node, QWidget *parentWidget, cons
             buildNode(childArray.get(i), childParent, childParentType, childSlots, childPath);
         }
         syncChildren(childParent, childParentType, childSlots);
-    }
-
-    // 重型重建
-    if (type == QLatin1String("table")) {
-        if (auto *table = qobject_cast<QTableWidget *>(widget)) qtRebuildTable(this, table, spec);
-    } else if (type == QLatin1String("tree")) {
-        if (auto *tree = qobject_cast<QTreeWidget *>(widget)) qtRebuildTree(this, tree, spec);
     }
 
     // 把自己登记到父容器的 siblings
@@ -357,10 +359,11 @@ void QtWindowBox::applyNodeProps(QWidget *widget, const QString &type, const QSt
 
     for (auto it = spec.begin(); it != spec.end(); ++it) {
         const QString key = toQString(it.key());
-        if (key == QLatin1String("id") || key == QLatin1String("type") || key == QLatin1String("children")
-            || key == QLatin1String("rows") || key == QLatin1String("row_ids") || key == QLatin1String("nodes")
-            || key == QLatin1String("columns") || key == QLatin1String("headers")) {
-            continue;  // 结构字段由 buildNode/重建逻辑处理
+        if (key == QLatin1String("id") || key == QLatin1String("type") || key == QLatin1String("children")) {
+            continue;
+        }
+        if (qtIsStructuralKey(type, key)) {
+            continue;  // 由 structuralChanged()/重建逻辑处理
         }
         const Variant value = it.value();
         const QString sig = qtSignature(value);
@@ -368,6 +371,32 @@ void QtWindowBox::applyNodeProps(QWidget *widget, const QString &type, const QSt
         sigs.insert(key, sig);
         qtApplyProp(this, widget, type, key, value);
     }
+}
+
+/**
+ * 表格/树的结构字段是否变了（变了才值得整表重建，并把新签名记进 propSigs_）。
+ *
+ * 结构签名与普通属性签名共用 propSigs_[id]：applyNodeProps() 会跳过结构字段，
+ * 所以两边不会互相覆盖。
+ */
+bool QtWindowBox::structuralChanged(const QString &id, const Variant &node, const QString &type) {
+    const Array spec = node.toArray();
+    QHash<QString, QString> &sigs = propSigs_[id];
+    bool changed = false;
+    for (const QString &key : qtStructuralKeys(type)) {
+        const QByteArray name = key.toUtf8();
+        const QString sig = qtSignature(spec.get(name.constData()));
+        if (sigs.value(key) == sig) continue;
+        sigs.insert(key, sig);
+        changed = true;
+    }
+    return changed;
+}
+
+void QtWindowBox::forgetProps(const QString &id, const QStringList &keys) {
+    auto it = propSigs_.find(id);
+    if (it == propSigs_.end()) return;
+    for (const QString &key : keys) it.value().remove(key);
 }
 
 void QtWindowBox::syncChildren(QWidget *container, const QString &type, const QList<ChildSlot> &desired) {
@@ -493,27 +522,61 @@ void QtWindowBox::patch(const Array &ops) {
             if (!props.isArray()) continue;
             const Array propArray = props.toArray();
             const QString type = types_.value(id);
+
+            // 结构字段先重建，再应用其余属性 —— 与 render 路径同一套顺序。
+            // 结构数据在 ops 的 `props` 里，不在 op 本身，早先传 spec 等于把表清空。
+            if ((type == QLatin1String("table") || type == QLatin1String("tree"))
+                && structuralChanged(id, props, type)) {
+                if (auto *table = qobject_cast<QTableWidget *>(widget)) qtRebuildTable(this, table, props);
+                else if (auto *tree = qobject_cast<QTreeWidget *>(widget)) qtRebuildTree(this, tree, props);
+            }
+
             QHash<QString, QString> &sigs = propSigs_[id];
             for (auto it = propArray.begin(); it != propArray.end(); ++it) {
                 const QString key = toQString(it.key());
+                if (qtIsStructuralKey(type, key)) continue;
                 const Variant value = it.value();
                 const QString sig = qtSignature(value);
                 if (sigs.value(key) == sig) continue;
                 sigs.insert(key, sig);
                 qtApplyProp(this, widget, type, key, value);
             }
-            // 重型重建
-            if (type == QLatin1String("table")) {
-                if (auto *table = qobject_cast<QTableWidget *>(widget)) qtRebuildTable(this, table, spec);
-            } else if (type == QLatin1String("tree")) {
-                if (auto *tree = qobject_cast<QTreeWidget *>(widget)) qtRebuildTree(this, tree, spec);
-            }
         } else if (kind == QLatin1String("call")) {
             const QString method = toQString(spec.get("method"));
-            const Variant args = spec.get("args");
-            // 预留：appendRows / clear / setText / setValue 等
-            Q_UNUSED(method);
-            Q_UNUSED(args);
+            const Variant argsValue = spec.get("args");
+            const Array args = argsValue.isArray() ? argsValue.toArray() : Array();
+            const QString type = types_.value(id);
+
+            // 命令式旁路：改完之后把对应键的签名摘掉，下一次 render 必然以树为准重新同步。
+            // 不摘就会出事后「签名说没变、控件其实变了」——表格被清空却没人重建它。
+            if (method == QLatin1String("appendRows")) {
+                if (auto *table = qobject_cast<QTableWidget *>(widget)) {
+                    qtAppendTableRows(table, args.get(0), args.get(1));
+                    forgetProps(id, qtStructuralKeys(type));
+                }
+            } else if (method == QLatin1String("clear")) {
+                qtClearContent(widget, type);
+                QStringList keys = qtStructuralKeys(type);
+                keys << QStringLiteral("items") << QStringLiteral("text") << QStringLiteral("value");
+                forgetProps(id, keys);
+            } else if (method == QLatin1String("setText")) {
+                qtApplyProp(this, widget, type, QStringLiteral("text"), args.get(0));
+                forgetProps(id, {QStringLiteral("text")});
+            } else if (method == QLatin1String("setValue")) {
+                if (qobject_cast<QLineEdit *>(widget) || qobject_cast<QTextEdit *>(widget)) {
+                    qtApplyProp(this, widget, type, QStringLiteral("text"), args.get(0));
+                    forgetProps(id, {QStringLiteral("text"), QStringLiteral("value")});
+                } else {
+                    qtApplyProp(this, widget, type, QStringLiteral("value"), args.get(0));
+                    forgetProps(id, {QStringLiteral("value")});
+                }
+            } else if (method == QLatin1String("select")) {
+                // 与声明式的 `current` 同一套语义（table/tree 按 id，list/tabs 按索引）。
+                qtApplyProp(this, widget, type, QStringLiteral("current"), args.get(0));
+                forgetProps(id, {QStringLiteral("current")});
+            } else if (method == QLatin1String("focus")) {
+                widget->setFocus();
+            }
         }
     }
 }
@@ -603,7 +666,16 @@ void QtWindowBox::setTray(const Array &spec) {
             if (reason == QSystemTrayIcon::Trigger) enqueue(QStringLiteral("tray"));
         });
     }
-    if (!iconPath.isEmpty()) tray_->setIcon(QIcon(iconPath));
+    if (!iconPath.isEmpty()) {
+        tray_->setIcon(QIcon(iconPath));
+    } else if (window_) {
+        // 没给图标时必须兜底：macOS/Linux 上**无图标的托盘项根本不显示**，
+        // 「托盘演示」就变成看不见也点不到的空壳。
+        const QIcon windowIcon = window_->windowIcon();
+        tray_->setIcon(windowIcon.isNull()
+                           ? window_->style()->standardIcon(QStyle::SP_ComputerIcon)
+                           : windowIcon);
+    }
     if (!tooltip.isEmpty()) tray_->setToolTip(tooltip);
     if (visible) tray_->show();
     else tray_->hide();

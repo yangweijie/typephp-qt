@@ -1,0 +1,44 @@
+# Linux 入口：qtphp build 在 Linux 上用它（Windows 仍用 project.yml，macOS 用 project.macos.yml）。
+#
+# Debian/Ubuntu 的 qt6-base-dev 是**多架构布局**：头文件在
+# /usr/include/<三元组>/qt6，库在 /usr/lib/<三元组>，插件在 /usr/lib/<三元组>/qt6/plugins。
+# 三元组 = `dpkg-architecture -qDEB_HOST_MULTIARCH`（x86_64-linux-gnu / aarch64-linux-gnu）；
+# Arch、openSUSE 那种 `/usr/include/qt6` 布局直接把下面两处换成 /usr/include/qt6 与 /usr/lib。
+#
+# 链接法与 macOS 完全不同：没有 framework，就是 -L + -lQt6Xxx；Qt 装在系统目录所以不需要 rpath。
+#
+# include 合并时列表是**整体替换、不是追加**，故框架内两条 include 路径要在下面重写一遍。
+include:
+  - project.yml
+
+include-paths:
+  - ../../cpp-src
+  - ../../php-src
+  - /usr/include/aarch64-linux-gnu/qt6
+  - /usr/include/aarch64-linux-gnu/qt6/QtCore
+  - /usr/include/aarch64-linux-gnu/qt6/QtGui
+  - /usr/include/aarch64-linux-gnu/qt6/QtWidgets
+  # Qt 头会引用 mkspec 里的 qplatformdefs.h
+  - /usr/lib/aarch64-linux-gnu/qt6/mkspecs/linux-g++
+
+# 清掉 MSVC 的 .lib 名词法与链接目录：链接开关全在 ld-flags 里。
+link-libs: []
+link-paths: []
+
+cxx-flags:
+  - -fPIC
+  - -DQT_CORE_LIB
+  - -DQT_GUI_LIB
+  - -DQT_WIDGETS_LIB
+
+ld-flags:
+  - -L/usr/lib/aarch64-linux-gnu
+  - -lQt6Widgets
+  - -lQt6Gui
+  - -lQt6Core
+
+# 宿主 PHP 通常只有 cli SAPI（无 libphp），让 tpc 从 php-src 现编私有 embed 运行时。
+# 缓存在 ~/.typephp/php-builder 下，之后所有构建复用；首次构建会慢（要编译整个 php-src）。
+php-builder:
+  extensions: []
+  zts: false

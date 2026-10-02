@@ -390,3 +390,405 @@ php bin/qtphp run /tmp/fakeproj --selftest '--shot /tmp/a b.png'; echo "rc=$?"
 凡是要从「用户传进来的目录路径」推导**产物文件名**的地方都得先规范化。
 
 **Windows 侧同样成立**（按模板代码推断，本机无法实机验证）：`package.bat` 用的就是 `.`。
+
+## F12. macOS 启动期噪声：`error messaging the mach port for IMKCFRunLoopWakeUpReliable`
+
+用户直跑 `examples/hello/build/hello` 时终端打出这一行，怀疑是缺陷。实测结论：**无害，且不是我们报的**。
+
+| 证据 | 结果 |
+|---|---|
+| 全仓 grep `IMK`（`bin` `src` `cpp-src` `php-src` `tests` `examples`） | 唯一命中是 `examples/hello/build/cache/.../stable-ids.json` 里的 base64 键（生成物），**源码零命中** |
+| 复现频率（cocoa 真平台，非 offscreen） | 10:22:35 用户那次、10:23:49 我这次各 1 条；随后 5 次 `--shot`、1 次拷进临时 `.app/Contents/MacOS/` 启动、1 次真窗口存活 5 s 的运行 **全部 0 条** ⇒ 间歇性，约 2/8 |
+| 功能是否受影响 | 每条都 `rc=0`；`--shot` 每次出图（19 KB PNG）；`QT_QPA_PLATFORM=offscreen` 下从不出现 ⇒ cocoa 专有 |
+| 用户那次是否崩/卡 | 事发约 3 分钟后 `pgrep -x hello` 仍能抓到 PID 67060 ⇒ 事件循环活着；之后进程消失（窗口被关） |
+
+**归属说明（这是推断，不是查出来的）**：`IMKCFRunLoopWakeUpReliable` 是 Apple InputMethodKit
+的 mach port 名，故这条 NSLog 来自系统输入框架而非 Qt 或本仓库。想证实到具体 dylib 需要
+`strings` 系统框架二进制，而 macOS 11+ 起它们在 dyld shared cache 里、磁盘上取不到 ——
+本机实测 `strings` 三个框架均 0 命中，所以止步于「字符串语义」这一层。
+
+**处置**：不处理。从终端直跑才会看见；`dist/Hello.app` 双击时 stderr 无人接。开发期想要干净日志：
+`./build/hello 2>/dev/null`，或走 `qtphp run` / 打包产物。
+
+## F13. 表格/树 diff 的四个真实缺陷（Phase 12.1，`--difftest` 实测）
+
+`--difftest` 首跑 **7/12 失败**，逐条追到 C++，四个根因：
+
+1. **重建顺序反了**（主因）。`buildNode()` 先 `applyNodeProps()`（其中 `current` → `selectRow()`/`setCurrentItem()`），
+   后 `qtRebuildTable()`/`qtRebuildTree()` —— 而重建里是 `setRowCount(0)` / `tree->clear()`。
+   于是**声明式选中永远无效**，连第一次渲染都不生效（不是「重渲染才丢」）。
+   ⇒ 表格/树的重建挪到 `applyNodeProps()` **之前**。
+
+2. **重建无条件跑**。`buildNode()` 尾部的重建没有任何签名守卫，每帧整表/整树全量重画：
+   大表每帧 O(n) 重建、选中/展开态被抹、item 指针全换。
+   ⇒ 新增 `QtWindowBox::structuralChanged(id, node, type)`：对 `columns/rows/row_ids`（table）
+   与 `headers/nodes`（tree）算签名，变了才重建。签名存进**既有的** `propSigs_[id]` ——
+   普通属性循环会跳过这些键，所以两套签名不会互相覆盖。
+
+3. **`patch()` 把错误的节点交给重建**：`qtRebuildTable(this, table, spec)` 里 `spec` 是 op 本身
+   （`['op'=>'set','id'=>…,'props'=>[…]]`），而 `qtField(node,'rows')` 读的是**顶层** `rows` —— 永远读不到。
+   结果 `setRowCount(0)` 后面没数据 ⇒ **一次只改 `enabled` 的补丁把整张表清空**（树同理，是 `clear()`）。
+   ⇒ 改为传 `props`，且顺序与 render 路径一致（先重建再逐属性）。
+
+4. **结构字段的跳过表是类型无关的**。`applyNodeProps()` 硬编码跳过 `rows/columns/row_ids/nodes/headers`，
+   而 `rows` 对 **QTextEdit 是普通属性**（可视行数，`qtApplyProp()` 里有实现）⇒ 走 render 时这条实现是死代码。
+   ⇒ 换成 `qtIsStructuralKey(type, key)` + `qtStructuralKeys(type)`（`qt_common.h`），按类型判定。
+
+**选中保留的口径**（重建里新增）：清内容前记住 `currentRow` 首列的 `Qt::UserRole`（行 id），
+填完后**按 id** 找回 —— 按索引记会在插行后选中错位；整段在 `QSignalBlocker` 内，不产生假 `select` 事件。
+树同理，用 `QTreeWidgetItemIterator` 按节点 id 找回。
+`qtRebuildTable` 还补了「没给 `columns` 时按最宽一行扩列」—— 控件构造是 `QTableWidget(0,1)`，
+不扩列则第 2 列之后的 `setItem` 静默失败。
+
+**顺带**：`columns.isEmpty()` 与 `rows` 缺失时**不再清表**（早先 `setRowCount(0)` 在 `isArray()` 检查之前）。
+
+`--difftest` 12/12 过、`--selftest` 仍 10/10、`--shot` 760×560、PHPUnit 103 例全绿。
+
+**仍未覆盖的边界**（下一步候选）：`FakeBridge` 的 `qt_fake_default_value()` 对 `table`/`tree`/`list`/`combo`
+返回 `null`，与真实桥接的数组/字符串形态不一致 —— 纯 PHP 测试里读这些控件的值会拿到跟生产不同的形状。
+
+## F14. `patch()` 的 `call` 操作落地（Phase 12.2，`--difftest` 实测）
+
+原状态：`qt_window_patch` 的 `call` 分支只有 `Q_UNUSED(method); Q_UNUSED(args);` —— 契约里写了、README 没写、
+调用方拿不到任何行为。现实现六个方法（`appendRows` / `clear` / `setText` / `setValue` / `select` / `focus`），
+`args` 统一按**位置参数**取（`args[0]`、`args[1]`），避免为每种方法发明一套对象形状。
+
+**命令式旁路必须让 diff 签名作废**，这是这一条真正的技术含量：
+`propSigs_` 记的是「上次应用过的值」，命令式改控件不经过它。不作废的话 —— `clear` 把表清空后，
+下一次 `render()` 拿同一棵树算出的 `rows` 签名与存储值**相等** ⇒ `structuralChanged()` 返回 false ⇒ 不重建 ⇒
+**表永久是空的**。新增 `QtWindowBox::forgetProps(id, keys)` 摘掉被命令式改过的键
+（`appendRows`/`clear` 摘结构键，`setText` 摘 `text`，`select` 摘 `current`…），
+缺失键的签名比较是 `""` vs 真实签名（含 undef 也是 `"\x01"`），必然不等 ⇒ 下一次 render 以树为准重新同步。
+文档口径同步写进 stub 与 README：命令式的改动只在下一次整树渲染前有效。
+
+`select` 不另写一套选中逻辑，直接 `qtApplyProp(..., "current", args[0])` —— 与声明式同一实现，
+避免 table 按行 id、tree 按节点 id、list 按索引这些口径在两条路径上漂移。
+`setValue` 对 `QLineEdit`/`QTextEdit` 走文本、其余走 `value`，与 `qtWidgetValue()` 的读数口径对齐。
+
+**鉴别力反证（关键，否则断言可能是空跑）**：把 `forgetProps()` 临时改成空操作重编译，
+`--difftest` 第 16 条「table 命令式改过后重渲染以树为准」精确失败为 `{"row":-1,"value":""}`
+—— 正是预测的「永久空表」失效模式；恢复后 20/20。这条反证说明该断言真的在验签名作废，而不是碰巧通过。
+（`appendRows`/`clear`/`select` 三条形同成功地被保留：它们验的是方法本身，不依赖作废。）
+
+实测（`QT_QPA_PLATFORM=offscreen`）：`--difftest` 20/20、`--selftest` passed、`--shot` 760×560 PNG、
+`qtphp test` 108 tests / 173 assertions、`qtphp lint` 契约一致。
+
+FakeBridge 侧同步实现六个方法，并加了一条与真实桥接一致的守卫：控件 id 未知时整条 `call` 跳过
+（真实桥接是 `if (!widget) continue;`），否则纯 PHP 测试会给不存在的控件凭空写出状态、验不出「打错 id」这类问题。
+`focus` 在假桥里记成 `props['focused'] = true` —— 桥接契约没有「查询焦点」的函数，真实 Qt 侧只能断言它不改值。
+
+## F15. 多窗口 / 托盘 / 定时器（Phase 12.3，示例 + 两处真实缺口）
+
+**多窗口的真实约束**：`QtApp::run()` 的循环条件是 `\qt_window_is_open($this->handle())`，
+每帧只 `process_events` + `drainEvents` **自己那个窗口**的事件队列。所以第二个窗口的控件信号
+会入它自己的队列而没人取 —— 界面能画（Qt 全局事件被主窗口的泵带起来了），但 PHP 侧 handler 永远不触发。
+⇒ 多窗口必须自己按帧轮流泵；为此给 `QtApp` 补了 `isOpen()`（3 行，包已有的 `qt_window_is_open`），
+否则示例连「主窗口还开着吗」都问不出来。`--selftest` 里 `open_log_btn`/`close_log_btn` 两条用例
+就是走这条真路径（`new QtApp()` + `createWindow` + `render` + `patch/appendRows` + `close`）。
+
+**泵循环 + 真实 QTimer 的存活实测**：`QT_QPA_PLATFORM=offscreen ./build/hello` 后台跑 3 秒
+（1 秒一跳 ⇒ 期间至少触发 3 次），进程仍存活、日志只有 1 行字体噪声、无 PHP 错误。
+这条只证明「泵循环与 QTimer 接线不崩」；tick handler 可调用由 `--selftest` 的 `timer clock` 用例证明，
+`appendRows` 落进真实表格由 `--difftest` 第 13/14 条证明 —— 三件事各有一条证据，没有一条能替另一条背书。
+
+**托盘兜底图标不是美化**：`setTray()` 原来只在 `icon` 非空时 `setIcon()`，
+而 macOS/Linux 上**无图标的 `QSystemTrayIcon` 根本不显示** ⇒ 不传 icon 的「托盘演示」是看不见也点不到的空壳。
+现改为：给了就用给的，没给用窗口图标，窗口也没图标时用 `style()->standardIcon(SP_ComputerIcon)`（需 `#include <QStyle>`）。
+
+**托盘事件不带 id**：`enqueue("tray")` 的 id 是空串，而 `QtApp::handleEvent()` 的分支是
+`if ($id !== '' && isset($handlers[$id][$type]))` ⇒ 空 id 只能由 `onAny('tray', …)` 接住。
+这是读代码读出来的口径，测试里用 `dispatch(['type'=>'tray'])`（不带 id）验了一遍。
+
+**示例里 `patch/appendRows` 的一个使用前提**：副窗口 `render()` 之后必须**先泵一帧**再 `appendRows` ——
+`patch` 查的是 `widgets_` 里已存在的控件，没泵过就找不到 `log_tbl`，第一条日志会被静默丢掉
+（`patch` 对未知 id 静默忽略，与未知属性一致）。所以 `open_log_btn` 里是
+`render() → runFrames(1) → log_append(...)`。
+
+**AOT 侧新验证到的两点**（此前仓库里没有任何先例）：`date('H:i:s')` 在 tpc 编译产物里可正常调用；
+把 `QtApp` 实例存进 `$state['log']`（`array<string,mixed>`）再取出用 `instanceof` 判类型可行。
+
+实测（`QT_QPA_PLATFORM=offscreen`）：`--selftest` **14/14**（新增 4 条）、`--difftest` 20/20、
+`--shot` 760×560（新增「实时」分组已在图上）、`qtphp test` **112 tests / 183 assertions**、`qtphp lint` 契约一致。
+
+## F16. 打包链复验（12.3 之后）：bundle 不带 offscreen 插件
+
+`php bin/qtphp package examples/hello` → `dist/Hello.app`（CLI 报 99.6 MB，`du -sh` 83M）。
+产物本身没问题，**但它的无头能力和 build 目录里的二进制不一样**：
+
+```
+Contents/PlugIns/platforms/  →  只有 libqcocoa.dylib
+
+$ env -i QT_QPA_PLATFORM=offscreen Hello.app/Contents/MacOS/hello --selftest
+qt.qpa.plugin: Could not find the Qt platform plugin "offscreen" in ""
+This application failed to start because no Qt platform plugin could be initialized.
+Available platform plugins are: cocoa.
+true rc=134          # SIGABRT
+```
+
+- **为什么 build 目录的 `hello` 能 offscreen**：它从开发机的 Qt 安装解析插件
+  （`/opt/homebrew/share/qt/plugins/platforms/` 里有 `libqoffscreen.dylib`、`libqminimal.dylib`），
+  而 macdeployqt 只按目标平台拷 `libqcocoa.dylib`。⇒ **offscreen 依赖开发机，不随 bundle 走**。
+- **`headless(true)` 与 QPA 平台无关**（`src/QtApp.php:192`）：它只让 `message()`/`confirm()` 直接返回默认值，
+  避免 `exec()` 弹模态永久阻塞。别把它读成「无头模式开关」—— 我这次就先读错了。
+- **正确口径**：对 bundle 做裸环境验收要用 cocoa（需要 GUI 会话）：
+  `env -i PATH=/usr/bin:/bin HOME=$HOME Hello.app/Contents/MacOS/hello --selftest` →
+  **14/14 ok、rc=0**；`--difftest` → **20/20、rc=0**；`--shot` → 760×560，「实时」分组在图上（读图确认）。
+  CI 若想对 bundle 无头验收，得自己把 `libqoffscreen.dylib` 拷进 `Contents/PlugIns/platforms/`（本轮未做）。
+  **→ 这条已在 12.4 由 `package` 自动完成，见 F17。**
+- **方法论坑**：`cmd | tail` 之后 `$?` 是 `tail` 的退出码 —— 上面那次 SIGABRT 差点被记成 rc=0。
+  要测退出码必须先 `out=$(cmd 2>&1); rc=$?` 再打印。
+
+## F17. 让 bundle 支持无头验收：补拷 offscreen 插件（Session 8）
+
+`bin/qtphp` 的 `packageAppBundle()` 在 macdeployqt 之后新增 `vendorHeadlessPlugin()`：把
+`libqoffscreen.dylib` 拷进 `Contents/PlugIns/platforms/`，并把 `@rpath/Qt{Core,Gui,Widgets}` 引用
+`install_name_tool -change` 成 `@executable_path/../Frameworks/...`；随后把该插件也塞进
+`vendorBundleDeps()` 的队列，兜住它可能带的绝对路径依赖。找不到插件只 `warning` 不失败 ——
+打包不该因为缺一个测试用插件而中断。
+
+**为什么必须自己改写引用**：macdeployqt 部署 cocoa 时**并不修 `LC_RPATH`** —— bundle 里的
+`libqcocoa.dylib` 至今带着 `@loader_path/../../../../lib`（在 bundle 内算出来是 `dist/lib`，不存在）。
+它是把引用直接改写成 `@executable_path/../Frameworks/...` 才生效的。照抄这个做法，别指望 rpath。
+
+**只拷 offscreen、不拷 minimal**：brew 的 `libqoffscreen.dylib`（156 KB）依赖只有 `@rpath/QtCore`+`@rpath/QtGui`
++ 系统框架，改写完就完全自包含；而 `libqminimal.dylib` 还带绝对路径 `/opt/homebrew/opt/freetype/lib/libfreetype.6.dylib`，
+多拖一个 dylib 且 offscreen 已够用 —— 没需求就不搬。
+
+实测（`env -i`，PATH/HOME 之外全清空）：
+```
+php bin/qtphp package examples/hello   → 「已补无头验收插件: libqoffscreen.dylib」，99.7 MB（+0.1 MB）
+bundle --selftest  (QT_QPA_PLATFORM=offscreen) → 14 行 ok + "selftest passed"，真 rc=0
+bundle --difftest  (同上)                        → 20 行 ok + "difftest passed"，真 rc=0
+bundle --shot      (cocoa，不设 offscreen)        → rc=0，760×560 PNG 正常（仅 F12 那行 IMK 噪声）
+otool -L PlugIns/platforms/libqoffscreen.dylib   → 只剩 @executable_path/../Frameworks/... 与系统框架
+codesign --verify --deep --strict                 → OK
+php bin/qtphp lint → 契约一致；php bin/qtphp test → OK (112 tests, 183 assertions)
+```
+**Windows 侧未做**：`windeployqt` 那条路径没动，本机无 Windows 环境可验，offscreen 是否随
+`windeployqt` 一起部署尚未实测。
+
+## F18. Windows/Linux 打包分支的边界（Session 9）
+
+**windeployqt 的默认插件清单没查到权威结论**：Qt 文档只说它"automatically collects all required
+Qt libraries, plugins"、Windows 平台插件名叫 `qwindows.dll`，没说 offscreen/minimal 是否在列
+（想读 `qttools/src/windeployqt/main.cpp` 原文，raw.githubusercontent 抓取超时）。
+⇒ 不押注它的行为：`vendorWindowsOffscreenPlugin()` 写成**幂等补拷** —— `dist/platforms/qoffscreen.dll`
+已存在就直接返回，缺了才从 `<qt>/plugins/platforms/` 拷，源也找不到就 warning 不失败。
+补拷本身是安全的：`qwindows.dll` 今天就从 `platforms/` 里加载、并解析到 exe 同目录的 `Qt6*.dll`，
+新插件走的是同一套解析路径。**本机无 Windows 环境，这条分支未实测。**
+
+**Linux 走不到打包**（按代码路径推断，未实测）：`cmdPackage()` 的分派是
+`if (PHP_OS_FAMILY !== 'Windows') return packageAppBundle(...)` —— 非 Windows 一律当 macOS，
+而 `packageAppBundle()` 开头就要求 `macdeployqt` 可执行 + 项目里的 `Info.macos.plist`，
+Linux 上两者都不存在 ⇒ 直接 `error` 退出。`resolveProjectYaml()` 那边倒是已经预留了
+`project.linux.yml` 的后缀映射，所以缺的是 package 这条链。
+
+## F19. Linux 侧的三处「非 Windows 即 macOS」假设（Session 10）
+
+1. **`cmdPackage()` 的分派**（已修）：原来是 `if (PHP_OS_FAMILY !== 'Windows') return packageAppBundle(...)`
+   ⇒ Linux 上会去要 `macdeployqt` 与 `Info.macos.plist`，报错指不到真正缺的东西。
+   现改成显式三路：Darwin → `.app`；Windows → `dist/` 目录；其余 →
+   `未实现 <平台> 平台的打包` 并 rc=1。
+   **实测方式**：本机是 Darwin，用 12.2 那套鉴别力反证 —— 临时把 Darwin 分支的条件改成永不成立的
+   `'TEMP-NEGATIVE-TEST'` 逼新分支执行 → 打出 `[ERROR] 未实现 Darwin 平台的打包…`、`rc=1`、`dist/` 未被碰；
+   还原后 `grep -rn TEMP-NEGATIVE-TEST` rc=1（干净），macOS 重打包 + bundle offscreen `--selftest` 14/14 rc=0 全绿。
+   注意这验的是**分支可达与退出码**，不是 Linux 上的真实行为（消息里的平台名取自 `PHP_OS_FAMILY`）。
+2. **`checkSharedLibraryDeps()` 是 Mach-O 专属**（未修）：`otool -L` + `\.dylib` + `/System/Library/` 白名单，
+   Linux 上 `otool` 不存在 → `shell_exec` 空 → **静默返回 []**，也就是 `qtphp run` 的依赖自检在 Linux 等于没做。
+   真要支持得换 `ldd` + `libX.so` 形态。
+3. **`cmdBuild()` 的 brew 前缀注入**（无害但未修）：`PHP_OS_FAMILY !== 'Windows'` 时跑 `brew --prefix`，
+   Linux 上取不到就跳过；但 Linux 的 Qt 链接方式（`-lQt6Core` + rpath，非 framework）与 macOS 完全不同，
+   `project.macos.yml` 那套 `-Wl,-framework,X` 在 Linux 上不成立。
+
+⇒ 结论：**Linux 支持是一个成建制的缺口，不是一行判断**。本轮只把"报错指错方向"这一处修掉，
+没有假装实现打包。
+
+## F20. Apple Container 在这台机器上没有 NAT egress，用宿主侧转发代理绕过（Session 11）
+
+**症状与定位（全部实测）**：容器里 DNS 能解析（`getent hosts mirrors.aliyun.com` 出 IP），但任何
+出站 TCP 都超时 —— `223.5.5.5:443`、`223.5.5.5:80`、`mirrors.aliyun.com:443`、`192.168.31.1:53` 全 FAIL；
+而 `192.168.64.1:53`（vmnet 网关）**OK**，宿主 `nc` 监听 `192.168.64.1:19022` 时容器能连上并送到数据。
+⇒ 不是 DNS、不是容器网络栈、不是 macOS 应用防火墙（`socketfilterfw --getglobalstate` = disabled）。
+
+逐条排除：
+1. **不是单台机器坏了**：`container create` 全新机器（同镜像）同样 FAIL。
+2. **不是路由缺失**：容器 `/proc/net/route` 有默认路由指向网关，ARP 表里有网关 MAC。
+3. **`--option mode=bridged` 不真桥接**：`container network create brhome` 成功，但拿到的还是
+   `192.168.65.0/24` 这种 host-only 段，不是局域网 `192.168.31.x`，egress 照样 FAIL。
+4. **`container system stop && start` 没修好**：egress 仍 FAIL，而且副作用是 **`default` 网段从
+   `192.168.64.0/24` 迁到 `192.168.65.0/24`**。
+5. **没有特权组件**：`/Library/PrivilegedHelperTools/` 里没有 container/vmnet 助手，
+   `systemextensionsctl list` 只有一个小米相机扩展 ⇒ vmnet NAT 走的是系统 `vmnetd`，本机它不给转发。
+   机器上同时跑着深信服 aTrust 零信任（`aTrustXtunnel`），高度可疑但**未证明**，也不是我能动的东西。
+
+**绕行办法**：既然「容器 → 宿主网关 IP」是通的，就在宿主上监听那个网关地址做一个只读转发代理
+（`/tmp/qtphp-linux/proxy.py`，只允许 `GET`/`HEAD`/`CONNECT`，其它方法 405），容器把 apt 指向它：
+
+```
+printf 'Acquire::http::Proxy "http://192.168.65.1:3128/";\nAcquire::https::Proxy "http://192.168.65.1:3128/";\n' \
+  > /etc/apt/apt.conf.d/99hostproxy
+```
+
+实测结果：`apt-get update` 成功，`Fetched 9279 kB in 11s (808 kB/s)`（含 `bookworm/main arm64 Packages 8689 kB`），
+`https://packages.sury.org/php` 也通（说明 CONNECT 隧道 + TLS 有效）⇒ **Linux 侧现在能真装东西、真编译了**。
+
+两个必须记住的坑：
+- **代理绑的地址会随重启变**：`container system start` 后网关从 `192.168.64.1` 变成 `192.168.65.1`，
+  代理得跟着重绑（脚本已支持 `python3 proxy.py <ip> [port]`）。
+- **同一网段里两台机器拿到过同一个 IP**：重启后 `tgl` 与探测机都显示 `.2`，ARP 冲突让 `tgl` 连代理
+  报 `Unable to connect to 192.168.64.1:3128`。删掉探测机（`container stop` → `container delete`）即恢复。
+  另外 `container exec` **不接受 `--` 分隔符**（`failed to find target executable --`），`container create`
+  的镜像是**位置参数**而非 `--image`。
+
+**磁盘账**：容器根盘是 `/dev/vdb 504G / 502G avail`，但它落在宿主 `~/Library/Application Support/com.apple.container`
+（实测 9.2 GB），宿主启动卷只剩 **9.9 Gi**（`/Volumes/data` 还有 391 Gi，可容器存储不在那）
+⇒ 往容器里装 GB 级东西实际吃的是快满的启动卷，装前必须 `df`。
+
+**下次复用这套环境的命令**（代理脚本在 `/tmp/qtphp-linux/proxy.py`，重启 Mac 会没，需要重写）：
+```bash
+container start tgl
+GWAY=$(ifconfig | awk '/^bridge[0-9]+/{b=$1} /inet 192\.168\.6[0-9]\.1/{print $2; exit}')   # 网关会变，每次查
+python3 /tmp/qtphp-linux/proxy.py "$GWAY" &                      # 只读转发代理（GET/HEAD/CONNECT）
+python3 -m http.server 8000 --bind "$GWAY" --directory /tmp/qtphp-linux/serve &   # 给容器发文件
+container exec tgl bash -c 'cd /work/qt && export http_proxy=http://'"$GWAY"':3128 https_proxy=$http_proxy \
+  && php bin/qtphp build examples/hello'
+```
+容器里 apt 的代理写死在 `/etc/apt/apt.conf.d/99hostproxy`，网关一变就要改这个文件（`Unable to connect to <旧IP>:3128` 就是它）。
+
+## F21. Linux 侧首次真实跑通：Debian 12 arm64 + Qt 6.4.2（Session 11）
+
+环境：Apple Container 里的 `debian:bookworm-slim`（aarch64），`g++-12`、`cmake 3.25.1`、
+`qt6-base-dev 6.4.2+dfsg-10`、宿主 PHP 8.4.25 跑 CLI。网络靠 F20 的宿主转发代理。
+
+**编译链全通，实测数字**：
+- tpc 在 Linux 上自建私有 embed 运行时成功：`/root/.typephp/php-builder/php-8.5.11-142201d298b578e5`。
+  compat 哈希与 macOS 的 `5852a1ce211cc711` **不同** ⇒ 缓存按平台分桶，两边互不污染。
+- 产物：`ELF 64-bit LSB pie executable, ARM aarch64 … not stripped`，58 MB；
+  `ldd` 里 `libQt6{Widgets,Gui,Core,DBus}.so.6`、`libonig.so.5` 全部解析到 `/lib/aarch64-linux-gnu`，无 `not found`。
+- `QT_QPA_PLATFORM=offscreen`：`--selftest` **14/14 rc=0**、`--difftest` **20/20 rc=0**、
+  `--shot` 出 **760×560 PNG rc=0**（读图确认：菜单、标题、输入行、设置/进度/实时三个分组、
+  底部三按钮、状态栏「就绪」都在）。
+- `php bin/qtphp test` → OK (112 tests / 183 assertions)；`lint` → 契约一致；
+  `run examples/hello --selftest` → rc=0；`new probeapp` 生成的 `project.linux.yml` 里
+  三元组推导正确（`/usr/include/aarch64-linux-gnu/qt6`）。
+- **Qt 版本差是白捡的兼容性证据**：Debian 12 是 6.4.2，本机 brew 是 6.11.2，
+  两套断言（14 + 20）在 6.4.2 上同样全绿 ⇒ 声明式 diff 引擎没踩到 6.4→6.11 的行为差。
+
+**Linux 独有的硬前置（macOS 上是 brew 顺带装的，Linux 必须显式列）**：
+- 首轮编译死在 `fatal error: mpfr.h: No such file or directory` 与 `gmpxx.h`（phpx 的
+  `src/core/big_float.cc` / `big_int.cc`）⇒ 要 `libgmp-dev libmpfr-dev`。
+- 编 PHP 源码要 `build-essential pkg-config bison re2c autoconf xz-utils zlib1g-dev libxml2-dev
+  libsqlite3-dev libonig-dev`（`libonig` 是 `--enable-mbstring` 的依赖，缺了 configure 就废）。
+
+**tpc 每次构建都会先联网取元数据**：进程里看到
+`curl --fail --location --retry 3 https://www.php.net/releases/index.php?json…`，
+即使 `~/.typephp/archives/php-8.5.11.tar.xz` 已经放好也一样 —— 它要先查索引拿到 pinned sha256，
+再决定要不要复用本地包（`OfficialPhpSource::prepareLocked()`：`hash_file('sha256', $archive) !== $release['sha256']`
+才重下）。⇒ **纯离线机器上第一次 build 一定失败**，得先把索引和包都预热。
+
+**Debian 的 Qt 没有架构无关的头文件路径**：`/usr/include/qt6` 不存在（实测 `No such file`），
+只有 `/usr/include/<三元组>/qt6`；而 tpc 的 yml 只对 `sources` 支持 `PHP_OS_FAMILY` 条件表达式
+（`ProjectYamlLoader::replaceOsFamilyComparisons()`），路径字符串不做插值
+⇒ 三元组只能在**生成时**写死进 `project.linux.yml`，这就是 `linuxMultiarchTriple()` 存在的原因。
+
+**offscreen 下的三条噪声**（都无害，别当错误）：
+`QStandardPaths: XDG_RUNTIME_DIR not set`、
+`QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)`
+（托盘在无平台原生接口时的探测）、`This plugin does not support propagateSizeHints()`。
+
+**CLI 这轮为 Linux 落地的四处**（都改完就在 macOS 侧复验过没回归）：
+`findQt()` 多架构分支、`doctor` 认 g++（原来只认 clang++，Linux 上必然报「未找到 C++」）、
+`checkLinuxLibraryDeps()` 走 `ldd`（只认 `not found` 与不存在的非系统绝对路径）、
+`cmdNew()` 生成 `project.linux.yml`。
+`qtphp package` 在**真 Linux** 上第一次跑到 12.6 那条分支：`[ERROR] 未实现 Linux 平台的打包…`、`rc=1`
+—— F19 的鉴别力反证到这里换成了真实环境证据。**Linux 打包路线仍未实现**，这是下一步。
+
+## F22. Linux 打包在真机上跑通：`dist/<name>/` = ldd 闭包 + DT_RPATH + qt.conf（Session 12）
+
+环境仍是 F20/F21 那台 `tgl`（Debian 12 arm64 + Qt 6.4.2）。新装一个包：
+`apt install patchelf` → `patchelf 0.14.3-1+b1`（slim 镜像里**没有**，是 Linux 打包的新硬前置）。
+
+**先实测再定方案**（原来 `build/hello` 的动态段）：
+- `(RUNPATH) /root/.typephp/php-builder/php-8.5.11-142201d298b578e5/install/lib`，
+  NEEDED 直连 11 个：`libQt6{Widgets,Gui,Core}`、`libstdc++`、`libxml2`、`libsqlite3`、`libz`、
+  `libonig`、`libm`、`libgcc_s`、`libc`。**`ldd` 传递闭包 51 行**，全部解析到 `/lib/aarch64-linux-gnu`，无 `not found`。
+- **ELF 里没有 libgmp/libmpfr** —— 那两个 `-dev` 包只是 phpx 的**编译期**头依赖
+  （`big_float.cc`/`big_int.cc` 要 `mpfr.h`/`gmpxx.h`），不进运行时闭包。打包因此不用搬它们。
+- 系统 `libqoffscreen.so` 自己**没有** RPATH/RUNPATH，NEEDED 是 X11/GLX + Qt6Gui/Core + libc
+  —— 这些在可执行文件的闭包里已经先加载了，所以 offscreen 插件即使不改写也能 dlopen 成功。
+  `libqxcb.so` 另有 14 个 xcb 家族依赖（`libQt6XcbQpa`、`libxcb-*`、`libSM/ICE`、`libxkbcommon-x11`），
+  **不在**可执行文件闭包里 ⇒ 插件必须自己带 rpath，链接期给 yml 加 `-Wl,-rpath` 这条路覆盖不到它。
+
+**闭包尺寸的坑**：`du -ch $(ldd … | 绝对路径)` 只算出 **2.5 MB**，因为 `/lib/aarch64-linux-gnu/libQt6*.so.6`
+是**软链**；`readlink -f` 后才是真身 —— 89 个对象实测量 **83.2 MB**（`libicudata.so.72.1` 一个就 29.8 MB）。
+先按这个数决定「`platforms/` 整目录全拷」不心疼：8 个平台插件 + 2 个 `xcbglintegrations` 只多几个 xcb 库。
+
+**为什么必须 DT_RPATH 而不是 DT_RUNPATH**：`ld.so(8)` 里 RUNPATH **只作用于本对象自己的 NEEDED**，
+RPATH 才沿依赖链传递。只在可执行文件上设 `$ORIGIN/lib` 的 RUNPATH，`libQt6Gui` 自己的
+`libglib-2.0`/`libEGL`/`libfontconfig` 会**回落到系统 ld.so.cache** —— 本机看着一切正常，换台没装 Qt
+的机器就炸。所以 `patchelf --force-rpath --set-rpath`，并且在 `verifyLinuxPackage()` 里
+**直接读 `readelf -d` 断言有 `(RPATH)` 且没有 `(RUNPATH)`**（patchelf 老版本会留下两者共存，那 DT_RPATH 白写）。
+
+**实现（`bin/qtphp` 新增 6 个函数，`cmdPackage()` 的 Linux 分支从报错改成派发到 `packageLinuxDir()`）**：
+产物布局 `dist/<name>/{<name>, lib/*.so, plugins/{platforms,xcbglintegrations}/*.so, qt.conf, assets/}`；
+`elfDeps()` 用 `ldd` 拿 `soname => /abs`（落地名用 **soname**，不是 `readlink` 后的真名，否则按 soname 找不到）；
+`isSystemSoname()` 把 glibc 家族（libc/libm/libdl/librt/libpthread/libresolv/libnsl/libutil/libgcc_s/ld-linux）
+留给目标系统，**libstdc++ 要搬**（它按 GLIBCXX 符号版本卡 ABI，目标机旧版会缺符号）；
+`linuxQtPluginDirs()` 认 Debian 的 `lib/<三元组>/qt6/plugins` 与扁平 `plugins/` 两种布局；
+`qt.conf` 写 `[Paths] Plugins = plugins`，让 Qt 不靠环境变量就能找到插件目录。
+**没走链接期 rpath**：插件不是我们链出来的，且开发产物（`build/`）保持原样、只在 package 阶段动产物。
+
+**实测验收（全部真 rc）**：
+```
+php bin/qtphp package examples/hello   → rc=0，85 个 .so + 10 个插件，dist/hello 140.3 MB
+readelf -d dist/hello/hello            → (RPATH) [$ORIGIN/lib]，无 RUNPATH
+ldd 里落在产物外的行（glibc 家族除外）  → 空
+ldd plugins/platforms/libqxcb.so 落在产物外的行 → 空（插件也自包含，RPATH=$ORIGIN/../../lib）
+cd dist/hello && env -i QT_QPA_PLATFORM=offscreen ./hello --selftest  → 14 条 ok，rc=0
+                                              --difftest             → 20 条 ok，rc=0
+                                              --shot                  → rc=0，31841 B PNG
+```
+自检里那句「每一行都落在产物内」**不是摆设**：另造一次「搬运循环故意漏掉 `libQt6XcbQpa.so.6`」的分支逼验，
+输出 `[ERROR] 仍指向产物之外： - libqxcb.so 的 libQt6XcbQpa.so.6 => /lib/aarch64-linux-gnu/…`
+（外加两个 xcbglintegrations 插件各一行）并且 `rc=1` —— 这条正是可执行文件的 `ldd` 看不见、只有对插件
+自己跑 `ldd` 才会暴露的依赖。第一次逼验（把 `libxcb.` 加进跳过名单）**没触发**，因为搬运和自检共用
+`isSystemSoname()`，跳过的同时也就免检了 —— 要漏检必须让「非 system 的 soname 不在 lib/ 里」。
+
+打包产物的 PNG 与开发产物的 PNG **逐字节一致**（sha256 `c79f6cc5cd4e…43a3`，两边同一个值）⇒
+搬库+改写 rpath 没有改变渲染结果。重复 `package`（`dist/hello` 已存在 → 整棵重建）rc=0；
+在项目目录内 `php ../../bin/qtphp package .` rc=0（`basename('.')` 那个老坑没复发）。
+macOS 侧复验没回归：`php -l`、`test` 112/183、`lint` 契约一致、`doctor` 全部 rc=0。
+
+**没测到的（别当已验证）**：`xcb` 插件在**真实 X/Wayland 桌面**上起不起 —— 容器里没有 X server，
+只证明了它的依赖能在产物内解析；`libqeglfs/libqlinuxfb/libqvnc` 等只是搬进去了，运行未测；
+产物**跨发行版**（Ubuntu 24.04 / Fedora）未测，Debian 12 → 12 之外只靠「glibc 家族留系统 + 其余全搬」这个假设。
+
+## F23. Linux 前置落到 `doctor`：探测点的真实位置与两条分支的逼验（Session 13）
+
+12.8 收尾时留的「下一步」第一条。`doctor` 原来在 Linux 上只会说 Qt/C++ 找到了没有，
+缺 `mpfr.h`、缺 `patchelf` 这类要等到 `build`/`package` 撞墙才暴露（F21 首轮就是死在 `mpfr.h`）。
+
+**探测点先实测再写死**（都在 `tgl` 上量的，别照抄网上的路径）：
+
+| 包 | 实测落点 | 备注 |
+|---|---|---|
+| `libgmp-dev` | `/usr/include/aarch64-linux-gnu/gmp.h` + `/usr/include/gmpxx.h` | **gmp.h 只在多架构目录下** ⇒ 搜索目录必须带 `<三元组>` |
+| `libmpfr-dev` | `/usr/include/mpfr.h` | F21 那条死因 |
+| `libonig-dev` | `/usr/include/oniguruma.h`；`/usr/include/onigmo.h` **不存在** | 所以探 `oniguruma.h`，照 `--enable-mbstring` 的习惯写 `onigmo.h` 会永久误报缺失 |
+| `libxml2-dev` | `/usr/include/libxml2/libxml/parser.h` | 嵌套目录，相对 `/usr/include` 写 |
+| `libsqlite3-dev` / `zlib1g-dev` | `/usr/include/sqlite3.h` / `/usr/include/zlib.h` | |
+| 命令 | `bison`/`re2c`/`autoconf`/`pkg-config`/`patchelf`/`xz` 全在 `/usr/bin` | `xz-utils` 这个包名对应 `xz` 命令 |
+
+**两个分支都用真机逼验过，不是写完就当它对**：
+- 命令分支：`apt-get remove -y patchelf` → `[WARN] Linux 构建前置缺失: patchelf` + `apt install -y patchelf`；装回来恢复「齐全」。
+- 头文件分支：往探测表里塞一条必然找不到的 `libbogus-dev => definitely-not-here.h` → 报出 `libbogus-dev`，
+  还原后「齐全」。多架构搜索那条分支则是**隐式验证**的：`gmp.h` 只存在于 `<三元组>` 目录，而检查判「齐全」，
+  说明它确实去那个目录找了。
+
+**apt 的 .deb 缓存别指望**：`remove` 之后 `install` 报
+`Failed to fetch … Could not connect to 192.168.65.1:3128` ⇒ 缓存里没有，得先把 F20 的宿主转发代理起回来。
+（顺带说明 `tgl` 里装的东西是真的留在容器里跨会话用，不是每次重装。）
+
+**保持原语义**：这些一律 `warning`，不进 `$allOk` —— `doctor` 的 rc 只由 error 级项决定，
+Linux 前置缺失不该让 `qtphp doctor` 变成失败退出（`build`/`package` 会在真正需要时报错并给同一条 apt 提示）。
+Linux 上因此多一行 `[OK] Linux 构建前置: 齐全`（7 行检查项 + 汇总）；macOS 侧输出与行数不变。
