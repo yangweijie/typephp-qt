@@ -1,5 +1,166 @@
 # Progress Log — typephp-qt
 
+## Session 17 — 2026-10-02（搜索插件 + 中英双语）
+
+### 任务
+> 「加搜索插件与多语言版本」
+
+用户决策：**英文为默认（根路径）、中文 /zh/**；**30 页全部双语**。
+
+### 搜索
+接入官方 `@vuepress/plugin-search@2.0.0-rc.137`（版本与 theme-default 同线）。
+索引**内联进客户端 bundle**，没有独立文件 —— 实测在 JS 产物里能搜到 `WidgetTree`、`闭包实参`、`qtphp doctor`。
+按语言分别配占位提示（英文 `Search docs` / 中文 `搜索文档`）。
+
+### 多语言
+```
+src/
+├── README.md + guide/ widgets/ advanced/ reference/ faq.md   # 英文 29 页（默认）
+└── zh/  同结构                                                # 中文 29 页
+```
+- `config.ts` 用 `locales` 配置两套 navbar/sidebar/editLink/lastUpdated 文案
+- 中文页的 52 处站内链接批量改写为 `/zh/...` 前缀（否则会跳回英文站）
+- 构建 **59 页**（29 英 + 29 中 + 404），2.8 秒，无警告
+- 验证中英**文件名一一对应**（`diff` 通过）、语言切换器双向可用、中文导航显示中文
+
+### 顺带发现：官方 links-check 抓不到锚点
+
+排查时发现 theme-default **内置了 links-check 插件**（可通过 `themePlugins.linksCheck` 配置），
+我先前单独 `plugins: [linksCheckPlugin(...)]` 是**重复注册**（构建报 `used multiple times`）。改为用主题配置项，设 `build: 'error'`。
+
+但实测：**它只验证 markdown 链接的目标文件存在，不校验锚点**（注入坏锚点后构建照常成功）。
+所以自建的 `check-anchors.py` 仍有独立价值，保留；`check-links.py` 改为"产物级复核"（官方是源码级）。
+
+三层防护各管一段：
+
+| 机制 | 层次 | 失败方式 |
+|---|---|---|
+| `themePlugins.linksCheck: build 'error'` | markdown 源码 | 构建失败 |
+| `check-links.py` | 产物 HTML | rc=1 |
+| `check-anchors.py` | 源码 `#锚点` | rc=1 |
+
+### 踩到的坑
+
+1. **VuePress 与官方插件是两套独立版本号**（vuepress 到 rc.31，插件已到 rc.137），
+   必须查 `npm view <pkg>@<ver> peerDependencies` 找配对，不能写同一个号。
+2. **重复注册 links-check** —— theme 已内置，自己再加会告警且只有最后一个生效。
+3. **heredoc 写长文件被截断两次**（`aot-notes.md`、`api.md`）—— 是命令长度限制，
+   不是语法问题。改为分段 `cat >>` 追加。截断处都做了行数核对才发现。
+4. **Write 工具的 staleness 检查**对"文件被 mv 走了"的状态会误判，
+   需先用 shell 建占位文件再写。
+
+### 验证
+```
+npm run build           → 59 页，2.8s，无警告
+check-links.py          → 无死链（base='' 与 base='/typephp-qt' 双模式，59 页）
+check-anchors.py        → 全部锚点有效（10 个目标文件，中英两套）
+                         + 中英两侧各做过坏锚点注入反证（rc=1）
+dev server              → / /zh/ /guide/ /zh/guide/ /faq.html /zh/faq.html 全部 200
+事实核对                → 英文 api.md 的 40 个 QtApp 方法 + 30 个 WidgetTree 方法
+                          逐个对照源码，全部存在
+中英结构                → 文件名 diff 完全一致
+qtphp test/lint         → 112 tests · 契约一致（项目未受影响）
+```
+
+### 待你手动做
+仓库 Settings → Pages → Source 选 **GitHub Actions**（首次部署前）。
+
+### 未做
+未提交。搜索插件用的是前缀匹配，中文命中率可用但不如分词型全文检索（如 algolia / meilisearch）。
+
+---
+
+## Session 16 — 2026-10-02（用 VuePress 加文档站）
+
+### 任务
+> 「用 vuepress 给项目添加文档」
+
+用户决策：**VuePress 2**（rc.31）+ **GitHub Pages 自动部署** + 「整体项目分析后添加内容」。
+
+### 先做项目分析
+通读了源码全貌，作为文档素材的准确性依据：QtApp 40 个公开方法、WidgetTree 30 个控件、
+24 个桥接函数、10 个事件类型、6 个 `patch` call 方法、7 个 CLI 子命令、
+属性白名单、示例的 3 个无头开关、跨平台能力。
+
+### 交付
+
+```
+docs/
+├── package.json / package-lock.json
+├── README.md                           # 怎么写文档
+├── check-links.py / check-anchors.py   # 构建期检查（CI 里跑）
+└── src/
+    ├── .vuepress/config.ts             # 导航 / 侧边栏 / base
+    ├── README.md                       # 首页
+    ├── guide/      6 页                # 安装·快速上手·项目结构·架构·状态与视图
+    │               + 6 页              # 事件·属性·布局·对话框·多窗口托盘定时器·增量补丁
+    ├── widgets/    5 页                # 目录总览 + 容器·输入·数据·展示
+    ├── advanced/   5 页                # 总览 + AOT 注意事项·手写桥接·diff 引擎·无头验收
+    ├── reference/  5 页                # 总览 + CLI·API·打包·平台支持
+    └── faq.md                          # 14 个常见问题
+```
+
+**共 30 页**，`npm run build` 2.2 秒完成，无警告。
+
+### 踩到的坑
+
+1. **VuePress 与官方主题是两套独立版本号。** `vuepress` 最高到 `2.0.0-rc.31`，
+   而 `@vuepress/theme-default` 已到 `2.0.0-rc.137`。我一开始给两者写了同一个版本号，
+   `npm install` 直接 ERESOLVE 失败（theme 的 peer 要求 `vuepress@2.0.0-rc.12`，
+   是它自己没更新的旧值）。查 `npm view <pkg>@<ver> peerDependencies` 才找到配对：
+   **theme-default rc.137 ⇄ vuepress rc.31**。
+2. **孤儿 sidebar 警告。** `/faq.html` 没进 sidebar 配置，构建警告 `is missing sidebar config`。
+   补上 `'/faq.html'` 条目。
+3. **两处死锚点。** 标题 `` ### 为什么一定要给 `row_ids` `` 的产物 id 是
+   `为什么一定要给-row-ids`（下划线转连字符），而我链接里写了 `-row_ids`。
+   写检查脚本才发现 —— 见下。
+4. **Git Bash 的 MSYS 路径改写** 把 `DOCS_BASE=/typephp-qt/` 改写成
+   `C:/Program Files/Git/typephp-qt/`，让我一度以为 base 没生效。
+   用 `.bat` 在 cmd 下验证才排除干扰。
+5. **cmd 里 `set "VAR=v" && node x` 变量传不下去**（`&&` 前作用域问题）——
+   正是技能里记过的坑，改用批处理文件。
+
+### 两个检查脚本（构建期守门）
+
+VuePress **不会**因为死链或死锚点而构建失败 —— 它照常出 30 页，问题只在用户点击时暴露。
+所以写了两个脚本并接进 CI：
+
+- `check-links.py` —— 站内链接死链。**自动探测 base 前缀**（本地 `/`、Pages `/typephp-qt/`），
+  两种产物都能直接查。
+- `check-anchors.py` —— 跨页锚点是否指向真实标题。按 VuePress 的 slug 规则转换：
+  小写 → 去行内代码 → 去粗斜体 → 空格转 `-` → 去 ASCII 标点（**保留 `-`**）→
+  去全角标点 → 下划线转 `-`。
+
+**两个脚本都做了鉴别力反证**：注入一个坏链接/坏锚点，确认报错且 rc=1，再还原。
+（这是从 Session 14 那个「脚本误报」教训里来的 —— 一个会撒谎的检查器比没有更糟。
+本次 `check-anchors.py` 的 slug 规则第一版就写错了：ASCII 标点类里把 `-` 也删了，
+导致它把**正确**的锚点报成死链。修完才敢信。）
+
+### 部署
+`.github/workflows/docs.yml`：推 `main`（`docs/**` 变更）→ `npm ci` → 构建 →
+跑两个检查 → 上传 → 发布到 Pages。base 用 `github.event.repository.name` 推导，
+仓库改名后不会静默 404。
+
+**需要你手动做一步**：仓库 Settings → Pages → Source 选 **GitHub Actions**（首次部署前）。
+
+### 验证
+```
+npm run build           → 30 页，2.2s，无警告
+check-links.py          → 无死链（base='' 与 base='/typephp-qt' 两种模式都过）
+check-anchors.py        → 12 处跨页锚点全部有效
+npm run dev             → :8080 起服务，index 与 /guide/ 均 200
+产物正文抽查            → 导航/侧边栏/正文/代码块/中文渲染正确
+事实核对                → 112 测试 · 24 桥接函数 · 30 控件 · 40 个 QtApp 方法
+                          · 30 个 WidgetTree 方法 · 6 个 patch call —— 文档与代码逐项一致
+```
+
+### 未做
+- 未提交（文件已就位，等你确认）。
+- 未加搜索（VuePress 2 的搜索插件需额外依赖，可后加）。
+- 未做文档的多语言版本。
+
+---
+
 ## Session 15 — 2026-10-02（更新 typephp-qt-app 技能）
 
 ### 任务

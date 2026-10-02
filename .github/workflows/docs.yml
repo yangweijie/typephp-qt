@@ -1,0 +1,71 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  # 允许在 Actions 页面手动触发（比如改了仓库 Pages 设置后想重新发布）
+  workflow_dispatch:
+
+# 只保留最新一次部署，避免并发推送互相覆盖
+concurrency:
+  group: docs-pages
+  cancel-in-progress: true
+
+# GITHUB_TOKEN 需要这两个权限才能发布到 Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install dependencies
+        working-directory: docs
+        run: npm ci
+
+      - name: Build site
+        working-directory: docs
+        # 站点部署在 https://<user>.github.io/<repo>/，base 必须带仓库名。
+        # 用 github.event.repository.name 而不是写死，仓库改名后不会静默 404。
+        run: npm run build
+        env:
+          DOCS_BASE: /${{ github.event.repository.name }}/
+
+      # 构建期已经有 links-check（themePlugins.linksCheck: build 'error'）拦死链，
+      # 但它只看 markdown 链接的目标文件、不校验锚点。这两个脚本补上：
+      # check-links 复核产物 HTML，check-anchors 校验 #锚点是否指向真实标题。
+      # 两者都覆盖中英两套页面。
+      - name: Check links and anchors
+        working-directory: docs
+        run: |
+          python3 check-links.py src/.vuepress/dist
+          python3 check-anchors.py src
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/src/.vuepress/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

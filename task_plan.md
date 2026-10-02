@@ -69,6 +69,8 @@
 | 13 | tpc 供给路线解析（Windows 上 composer 驱动抢占原生发行包 → `build` 报缺 `phpx.dll`） | ✅ done：`findTpc()` 改按**运行时体检**选路，删掉硬编码路径（F24）。Windows 端到端复验：`build` → `--selftest` 14/14 → `--shot` 21KB PNG → `test` 112/183 → `lint` 契约一致 |
 | 14 | 更新 `typephp-qt-app` 技能为包优先 | ✅ done：技能原本只教手写桥接（源自 `qt-taskboard`），不知本包存在。改写为「路线 0 用包 / 路线 1 手写」双轨；新建 `references/aot-pitfalls.md` 收录 8 个 AOT 坑；SKILL.md 加 14 条硬规则；evals 4→6。逐项对照真实代码核实（22 方法 / 30 控件 / 10 事件 / 6 call / 7 子命令），`scaffold.sh` 实跑通过 |
 | 15 | 技能入库到仓库 `.ohmyagent/skills/` | ✅ done：复制 25 个文件并修掉入库才暴露的三处问题 —— `.sh` 的 CRLF（Linux 上 shebang 会坏）转 LF、`git update-index --chmod=+x` 补执行位（Windows 下 `git add` 记成 100644）、新增 `.gitattributes` 固化换行符规则（`*.sh`→LF / `*.bat`→CRLF / 图片→binary）。从 git 索引导出后逐字节验证 + 实跑通过。**未提交**（已暂存） |
+| 16 | VuePress 2 文档站 + GitHub Pages 部署 | ✅ done：`docs/` 下 30 页（指南 12 / 控件 5 / 深入 5 / 参考 5 / FAQ + 首页），VuePress 2 rc.31 + theme-default rc.137。新增两个构建期守门脚本（死链、跨页锚点），都做过鉴别力反证。`.github/workflows/docs.yml` 推 main 自动发布，base 按仓库名推导。事实核对：112 测试 / 24 桥接函数 / 30 控件 / 40 个 QtApp 方法 / 30 个 WidgetTree 方法 全部与代码一致。**待你手动开 Pages Source = GitHub Actions** |
+| 17 | 搜索插件 + 中英双语 | ✅ done：接入官方 `plugin-search`（索引内联，按语言配占位）；站点改为**英文默认（根）+ 中文 /zh/**，各 29 页共 59 页。中文页 52 处站内链接改写为 `/zh/` 前缀。**顺带查实**：theme 内置的 links-check 只验目标文件、**不校验锚点**（注入坏锚点仍构建成功），故保留自建 `check-anchors.py`，`check-links.py` 改定位为产物级复核 —— 形成源码/产物/锚点三层防护。中英文件名一一对应，语言切换与双语言搜索均实测可用 |
 
 ### Phase 10 分解（macOS）
 

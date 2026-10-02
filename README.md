@@ -2,6 +2,8 @@
 
 基于 TypePHP (AOT) + Qt 6 的原生桌面 GUI 应用快速开发框架。
 
+📖 **完整文档：https://yangweijie.github.io/typephp-qt/**（英文，30 页）· [中文文档](https://yangweijie.github.io/typephp-qt/zh/)（29 页）—— 分指南、控件目录、深入原理、参考手册四部分。文档源文件在 [`docs/`](docs/)。
+
 ## 特性
 
 - **声明式 UI** — 用 PHP 数组描述控件树，C++ 侧按 id 做差异更新，控件状态（输入光标、表格选中、滚动位置）在重渲染后保留
