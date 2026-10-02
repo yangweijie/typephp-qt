@@ -23,6 +23,7 @@ const enSidebar = {
       children: [
         '/guide/README.md',
         '/guide/installation.md',
+        '/guide/qt-setup.md',
         '/guide/quickstart.md',
         '/guide/project-structure.md',
         '/guide/architecture.md',
@@ -101,6 +102,7 @@ const zhSidebar = {
       children: [
         '/zh/guide/README.md',
         '/zh/guide/installation.md',
+        '/zh/guide/qt-setup.md',
         '/zh/guide/quickstart.md',
         '/zh/guide/project-structure.md',
         '/zh/guide/architecture.md',

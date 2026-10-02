@@ -21,6 +21,11 @@
 | macOS (Apple Silicon) | ✅ | ✅ `dist/<Name>.app`（macdeployqt + ad-hoc 签名） | `brew install qtbase libiconv` |
 | Linux (Debian/Ubuntu) | ✅ | ✅ `dist/<name>/`（ldd 依赖闭包 + patchelf 改 DT_RPATH + `qt.conf`） | 见下 |
 
+**只用到 Qt 的 `Core` / `Gui` / `Widgets` 三个模块**（没有 QML/Quick、Network、Sql），
+所以最小安装就够。各系统的安装方式、其他发行版的包名、非默认 Qt 版本怎么指定、链接报错怎么查，
+见 **[Qt 的安装与编译](https://yangweijie.github.io/typephp-qt/zh/guide/qt-setup.html)**。
+`qtphp` 自动探测的是 Qt **6.9.3** 的常见路径；其他版本用 `QT_DIR` 指定（优先级高于自动探测）。
+
 Linux 侧的实测环境是 Debian 12 arm64 + `qt6-base-dev 6.4.2` + `cmake 3.25.1`：
 `build` 产出 ELF PIE 可执行文件，`QT_QPA_PLATFORM=offscreen` 下三个验收开关全部 rc=0
 （当时示例的 `--selftest` 是 14 条用例、`--difftest` 20 条，示例后来扩充过，用例数已增长）。

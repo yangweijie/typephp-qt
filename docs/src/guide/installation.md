@@ -40,6 +40,12 @@ It checks each item and prints the resolved paths:
 
 `tpc` and "PHP runtime library" are two **separate** checks — they are not always the same directory. Look at those two lines first when a build fails. The reason is in [the two tpc supply routes](/advanced/aot-notes.md#the-two-tpc-supply-routes).
 
+## Installing Qt itself
+
+The commands below install the Qt pieces alongside everything else. If you need the detail —
+which modules are required, other distros, a non-default Qt version, or linking failures — see
+**[Installing and Building Qt](/guide/qt-setup.md)**.
+
 ## Per-platform dependencies
 
 ### Windows

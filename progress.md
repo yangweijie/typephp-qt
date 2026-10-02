@@ -1,5 +1,70 @@
 # Progress Log — typephp-qt
 
+## Session 23 — 2026-10-02（文档补 Qt 安装与编译，跨系统）
+
+### 任务
+> 「文档补充 qt 相关库的编译和安装（跨系统）」
+
+### 先摸清事实（不凭印象写）
+```
+桥接实际用到的 Qt 模块 → 对着 cpp-src/ 每个 #include 核：只用 Core / Gui / Widgets
+                          （无 QML/Quick、Network、Sql）
+findQt() 探测的路径      → 硬编码 6.9.3；Windows 三处 + brew keg-only 四处
+各平台链接方式           → Windows .lib / macOS framework(-F 且编译期也要) / Linux -lQt6Xxx
+qtphp new 生成的 yml     → Qt 路径以纯字符串写入，可手改
+```
+验证 `qmake -query QT_VERSION` → 6.9.3（文档里的命令是真跑过的）。
+
+### 新增文档（中英各一页，共 +369 行）
+`guide/qt-setup.md` / `zh/guide/qt-setup.md`，覆盖：
+
+- **最小模块集**：只要 Core/Gui/Widgets，附各模块用途
+- **版本要求**：Qt 6.0+，实测 6.9.3，自动探测只认 6.9.3 → 其他版本用 `QT_DIR`
+- **Windows**：官方在线安装器（该勾/不该勾哪些组件）+ aqtinstall（可脚本化）+ 验证命令
+- **macOS**：`brew install qtbase libiconv`；解释 keg-only 与 framework 布局，
+  以及**为什么 `-I` 与 `-F` 必须同时给**（转发头用限定名）
+- **Linux**：Debian/Ubuntu 一条命令；**Fedora / Arch / openSUSE 的包名与扁平路径**
+  （Debian 多架构布局 vs 其他发行版的 `/usr/include/qt6`）
+- **指定非默认 Qt**：`QT_DIR` 或直接改 yml
+- **排错表**：8 条常见症状 → 原因 → 解法（含 LNK2038、`-F` 缺失、平台插件未部署）
+
+同时从 `installation.md` 链过去，并加进中英 sidebar。
+
+### 顺带修掉 2 个真问题
+
+**1. `QT_DIR` 优先级错误（功能缺陷）**
+写文档时验证发现：`findQt()` 把 `QT_DIR` **放在候选列表之后**，
+于是「机器上恰好有一份候选路径里的 Qt」时，`QT_DIR` 被完全无视 ——
+而那正是最需要覆盖它的场景（想用 6.10、或切到另一份 Qt）。
+改成 `QT_DIR` 最优先，指向不存在目录时告警并回落。
+实测：`QT_DIR=D:/temp/fakeqt2` 现在确实生效（改之前无效）。
+
+**2. `check-anchors.py` 的 slugify 又错了（检查器撒谎）**
+它把 `Linux（Debian/Ubuntu）` 算成 `linux-debianubuntu`（全角括号与斜杠直接删掉），
+而 VuePress 的真实 id 是 `linux-debian-ubuntu`（转成分隔符）。
+于是把**正确**的链接报成死锚点。修了两处：全角括号/斜杠转 `-`、去掉首尾多余 `-`。
+**修完又做了坏锚点注入反证**，确认仍有鉴别力 —— 这是第二次栽在这个脚本上，
+教训是：**检查器本身也要被检查**。
+
+### 验证
+```
+qmake -query QT_VERSION      → 6.9.3（文档命令实跑）
+QT_DIR 优先级                → 修复前被无视；修复后 D:/temp/fakeqt2 生效
+                              + 不存在路径会告警并回落
+findQt 候选 vs 文档描述       → 逐条一致
+qtphp new                    → 生成的 yml Qt 路径正确，且会采纳 QT_DIR
+docs 构建                    → 61 页（+2），链接与锚点全过（含坏锚点注入反证）
+qtphp test / lint            → 116 tests · 契约一致
+示例真实构建                  → Build successful（findQt 改动后复验）
+README                       → 平台支持段补最小模块集 + 指路链接
+```
+
+### 教训
+**写文档的过程本身就是一次审计。** 这次为了写「怎么指定别的 Qt 版本」去验证 `QT_DIR`，
+才发现它根本不生效 —— 如果不实跑、照着代码「看起来是这么设计的」写，就会写出一条假文档。
+
+---
+
 ## Session 22 — 2026-10-02（更新 README）
 
 ### 任务

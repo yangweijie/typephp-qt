@@ -357,6 +357,14 @@ function linuxMissingPackages(): array
 
 function findQt(): ?string
 {
+    // 显式指定的永远优先。否则在「机器上恰好有一份候选路径里的 Qt」时，
+    // QT_DIR 会被无视 —— 那正是最需要覆盖它的场景（想用 6.10、或想切到另一份 Qt）。
+    $env = getenv('QT_DIR');
+    if ($env) {
+        if (is_dir($env)) return $env;
+        warning("QT_DIR 指向的目录不存在: $env（忽略，继续自动探测）");
+    }
+
     // Debian/Ubuntu 的 qt6-base-dev 是「前缀 /usr + 多架构子目录」布局，
     // 与 brew/官方安装器的 include+lib+bin 同构，所以这里返回前缀 /usr。
     if (PHP_OS_FAMILY === 'Linux') {
@@ -378,8 +386,6 @@ function findQt(): ?string
     foreach ($candidates as $path) {
         if (is_dir($path)) return $path;
     }
-    $env = getenv('QT_DIR');
-    if ($env && is_dir($env)) return $env;
     return null;
 }
 
