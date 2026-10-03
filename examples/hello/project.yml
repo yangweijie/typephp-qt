@@ -21,7 +21,11 @@ sources:
 
 build-dir: build
 
-cxx-std: c++20
+# 编译参数固化在这（直连 tpc 也吃这里，不再只靠 qtphp 的 CLI 默认）：
+#   - cxx-std 必须是 c++17：nano 严格校验这一项，写 c++20 会被直接拒绝
+#   - optimize: 2 即命令行 -O2；不写这项时直连 tpc 会按默认 -O0 编
+cxx-std: c++17
+optimize: 2
 
 include-paths:
   - ../../cpp-src

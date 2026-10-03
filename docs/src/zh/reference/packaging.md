@@ -118,13 +118,14 @@ Linux 上没有 `windeployqt` 等价物，所以要自己组装。关键点：
 
 ## 自检机制
 
-打包脚本不只是拷文件 —— 它**证明结果能跑**。最后一步把 `PATH` 缩到最小（Windows 上是 `C:\Windows\System32`；macOS/Linux 用 `env -i`），这样构建机的任何东西都漏不进来，然后检查三件事：
+打包脚本不只是拷文件 —— 它**证明结果能跑**。macOS 侧 `qtphp package` 最后会扫一遍依赖自包含性并真跑产物；手工验收时把 `PATH` 缩到最小（Windows 上是 `C:\Windows\System32`；macOS/Linux 用 `env -i`）挡住构建机环境，然后检查：
 
-1. **退出码** —— 非零说明缺 DLL/so，报错会指出是哪个。
-2. **没有 PHP 启动问题** —— 嵌入式运行时把缺扩展报成 **warning** 然后继续，所以干净退出还不够。自检扫描 stdout 和 stderr 里的 `PHP Startup` / `Fatal error`。
-3. **真的渲染出一帧** —— 应用必须能产出它的截图。
+1. **依赖自包含** —— 扫 bundle 内**全部** Mach-O（framework 内部的引用也算），任何指向 bundle 之外的绝对路径都判 `rc=1`。`env -i` 挡不住这类文件系统依赖：实测 QtCore 引用 brew 的 ICU，`env -i` 全绿，换台没装 brew 的机器直接 dyld 起不来。
+2. **退出码** —— 非零说明缺 DLL/so，报错会指出是哪个。
+3. **没有 PHP 启动问题** —— 嵌入式运行时把缺扩展报成 **warning** 然后继续，所以干净退出还不够。自检扫描 stdout 和 stderr 里的 `PHP Startup` / `Fatal error`。
+4. **真的渲染出一帧** —— 应用必须能产出它的截图。
 
-::: tip 为什么第 2 条要扫 stdout
+::: tip 为什么第 3 条要扫 stdout
 PHP 把那些启动 warning 写到 **stdout**，不是 stderr。只扫 stderr 会漏。
 :::
 

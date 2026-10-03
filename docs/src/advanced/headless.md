@@ -79,7 +79,12 @@ $app->dispatch(['type' => 'click', 'id' => 'greet_btn']);
 $app->dispatch(['type' => 'submit', 'id' => 'name_input', 'value' => 'Ada']);
 // … one dispatch per control …
 
-echo $app->lastError() === '' ? "selftest passed\n" : "selftest failed\n";
+$failed = $app->lastError();
+echo $failed === '' ? "selftest passed\n" : "selftest failed: $failed\n";
+$app->destroy();
+if ($failed !== '') {
+    exit(1);      // CI gates on the exit code, not on log text
+}
 ```
 
 ```bash
@@ -110,6 +115,19 @@ qtphp run . --difftest
 ```
 
 The example app's 20 assertions live in `diff_test()` inside `examples/hello/src/main.php`; write your own app's boundary assertions the same way.
+
+## Exit codes
+
+The three switches report through the process exit code, so CI can gate on `rc` instead of grepping output:
+
+| Switch | `0` | `1` |
+|---|---|---|
+| `--selftest` | every case `ok` | at least one `FAIL` |
+| `--difftest` | every assertion `ok` | at least one `FAIL` |
+| `--shot <path>` | PNG written | `snapshot()` returned false (unwritable path, no usable platform plugin) |
+
+`qtphp run` forwards the app's exit code unchanged, and `qtphp package` treats a non-zero
+`--selftest` inside the bundle as a packaging failure.
 
 ## The three switches side by side
 

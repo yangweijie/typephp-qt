@@ -118,13 +118,14 @@ There is no `windeployqt` equivalent on Linux, so the bundle is assembled by han
 
 ## The self-check
 
-The packaging script does not just copy files — it **proves the result runs**. The last step reduces `PATH` to the minimum (on Windows `C:\Windows\System32`; on macOS/Linux `env -i`) so nothing can leak in from the build machine, then checks three things:
+The packaging script does not just copy files — it **proves the result runs**. On macOS `qtphp package` finishes by scanning the whole bundle for self-containment and actually running the artifact; for manual verification, reduce `PATH` to the minimum (on Windows `C:\Windows\System32`; on macOS/Linux `env -i`) to block the build machine's environment, then check:
 
-1. **Exit code** — non-zero means a missing DLL/so, and the error names which.
-2. **No PHP startup problem** — the embedded runtime reports a missing extension as a **warning** and carries on, so a clean exit code is not enough. The check scans stdout *and* stderr for `PHP Startup` / `Fatal error`.
-3. **A rendered frame** — the app must actually produce its screenshot.
+1. **Dependency self-containment** — every Mach-O in the bundle is scanned, framework-internal references included; any absolute path pointing outside the bundle fails with `rc=1`. Note `env -i` cannot catch filesystem-level dependencies: QtCore pinned to brew's ICU passed `env -i` cleanly yet failed at dyld on a Mac without brew.
+2. **Exit code** — non-zero means a missing DLL/so, and the error names which.
+3. **No PHP startup problem** — the embedded runtime reports a missing extension as a **warning** and carries on, so a clean exit code is not enough. The check scans stdout *and* stderr for `PHP Startup` / `Fatal error`.
+4. **A rendered frame** — the app must actually produce its screenshot.
 
-::: tip Why step 2 scans stdout
+::: tip Why step 3 scans stdout
 PHP writes those startup warnings to **stdout**, not stderr. Scanning stderr alone misses them.
 :::
 

@@ -451,7 +451,9 @@ sources:
 
 build-dir: build
 
-cxx-std: c++20
+# 固化编译参数：cxx-std 必须恰好 c++17（nano 严格校验），optimize: 2 即命令行 -O2。
+cxx-std: c++17
+optimize: 2
 
 include-paths:
   - {$pkgDir}/cpp-src
@@ -750,9 +752,13 @@ function main(int $argc, array $argv): void
         // （否则抓到 QLineEdit 清除按钮的淡入淡出中途，同一产物连跑会出多种哈希）。
         $app->runFrames(3);
         $ok = $app->snapshot($shot);
-        echo $ok ? "snapshot: $shot\n" : "snapshot failed\n";
         $app->destroy();
-        return;
+        if ($ok) {
+            echo "snapshot: $shot\n";
+            return;
+        }
+        echo "snapshot failed: $shot\n";
+        exit(1);
     }
 
     // 无头自检：--selftest 逐个触发所有事件，验证每个 handler 都能调用。
@@ -767,12 +773,13 @@ function main(int $argc, array $argv): void
         $app->dispatch(['type' => 'tray', 'value' => 'double']);
         $app->dispatch(['type' => 'menu', 'id' => 'tray.hello']);
 
-        if ($app->lastError() !== '') {
-            echo "selftest failed: ", $app->lastError(), "\n";
-        } else {
-            echo "selftest passed\n";
-        }
+        $failed = $app->lastError();
         $app->destroy();
+        if ($failed !== '') {
+            echo "selftest failed: ", $failed, "\n";
+            exit(1);
+        }
+        echo "selftest passed\n";
         return;
     }
 
@@ -965,8 +972,18 @@ function findRuntimeLibDir(): ?string
     return null;
 }
 
-function cmdBuild(string $path): int
+function cmdBuild(string $path, array $flags = []): int
 {
+    $unknown = array_values(array_diff($flags, ['--nano']));
+    if ($unknown !== []) {
+        error('未知编译选项: ' . implode(' ', $unknown) . '（build 目前只认 --nano）');
+        return 1;
+    }
+    // nano：php-nano + PHPX 的源码直接编进产物，不链任何 PHP 运行时 ⇒ 产物小一个量级。
+    // 只在 macOS arm64 真机验证过（见 docs/src/reference/cli.md#nano）；Windows/Linux 是
+    // 原样透传给 tpc，未实测。
+    $nano = in_array('--nano', $flags, true);
+
     $projectYml = resolveProjectYaml($path);
     if (!file_exists($projectYml)) {
         error("未找到 project.yml: " . rtrim($path, '/\\') . '/project.yml');
@@ -987,6 +1004,13 @@ function cmdBuild(string $path): int
     $vcvars = findVcvars();
     $projectAbs = realpath($projectYml) ?: $projectYml;
     $tpcCmd = tpcCommand($tpc) . ' ' . escapeshellarg($projectAbs) . ' -O2';
+    if ($nano) {
+        // `--nano requires the C++17 language standard`（tpc 是严格相等校验）。示例/模板的
+        // yml 已固化 c++17，这里保留 CLI 覆盖作兜底：yml 仍写 c++20 的老项目走 nano 不至于直接死。
+        // `php-builder:` 段在 nano 下由 tpc 自己忽略（CompilerBase::isPhpBuilderBuild()）。
+        $tpcCmd .= ' --nano --cxx-std c++17';
+        info('nano 模式：不链接 PHP 运行时（产物内不链 libphp/phpx）');
+    }
 
     // Homebrew 的 include/lib 得靠环境变量递给 clang：phpx 的 sapi-static/CMakeLists.txt
     // 没有根 CMakeLists 那段 brew 前缀探测，而 tpc 调 cmake 的参数是写死的、注入不了 flag。
@@ -1021,8 +1045,13 @@ function cmdBuild(string $path): int
     }
 
     if (PHP_OS_FAMILY === 'Windows') {
-        // 编译成功后自动部署运行时 DLL，否则双击 exe 会报"找不到 DLL"
-        deployRuntimeDlls($path);
+        // 编译成功后自动部署运行时 DLL，否则双击 exe 会报"找不到 DLL"。
+        // nano 产物不链 PHP/PHPX DLL —— 这一点由 tpc 自己的审计保证
+        // （NativeDependencyAuditor::assertWindowsImports() 见到 php*.dll 直接把构建判失败），
+        // 所以这里不用再搬。
+        if (!$nano) {
+            deployRuntimeDlls($path);
+        }
     } else {
         // macOS/Linux 的 PHP 运行时是静态链接/私有运行时，没有 DLL 要搬，
         // 但 assets/ 同样要拷 —— 否则开发期相对路径失效、打包后才正常。
@@ -1419,7 +1448,7 @@ function cmdPackage(string $path): int
  * macOS 打包：产出 dist/<Name>.app，把 Qt framework、cocoa 插件和 brew 链接库都塞进 bundle。
  *
  * 流程对齐 typephp-compiler 的 examples/qt-taskboard/package-macos-app.sh：
- * 搭 bundle 骨架 → macdeployqt → 补 offscreen 插件 → 补搬它不管的非 Qt 依赖 → ad-hoc 签名 → 校验。
+ * 搭 bundle 骨架 → macdeployqt → 补 offscreen 插件 → 扫全部 Mach-O 补搬依赖并改写引用 → ad-hoc 签名 → 校验。
  * 我们的 PHP/PHPX 是静态链进二进制的（--enable-embed=static），所以没有 libphp.dylib 要搬。
  */
 function packageAppBundle(string $path, string $name, string $exe, string $distDir): int
@@ -1472,10 +1501,7 @@ function packageAppBundle(string $path, string $name, string $exe, string $distD
         info('已补无头验收插件: ' . basename($headless));
     }
 
-    $vendored = vendorBundleDeps($appBinary, $frameworks);
-    if ($headless !== '') {
-        $vendored = array_merge($vendored, vendorBundleDeps($headless, $frameworks));
-    }
+    $vendored = vendorBundleDeps($contents, $frameworks);
     if ($vendored) {
         info('已搬进 bundle：' . implode(', ', $vendored));
     }
@@ -1735,6 +1761,65 @@ function isSystemDepPath(string $path): bool
 }
 
 /**
+ * 列 bundle 里全部 Mach-O（读文件头魔数判；realpath 去重 framework 的符号链接）。
+ *
+ * 只扫主二进制会漏：实测 QtCore 自己对 brew 的 ICU 就带着绝对引用，而 macdeployqt
+ * 单漏了这三条 —— 产物在没装 brew 的机器上 dyld 直接起不来（F39）。
+ */
+function bundleMachOFiles(string $contents): array
+{
+    $files = [];
+    $seen = [];
+    $it = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($contents, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::LEAVES_ONLY
+    );
+    foreach ($it as $entry) {
+        if (!$entry->isFile()) {
+            continue;
+        }
+        $real = realpath($entry->getPathname());
+        if ($real === false || isset($seen[$real])) {
+            continue;
+        }
+        $seen[$real] = true;
+        $fh = @fopen($real, 'rb');
+        if (!$fh) {
+            continue;
+        }
+        $magic = (string) fread($fh, 4);
+        fclose($fh);
+        if (in_array($magic, ["\xCF\xFA\xED\xFE", "\xCE\xFA\xED\xFE", "\xCA\xFE\xBA\xBE", "\xCA\xFE\xBA\xBF"], true)) {
+            $files[] = $real;
+        }
+    }
+    return $files;
+}
+
+/** 读 Mach-O 的加载引用：otool -L 去掉自身 install name（对它来说 otool -L 第一条是 ID 而非依赖）。 */
+function machOLoadRefs(string $binary): array
+{
+    $deps = machODeps($binary);
+
+    $idOut = shell_exec('otool -D ' . escapeshellarg($binary) . ' 2>/dev/null');
+    if ($idOut) {
+        foreach (explode("\n", $idOut) as $line) {
+            $line = trim($line);
+            if ($line === '' || str_ends_with($line, ':')) {
+                continue;
+            }
+            if (($i = array_search($line, $deps, true)) !== false) {
+                unset($deps[$i]);
+                $deps = array_values($deps);
+            }
+            break;
+        }
+    }
+
+    return $deps;
+}
+
+/**
  * 把 offscreen 平台插件拷进 bundle，并返回其路径（找不到就返回空串）。
  *
  * macdeployqt 只按目标平台拷 cocoa，产物因此**无法无头验收**：设了 QT_QPA_PLATFORM=offscreen
@@ -1802,15 +1887,17 @@ function vendorWindowsOffscreenPlugin(string $qtDir, string $distDir): void
 }
 
 /**
- * 把仍指向 brew / 私有运行时的绝对路径依赖复制进 Frameworks 并改写引用。
+ * 扫 bundle 内全部 Mach-O，把仍指向 brew / 私有运行时的绝对路径依赖复制进 Frameworks 并改写引用。
  *
- * macdeployqt 只管 Qt 自己的东西，libiconv/gmp/mpfr/onig 这些得自己搬。
- * 队列里既放主二进制也放每个刚搬进来的 dylib —— 它们自身的依赖同样要改。
+ * macdeployqt 会处理好主二进制的引用，但 framework 内部会漏：实测 QtCore 指着 brew ICU 的
+ * 三条绝对引用原样留下，产物在没装 brew 的机器上 dyld 直接起不来（F39）。这里不赌它漏不漏 ——
+ * 队列从 Contents 下**全部** Mach-O 出发。目标已在 Frameworks 内的直接改写引用；
+ * 不在的补拷（并改写其 install name）再改写引用。
  */
-function vendorBundleDeps(string $appBinary, string $frameworks): array
+function vendorBundleDeps(string $contents, string $frameworks): array
 {
     $vendored = [];
-    $queue = [$appBinary];
+    $queue = bundleMachOFiles($contents);
     $done = [];
 
     while ($queue) {
@@ -1820,8 +1907,8 @@ function vendorBundleDeps(string $appBinary, string $frameworks): array
         }
         $done[$target] = true;
 
-        foreach (machODeps($target) as $dep) {
-            if (!str_starts_with($dep, '/') || isSystemDepPath($dep) || !file_exists($dep)) {
+        foreach (machOLoadRefs($target) as $dep) {
+            if (!str_starts_with($dep, '/') || isSystemDepPath($dep)) {
                 continue;
             }
             $base = basename($dep);
@@ -1829,6 +1916,10 @@ function vendorBundleDeps(string $appBinary, string $frameworks): array
             $newName = '@executable_path/../Frameworks/' . $base;
 
             if (!file_exists($dst)) {
+                if (!file_exists($dep)) {
+                    warning("依赖不在本机也不在 bundle 内，无法自包含：$dep");
+                    continue;
+                }
                 copy($dep, $dst);
                 chmod($dst, 0644);
                 exec('install_name_tool -id ' . escapeshellarg($newName) . ' ' . escapeshellarg($dst) . ' 2>&1', $out, $rc);
@@ -1843,7 +1934,7 @@ function vendorBundleDeps(string $appBinary, string $frameworks): array
             exec('install_name_tool -change ' . escapeshellarg($dep) . ' ' . escapeshellarg($newName)
                 . ' ' . escapeshellarg($target) . ' 2>&1', $out2, $rc2);
             if ($rc2 !== 0) {
-                warning("改写 $target 对 $base 的引用失败：" . implode(' ', $out2));
+                warning('改写 ' . basename($target) . " 对 $base 的引用失败：" . implode(' ', $out2));
             }
         }
     }
@@ -1851,17 +1942,20 @@ function vendorBundleDeps(string $appBinary, string $frameworks): array
     return array_values(array_unique($vendored));
 }
 
-/** 自检 .app：依赖是否全部落进 bundle、plist 是否合法、签名是否可验。 */
+/** 自检 .app：全 bundle 依赖是否自包含、plist 是否合法、签名是否可验。 */
 function verifyAppBundle(string $bundle, string $appBinary): int
 {
     echo PHP_EOL;
     info('自检打包产物...');
     $ok = true;
 
+    // 只扫主二进制会漏 framework 内部的引用（F39：QtCore → brew ICU 的绝对引用就是这样漏过的）
     $external = [];
-    foreach (machODeps($appBinary) as $dep) {
-        if (str_starts_with($dep, '/') && !isSystemDepPath($dep)) {
-            $external[] = $dep;
+    foreach (bundleMachOFiles($bundle . '/Contents') as $file) {
+        foreach (machOLoadRefs($file) as $dep) {
+            if (str_starts_with($dep, '/') && !isSystemDepPath($dep)) {
+                $external[] = substr($file, strlen($bundle) + 1) . ' → ' . $dep;
+            }
         }
     }
     if ($external) {
@@ -1883,6 +1977,36 @@ function verifyAppBundle(string $bundle, string $appBinary): int
         warning('codesign 校验未通过：' . implode(' ', $verify));
     }
 
+    // 在无 GUI 会话下真跑一遍产物，并检查它的告警。
+    //
+    // 为什么单独查告警：`--shot` 出图的 sha256 只覆盖**窗口像素**，托盘不在 `grab()` 范围内，
+    // 于是「打包后 assets 路径解析不到、托盘图标静默丢失」这类问题出图哈希照旧相同，
+    // 只能靠人眼扫日志。stderr 才是这类缺陷的唯一信号。
+    //
+    // QT_MESSAGE_PATTERN 给每条 Qt 日志加上 `type|category|` 前缀，用来把真正要拦的
+    // qWarning 与 Qt 平台插件自己那些无害告知区分开（不区分的话会有害地误报）。
+    info('在无 GUI 会话下真跑产物（offscreen --selftest），并检查其告警...');
+    exec(sprintf(
+        'QT_QPA_PLATFORM=offscreen QT_MESSAGE_PATTERN=%s %s --selftest 2>&1',
+        escapeshellarg('%{type}|%{category}|%{message}'),
+        escapeshellarg($appBinary)
+    ), $runOut, $runRc);
+
+    if ($runRc !== 0 || !in_array('selftest passed', $runOut, true)) {
+        // rc 是主判据（示例/脚手架的 --selftest 失败即 exit 1）；仍比对文本，
+        // 是为了接住那些自己写了自检但失败时不改退出码的应用。
+        error('产物内无头自检未通过（rc=' . $runRc . '）：' . implode(' | ', array_slice($runOut, -5)));
+        $ok = false;
+    }
+    $warned = array_values(array_filter($runOut, 'bundleIsWarningLine'));
+    if ($warned) {
+        error('产物启动时告警，说明有资源或能力没就绪：');
+        foreach ($warned as $line) {
+            echo "  - $line" . PHP_EOL;
+        }
+        $ok = false;
+    }
+
     if (!$ok) {
         return 1;
     }
@@ -1890,6 +2014,28 @@ function verifyAppBundle(string $bundle, string $appBinary): int
     success(sprintf('打包完成: %s (%.1f MB)', $bundle, dirSize($bundle) / 1048576));
     info('启动: open ' . escapeshellarg($bundle));
     return 0;
+}
+
+/**
+ * 判定一条 `QT_MESSAGE_PATTERN` 格式化后的产物输出是否是「要拦的告警」。
+ *
+ * 只按 type 拦会误报：Qt 平台插件在 offscreen 下恒常打两条无害 warning ——
+ * 字体别名表填充耗时（跟开发机速度有关，与产物自包含性无关）、
+ * 以及「本插件不支持某能力」的通用告知。这两条白名单掉，剩下的 warning
+ * 才是应用/桥接层自己 `qWarning` 出来的、指向真实缺陷的信号。
+ */
+function bundleIsWarningLine(string $line): bool
+{
+    if (preg_match('/^(crash|fatal)\|/', $line) === 1) {
+        return true;
+    }
+    if (preg_match('/^(warning|critical)\|/', $line) !== 1) {
+        return false;
+    }
+    if (str_contains($line, '|qt.qpa.fonts|')) {
+        return false;
+    }
+    return !str_contains($line, 'This plugin does not support ');
 }
 
 /** 递归删目录树（只用于重建自己生成的 bundle）。 */
@@ -2075,7 +2221,7 @@ function main(array $argv): int
         echo '用法:' . PHP_EOL;
         echo '  qtphp doctor            检查工具链' . PHP_EOL;
         echo '  qtphp new <name>        创建新项目' . PHP_EOL;
-        echo '  qtphp build <path>      编译项目' . PHP_EOL;
+        echo '  qtphp build <path> [--nano]  编译项目（--nano：源码内联 PHP，不链运行时，仅 macOS 已验证）' . PHP_EOL;
         echo '  qtphp run <path> [app参数…]  运行项目，其后的参数原样透传给应用' . PHP_EOL;
         echo '  qtphp package <path>    打包项目' . PHP_EOL;
         echo '  qtphp test              运行测试' . PHP_EOL;
@@ -2099,7 +2245,8 @@ function main(array $argv): int
                 error('请指定项目路径');
                 return 1;
             }
-            return cmdBuild($argv[2]);
+            // 第 3 个参数起是编译选项（目前只有 --nano），未知项在 cmdBuild 里报错而不是静默忽略
+            return cmdBuild($argv[2], array_slice($argv, 3));
         case 'run':
             if (!isset($argv[2])) {
                 error('请指定项目路径');

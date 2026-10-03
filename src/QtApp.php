@@ -475,6 +475,9 @@ final class QtApp
     private function safely(array $entry, array $event): void
     {
         [$handler, $arity] = $entry;
+        // 每次分发先清空：否则上一个 handler 的异常会冒充这一次的原因，
+        // 一次失败就能把整轮自检的用例全部误报成 FAIL。
+        $this->lastError = '';
         try {
             if ($arity <= 0) {
                 $handler();

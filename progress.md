@@ -1,5 +1,283 @@
 # Progress Log — typephp-qt
 
+## Session 27 — 2026-10-03（无头验收开关按退出码报失败）
+
+### 任务
+> 「继续」——做 F32/Phase 29 记账里那条本机可验的缺口：三个开关失败时仍 rc=0。
+
+### 交付结果（全部实测）
+- `examples/hello/src/main.php` 与 `bin/qtphp` 的 `qtphp new` 模板：`--selftest`/`--difftest`/`--shot`
+  失败一律 `exit(1)`；`self_test()`/`diff_test()` 改为返回失败计数。
+- `--shot` 原先**静默**（`$ok` 取了不用），现在打印 `snapshot failed: <path>`。
+- `verifyAppBundle()`：rc 升为主判据，文本比对留着接住自写自检但不改退出码的应用。
+- 新增 `QtApp::safely()` 分发前清 `lastError` —— 造负控制时挖出的诊断缺陷（一次异常污染其后所有用例）。
+
+### 验证（macOS arm64 真机，正反两向）
+```
+offscreen --selftest  25/25   rc=0      注入 throw → 1 条 FAIL  rc=1
+offscreen --difftest  20/20   rc=0      判反一条断言 → 1 条 FAIL rc=1
+--shot 正常出图       rc=0   cocoa 2728fb1a6a06… / offscreen 6c4832a6b738…（与基线逐字节同）
+--shot /no/such/dir   rc=1（直接跑产物、穿过 qtphp run 都是 1）
+qtphp new demo → build → run --selftest rc=0；模板侧坏路径 rc=1
+php bin/qtphp package examples/hello    rc=0  83.6 MB
+   └ 藏 assets/icon.png                rc=1  warning|default|tray icon could not be loaded
+phpunit 127 tests / 215 assertions；lint 契约一致；docs/check-anchors.py src 全绿
+```
+
+### 两个 AOT 语义坑（都是实测，写进 F34）
+1. `1 % 0` 在 AOT 产物里**不抛** `DivisionByZeroError` —— 第一版负控制因此测了个空。
+   自检里的失败必须显式 `throw`，`safely()` 只捕 `\Throwable`。
+2. `echo $cond ? "a: ", $x, "\n" : "b\n";` 被 tpc 拒收（`Syntax error, unexpected ','`），
+   脚手架模板第一版就这样 build rc=1。同一条 `echo` 不带三元时逗号是合法的。
+
+### 教训
+12. **负控制要先证明"它能失败"**：注入后如果输出与正向完全一致，先怀疑注入本身没落地
+    （本轮 `1 % 0` 就是），而不是直接宣布判据成立。
+13. **改模板要走一遍 `new`→`build`**：模板文本不在单测覆盖里，只有真编译才暴露 AOT 前端差异。
+14. **同一条教训会以新形式重犯**：本轮先用 `| tail` 吞掉 rc（教训 8），又用 `perl -pi -e` 做注入
+    却因定界符语法错而"注入成功"（读了个无效的 rc=0）。凡是做负向控制，先单独验证
+    "改动确实落到文件上了"（`assert count==1` / `grep` 结果），再谈判据成立。
+
+### 文件清单（本轮，12 个）
+```
+examples/hello/src/main.php       三开关 exit(1)；self_test/diff_test 返回失败计数
+bin/qtphp                         脚手架模板同款 + verifyAppBundle 判据改 rc 为主
+src/QtApp.php                     safely() 分发前清 lastError
+tests/QtAppTest.php               +1 例：lastError 只描述本次分发
+README.md                         无头验收段补退出码
+docs/src/advanced/headless.md     +「Exit codes」表 + selftest 片段带 exit(1)
+docs/src/zh/advanced/headless.md  同上（中文）
+docs/src/reference/cli.md         run 段补一句退出码语义 + 跨页锚点
+docs/src/zh/reference/cli.md      同上（中文）
+findings.md                       F34（AOT 退出码通路 / 两个 AOT 坑 / lastError 归因 / 锚点鉴别力）+ F35（nano 卡点定案）+ F33 §3 补正
+task_plan.md                      Phase 31 + 31.1 分解 + 交付标准新条目 + Errors 4 行；Phase 30 行与 30.2 分解、Errors 再 +3 行（否证的三条假设）
+progress.md                       本文件
+```
+现场已复原：注入的负控制全部撤掉（`grep NEG` 为 0），`examples/hello/build/hello` 与
+`dist/Hello.app` 都是还原后重编的健康产物（package rc=0、83.6 MB）。临时脚手架目录已删。
+
+### 追加（同一天）：按用户给的《TypePHP 四种运行时与链接方案》文档重核 nano（F35 / Phase 30.2）
+
+> 「参考 <附件文档>」——文档对 nano 的安装口径、平台边界、Windows 行为的说法与 F33 的读码结论不完全一致，
+> 特别是「Windows `--nano` 只是 policy、仍链完整 PHP/PHPX DLL」与我上一轮「全平台源码组合」直接冲突。
+
+本轮**全程只读**（`df -h /` 只剩 2.1 GiB ⇒ 明确不拉包、不再跑 250-TU 级 nano 重编）：
+
+- 三轴对照确认本仓库没用错配置：`mode: bin` + 默认 `sapi: embed`，mac 走 `php-builder`、win/linux 走宿主 libphp。
+- 逐条否证 nano 卡点的四种解释（phpx 版本旧 / vendor 供给方式不对 / Qt 代码 / 还有第二个不匹配依赖），
+  每条都给到 file:line 或实测数据；新增的独立证据是 **`basic_functions.c` 被 `#ifdef PHP_NANO` 分成两套模块入口**，
+  nano 编的是 deps 为 NULL 的那一套 ⇒ 唯一不可满足的仍是 `"Core"`。
+- 反向新证据：**"Core" 就是 `strlen` 所在的扩展**（实测宿主 PHP 8.5.7 反射映射）⇒ 卡点不可能靠应用侧改写绕过，
+  修复点只有上游两处；姊妹仓库当前源码与 v0.9.4 在这两处逐行一致 ⇒ 「等发版」不是出路。
+- Windows 那条按**未验证的矛盾**记录，两边都不采为事实。文档的 `--full-static` 对 qt 不适用（要链 Qt 自己的动态库）。
+
+教训 15：**file:line 只有本会话真读过才能落进 findings**。压缩前的草稿里带着 `NativeSourceProjectBuilder.php:307`、
+`NativeDependencyAuditor.php:26` 这类凭印象的行号，落笔前逐条 grep 复核才发现真实位置是 `-DPHP_NANO=1` 在
+`NativeSourceProjectBuilder.php:108`、`assertWindowsImports()` 在 `NativeDependencyAuditor.php:69-96`。
+同一条规则也救了一个数：先写「php-nano 全仓只有 4 处 `ZEND_MOD_REQUIRED`」，用 count 模式重数得到 7 处 / 5 文件
+（其中 2 处是宏定义本身），措辞随即改成「实际使用落在 4 个模块」——**分页的 grep 结果不能当计数用**。
+最严重的一处也在这条上：F35 §3 初稿写「`NanoBuildBackend.php` 11-14 行注释写着『Nano composes the php-nano
+and PHPX runtime sources directly on every supported native platform』」——重新 Read 那个 20 行的文件后发现
+**这句引号里的话根本不存在**（11-19 行是两个连参数都不看的恒返回函数，唯一的注释是第 5/8 行的类/常量说明）。
+落盘前换成真实证据：`forHost()`/`composesRuntimeSources()` 无视 `$platformName`、`assertWindowsImports()`
+的调用点在 `Translator.php:3025-3028`（守卫 `if ($this->isWindows())` 在 3025，`dumpbin /imports` 实参在 3027）。
+**引号内的原文必须当场读出来，不能凭印象拼。**
+
+### 追加 2（同一天）：把 §2(a) 的补丁改掉并真机跑通 nano（F35 §5 / Phase 30.3）
+
+> 「直接改」——上一轮只读到「修复只可能在上游两处」，用户令直接落地。
+
+- 改动一处一行：`Translator.php:1949` nano 下 deps 宏 `ZEND_MOD_REQUIRED` → `ZEND_MOD_OPTIONAL`
+  （`typephp-qt/vendor/swoole/typephp/` + `typephp-compiler/src/` 两处同步；vendor 是 gitignored，姊妹仓库那处**未提交**）。
+- `--dry` 先验 codegen（0.4 s，比整轮编译便宜三个数量级）：生成的 `extension-hello_nano.cc:856-861` 六条依赖
+  （`standard/date/json/Reflection/SPL/Core`）全部变成 OPTIONAL ⇒ 尺子先对上，再花 250-TU 的钱。
+- 真机三开关全过：`--selftest` 25/25 rc=0、`--difftest` passed rc=0、`--shot` offscreen 与 cocoa ×2
+  **哈希与 embed 模式基线逐字节相同**（`6c4832a6b738…` / `2728fb1a6a06…`）；`otool -L` 无 libphp/phpx。
+- **A/B 是在同一棵 `build-nano` 树里换同一个变量做的**：还原补丁 → 重新生成回到 REQUIRED → 构建仍 rc=0 →
+  运行 rc=1 且全进程只有一行 `Unable to start PHP Nano extensions` → 再打回补丁 → rc=0。
+  顺带否证了 F33 那句「tpc 会按 target 名重新生成该文件，所以改生成文件不能作为正证」的**反向担忧**：
+  这次增量重编确实重写了生成源（grep 当场确认），249 个对象走缓存、只重编项目 TU + 重链，一轮控制实验几十秒。
+- 磁盘：`df -h /` 全程 2.0 GiB 可用未变，`build-nano` 峰值 20 MB ⇒ 250-TU 级 nano 重编在本机是安全的（此前高估了风险）。
+
+### 追加 3：那 2.55 MB 的体积差是自己挖的坑，归因到 `-O`（F35 §5 收尾）
+
+- 现象：本轮 `-O0`（默认）编出 6,988,648 B，F33 记的是 4,370,536 B ⇒ 我先按「未归因」落了盘，随后用**同一棵树只换 `-O`**
+  重编把它关掉：`-O2` ⇒ **4,370,536 B / strip 3,639,504 B，文件总尺寸与 F33 等值**（`__text` 2,131,164 vs 2,129,548）。
+  根因不是推测 —— 旧会话记录里那条命令原样躺着：
+  `php vendor/bin/tpc.php examples/hello/project.nanoprobe.yml --nano --cxx-std c++17 -O2 -o /tmp/hello-nano --no-progress`，
+  `-O2` 和 `--cxx-std c++17` 都写在 CLI 上，F33 只把后者记进了 findings。顺带一条：`bin/qtphp:1004` 本来就硬编码 `-O2`
+  （Phase 32 改动后的行号，当时记的 994 已被顶掉），
+  所以走 `qtphp build` 时这个档是固定的，只有直连 tpc 才会掉到 `-O0`。
+- 中途两条无效读数如实记：① `nm -arch arm64 | grep -c " _php_parse_date$"` 全 0 —— 换了不带 `-arch` 的 `nm` 后
+  才拿到 14,195 个符号，那批 0 是**仪器坏了**不是「代码不存在」；② 早先那条 `grep -oE "\b(html|date|…)\("`
+  零输出也是可疑的正则，没当证据用（BSD grep 的 `\b` 不保证）。
+- 有效旁证：两档 250 TU、链接命令（含 `-Wl,-dead_strip`）完全相同，符号数 8,274 vs 8,727，
+  独有项集中在 Qt 模板实例与 `_register_class_*` ⇒ 差异在内联/死代码，不在 php-nano 组件集合。
+- `-O2` 档也真机跑过：selftest/difftest rc=0，offscreen 与 cocoa 两张图仍与 embed 基线逐字节相同。
+
+教训 17：**测得的数字要把「怎么测的」一起落盘，尤其是命令行上没写的默认值。** 这次 F33 的两个体积数字本身没错、
+也确实可复现，但因为漏记 `-O2`，同「配置」复现时先差出 2.55 MB，还让我先落了一条「未归因」的记录。
+⇒ 以后凡产物尺寸/耗时这类数，同一行里写清 `-O`、`--nano`、`strip` 口径与 `--job`；入口 yml 里能写死的就写死，
+别靠命令行临时传。
+
+教训 16：**写进记录的 file:line 要区分「读过」和「以为读过」。** 复核 30.3 时顺手回查 §3 那三处 Windows 反向证据，
+发现初稿里「`NanoSourceComposer.php:331-340` 专产 `php_nano.lib`」是**凭印象拼出来的**：该文件实测只有 252 行，
+全 `src/` grep `php_nano\.lib` 零命中，`typephp_main_nano.cc` 的真实引用点在 `Preprocessor.php:446`。
+同一条里另外三处（`NanoBuildBackend.php:11-19`、`NativeDependencyAuditor.php:69-96`、`Translator.php:3025-3028`，
+其中后两处的行号也是这次才校正的）逐条 grep 过才留下。替换成真证据 `NativeBuildConfigurationTrait.php:238-248`
+（`getLibraries()` 在 nano 下提前 return，`php8ts/php8embed` 只在 273-301 的非 nano 分支追加）后结论方向没变，
+但**那条证据链此前确实空了一环** —— 记下来：凡是「三处反向证据」这种自带可信度修辞的清单，每一项都得单独站得住。
+
+### 追加 4：nano 接进 `bin/qtphp`，真正的墙在 tpc 的 `php-builder:` 判定上（F36 / Phase 32）
+
+用户令「nano 接进 bin/qtphp」。接入本身只有三处（`cmdBuild` 收 `--nano` 并下发
+`tpc <entry> -O2 --nano --cxx-std c++17`；Windows 分支 `if (!$nano)` 才 `deployRuntimeDlls()`；usage 加一行），
+**真正挡住的是 `examples/hello/project.macos.yml` 结尾那段 `php-builder:`** —— F33 的绕法是复制一份删掉该段的探针 yml，
+那等于每个项目为 nano 多养一份入口配置，不可交付。
+
+- 落点 `CompilerBase::isPhpBuilderBuild()` 加 `&& !$this->isNanoMode()`，两处同步（`typephp-qt/vendor/...` 与
+  `typephp-compiler/src/...`）。配置层没有 off switch：`configurePhpBuilder()` 只写字段、
+  `preparePhpBuilderEnvironment()` 在执行期按这个判定触发 ⇒ 只能改判定本身。只关 `isNanoMode()`，
+  不关 `isNanoPolicyMode()`（后者仍链宿主 libphp，那条路上 `php-builder:` 语义不变）。
+- **真机三向（同一个 `build/` 目录，不新开 build-dir）**：nano 产物 4,403,640 B（strip 3,672,352 B）、
+  日志 `php-builder` 出现 0 次、`otool -L` 只剩 Qt 三件套 + 系统框架 + brew libiconv + libc++/libSystem；
+  `--selftest` 25 例、`--difftest` 20 例、`--shot` cocoa `2728fb1a6a06…` / offscreen `6c4832a6b738…`
+  与 embed 基线**逐字节相同**。切回 embed：只重编少数 TU（log 报 12 files）后产物回到 25,569,608 B（与基线等值）、
+  `-lphp` 回来 ⇒ 跨模式复用增量缓存不是 no-op、也没被污染。
+- **上游回归 A/B（能实测就不推理）**：`typephp-compiler` 里 `--filter '(PhpBuilder|Nano)'`
+  打补丁 vs `git show HEAD:src/CompilerBase.php` 两臂**逐位相同**（`Tests: 73, Assertions: 206, Errors: 3, Failures: 1, Deprecations: 7`，
+  4 个坏用例名字一致）。那 4 个坏点与本次无关：3 个是 `swoole/php-nano` 在该仓库 vendor 里没装
+  （`ComposerNativePackage.php:82` 抛），1 个是 `CompilerBaseApiTest.php:1117` 的 `/var/folders` vs
+  `/private/var/folders`（mac 符号链接）。测完 `cmp` 校验还原为逐字节一致。
+- **诚实记下两处没对齐的口径**：① log 报 12 files 重编，而 mtime 落在该窗口的 `.o` 只有 8 个，
+  我没逐文件核对哪个为准；② qtphp 的 nano 产物比直连 tpc `-O2` 那次大 33,104 B（+0.76%），**未归因**。
+- 文档：en/zh `docs/src/{reference,zh/reference}/cli.md` 各加 `## nano` 段（锚点 `#nano` 是代码注释里指的那个），
+  「首次构建会慢」tip 交叉引用它 —— nano 恰好不走现编私有 embed 运行时那一步。
+  回归：`qtphp test` 127/215、`lint` 契约一致、`check-anchors.py docs/src` rc=0（16 个目标文件）。
+  **边界**：`check-anchors.py` 的正则只吃 `](/xxx.md#frag)`，本轮的页内 `](#nano)` 不经它校验。
+- 顺带把自己写的三条失效引用改掉：Phase 32 把 `bin/qtphp` 行号顶掉 10 行（`-O2` 994→1004），
+  F35 / 30.3 / 追加 3 里的 `bin/qtphp:994` 全部校正；F36 §1 初稿的 `12 处`、`Translator.php:527/:4323`、
+  裸 `SourcePipelineTrait.php`（真实路径含 `Build/`）也是压缩前记忆的锅，本轮 grep 后才落定。
+
+### 追加 5：两条教训
+
+教训 18：**改了被自己引用过的源文件，行号就是新的债。** `bin/qtphp` 加 10 行，findings/task_plan/progress 里
+三条 `bin/qtphp:994` 当场全部失真，而且是「看起来仍然可信」的那种失真 —— 数字对得上语义、只有位置错了。
+凡本轮动过行的文件，落笔引用前先重新 grep 一次定位，别复用旧记录里的行号。
+
+教训 19：**上游测试跑不绿时，先分清「回归」和「这台机器本来就这样」。** `--filter CompilerBaseApiTest` 整跑
+中途死掉且不打印 `Tests:` 摘要（死在 `testParseProjectYamlLoadsDocumentedCompilerOptions` 的 `profile` 校验 +
+PHP 8.5 `setAccessible()` deprecation），第一反应容易当成自己改坏了。A/B 用 HEAD 覆盖同一个文件重跑，
+输出逐行相同 ⇒ 是既有问题。顺带一条陷阱：那 3 句 `assertTrue(isPhpBuilderBuild())` 里有一句（`:1119`）
+在 `:1117` 的 mac 路径断言失败后根本执行不到 ⇒ **它不能当我这次改动的正向证据**，正向证据只能回到真跑一遍构建（T1）。
+
+### 追加 6：`-O2`/`cxx-std` 固化进入口 yml（Session 28 窗口，F37 / Phase 32.6）
+
+用户令「把 -O2/cxx-std 写进入口 yml 固化」。落点：`examples/hello/project.yml`（公共段）改 `cxx-std: c++17` +
+新增 `optimize: 2`；`bin/qtphp` 的 `qtphp new` 模板同步；nano 分支注释从「覆盖 yml 的 c++20」改写为
+「兜底老 yml」（**CLI 覆盖保留**：老脚手架项目走 nano 不至于直接死）；中英 cli.md 与 README 的 `-O2`/C++ 口径同步。
+
+为什么敢降 c++20→17：`Translator.php:661` 对 nano 是**严格相等**校验，tpc 自身默认就是 c++17，且上一轮
+250 TU nano 全量编译已把全部桥接源码（含 `.mm`）在 c++17 下编过；技能模板本来就写 c++17，本次是向它对齐。
+
+验收（全部实测，Apple Silicon）：
+
+```
+embed 重编      12 TU + pch 重建（新目录 413c569c…）→ 25,569,608 B（与旧基线同值）
+embed 四件套    selftest 25 例 / difftest 20 例 / shot cocoa 2728fb1a… + offscreen 6c4832a6… 全 rc=0、哈希同基线
+nano 重编       250 TU → 4,403,640 B（与旧基线同值）＋ 四件套同样全过、哈希同基线
+裸 tpc --nano   `tpc project.macos.yml --nano -o /tmp/…`（不给 -O2、不给 --cxx-std）→ 过严格校验 + 编链成功、
+                selftest passed、出图同基线 ⇒ cxx-std 生效直证
+optimize 直证   同命令加 CLI -O0 → 6,989,240 B vs yml-O2 的 4,370,928 B（+60%）⇒ yml 的 optimize: 2 真进了编译
+                （同时确认 CLI 仍优先：-O0 能覆盖 yml）
+qtphp new 冒烟  /tmp 生成项目 rc=0，project.yml 落出 cxx-std: c++17 + optimize: 2 注释块
+```
+
+- **体积差新边界（仍未归因）**：qtphp 4,403,640 vs 裸 tpc 4,370,928 = **32,712 B**，差聚在 `__TEXT`（+32,768 B 整），
+  符号名总长几乎相同（492,577 vs 492,248）。已排除 optimize / cxx-std / tpc 入口（`findTpc()` 实测走
+  `vendor/bin/tpc.php`，与探针同一入口）/ `php-builder:` 段（本轮两边都用同一入口 yml）。旧记的 33,104 B 是
+  另一对产物，作废。
+- **上游缓存缺陷（新发现，未修）**：同一 `build/` 连续换 output 名（A→B→C）后，第三次链接报
+  `typephp_project_hello_nano_ymlcheck_o0::get_persistent_*` undefined —— 共享路径对象的新鲜度键没捕获
+  目标名/命名空间变更。复现命令与影响面写进 F37 §2；固定目标名的正常流程不受影响。
+- 处置：进入打包验收前清 `build/cache/{objects,incremental,link}`，从干净状态重建 nano 产物再验，不拿
+  被对抗性探针污染过的缓存产物做验收。
+
+教训 20：**对抗性探针会把共享缓存搅出正常流程见不到的状态 —— 验完要么记录污染并重建，要么一开始就用
+独立 build-dir。** 本轮为追 32 KB 差，在同一个 build-dir 里连续换了三个 output 名，踩出上游缓存缺陷；
+这条缺陷是收获，但缓存也被搅浑，打包验收前必须先清缓存重建，否则验的是未知状态。
+
+### 追加 7：`.app` 打包链 × nano 产物验收 + 33,312 B 体积差归因（Session 28 收尾，F38 / Phase 33）
+
+先按 F37 §2 的处置清 `build/cache/{objects,incremental,link}`，重建干净 nano 产物（4,370,328 B），
+再 `qtphp package examples/hello` rc=0：
+
+```
+bundle        dist/Hello.app  67,248,220 B（64.1 MiB）/ 46 文件（du 65,824 KB）
+对照 embed 版  87,612,051 B / 54 文件 / 83.6 MiB  ⇒ −20,363,831 B（−23.2%）
+bundle 二进制  3,787,792 B（macdeployqt strip 过），sha256 ada43ae4…
+依赖          otool -L 全 @executable_path 改写、无 libphp；codesign --verify --deep --strict 通过
+无头验收      verifyAppBundle() 通过（bundle 内 offscreen --selftest + stderr 白名单）
+出图          cocoa 2728fb1a… / offscreen 6c4832a6… 与开发态基线逐字节相同；读图 backend=wkwebview，js=支持
+```
+
+33,312 B 体积差四步单变量实验（全部实测）：
+
+```
+A 清 cache 首建         4,370,328 B  扩展源 34,475 B 无表      ← canonical
+B 先 embed 再切 nano    4,403,640 B  扩展源 60,304 B 含表×2    ← 脏态精确复现
+C nano-after-nano       4,403,640 B  带表                      ← 粘滞，不自愈
+D 清 cache 再建         4,370,328 B  无表                      ← 复位
+```
+
+节级 forensics（B vs A）：`__TEXT` +32,768（页对齐）、`__text` +32,220、`__bss` +6,984（表 6,976+对齐）、
+`__LINKEDIT` +544、`__unwind_info` +16、`__gcc_except_tab` +24、`__cstring` +6、`__init_offsets` +4；
+新符号 `typephp_project_hello::_literal_strings`、`__GLOBAL__sub_I_extension_hello.cc`、
+`__cxx_global_var_init/dtor`。机制：`Translator.php:498-506` nano 下强制 `noLiteralStrings=true`，干净
+首建遵从，但同目录 embed 轮的字面量字符串表风味被增量缓存沿用。行为零差异（selftest 25/25、difftest
+20/20、两条哈希逐字节同）⇒ 纯体积/风味问题，归上游缓存缺陷家族（F37 §2 同类）。F37 §1 的 32,712 B
+就此结案 = 33,312 − 600（目标名长差）。
+
+文档修正：README + 中英 cli.md 的 4,403,640→**4,370,328**、3,672,352→**3,639,472**（干净首建口径），
+cli.md 表后加「先 embed 再切 nano 会脏 ~33 KB，清 `build/cache` 下 objects/incremental/link 后重建即
+回干净口径」注记；README 另记 macOS .app 83.6→64.1 MiB。
+
+教训 21：**产物二进制内嵌编译时间戳（实测脏 16:42:47 / 干净 17:28:29）⇒ 跨轮次二进制不可逐字节
+diff；引用体积/行为前先确认是干净态还是脏态，尺子取「尺寸 + 符号表 + 出图哈希」。**
+
+### 追加 8：修 `.app` 自包含缺陷（用户令「修复自包含问题」，F39.1 / Phase 34）
+
+背景：追问「ICU 是干嘛的」时挖出 —— bundle 内 36 MB ICU 拷贝是死重，QtCore 三条引用还是
+`/opt/homebrew/opt/icu4c@78/...` 绝对路径；`env -i` 全绿也测不出，藏掉 brew 的 ICU 后原产物 rc=134。
+
+改动（`bin/qtphp`）：
+
+- 新增 `bundleMachOFiles()`（魔数判 Mach-O + realpath 去重符号链接）与 `machOLoadRefs()`
+  （`otool -L` 剥掉 framework 自 ID —— 第一行是 ID 不是依赖，不剥会拿 basename `QtCore` 乱拷）；
+- `vendorBundleDeps($appBinary)` → `vendorBundleDeps($contents)`：队列从 Contents **全部** Mach-O
+  出发（主二进制 / framework / 插件 / 依赖 dylib 一视同仁），已在 Frameworks 的直接 `-change`、
+  不在的补拷 + 改 ID 再 `-change`；两处调用点合并为一处；
+- `verifyAppBundle()` 扩到全 bundle 扫描，报错带「文件 → 引用」；
+- 中英 `packaging.md`「自检机制」加「依赖自包含」判据 + 更正「`env -i` 什么都漏不进来」。
+
+验收（全实测）：
+
+```
+修复后 package      rc=0；QtCore icu 三条 → @executable_path；全 bundle 只剩 4 条 Qt 自 ID（非加载引用）
+负控制（停改写）     rc=1，精确列出 QtCore → brew icu×3（旧自检看不见）；顺带查明主二进制与其余依赖
+                     macdeployqt 本会处理，全 bundle 扫描挖出的唯一遗漏就是 framework 内部 ICU
+藏 brew icu4c@78     修复产物 rc=0、selftest passed，DYLD_PRINT_LIBRARIES 显示 ICU 从 bundle 内加载
+                     （修前同条件 rc=134）⇒ 36 MB 拷贝由死重变真依赖
+回归                difftest passed；cocoa 2728fb1a… / offscreen 6c4832a6… 同基线；codesign ok；
+                     phpunit 127/215；lint 契约一致
+```
+
+教训 22：**自包含验收必须把依赖从磁盘上「藏掉」再跑（改名 symlink 或上干净机器）；`env -i` 只清
+环境变量，清不掉文件系统依赖 —— 全绿的 env -i 与本机通过都可能是假象。**
+
+收尾：brew symlink 已还原复核；`/tmp/hello-icu-fixed.app` 对照副本已清理；项目记忆已更新为「已修」。
+
+
 ## Session 26 — 2026-10-03（补交 .lib + WebView2 分支 W1–W5 真机验证）
 
 ### 任务
@@ -93,6 +371,60 @@ P2 按 bundle-aware 修，并把触发条件钉成「exe 目录的父目录名�
 offscreen `--selftest` passed；`phpunit` **126 tests / 212 断言**、`lint` 契约一致、
 `codesign --verify --deep --strict` 通过（临时改名已还原）。中英 `packaging.md`/`dialogs.md` + README 同步。
 
+### 6. mac 打包验收补「stderr 无告警」判据（Phase 29 / F32）
+
+F31 修完之后剩下的问题不是「还有没有缺陷」，而是「**下一次同类缺陷还有没有人看得见**」。
+答案是看不见：`--shot` 的 sha256 只覆盖窗口像素，`--selftest` 失败仍返回 0，
+`otool -L` 只管链接 ⇒ 资源加载不上时 `package` 照样打印「打包完成」。
+
+先把健康产物的真实 stderr 量出来再定规则（不猜白名单）。bundle 内
+`QT_QPA_PLATFORM=offscreen QT_MESSAGE_PATTERN='%{type}|%{category}|%{message}' --selftest`：
+
+```
+warning|qt.qpa.fonts|Populating font family aliases took 70 ms. …"Sans Serif"…
+warning|default|This plugin does not support propagateSizeHints()
+```
+
+两条都是 Qt 平台插件自身的无害告知 —— **按 type 一律拦会把正例判成失败**。
+所以 `verifyAppBundle()` 里新增的判据是：输出含 `selftest passed`（rc 只兜底，
+因为 selftest 失败仍返 0，这点在 F32 里单列为待修），且过滤掉上面两类之后无告警行。
+
+鉴别力（两个方向都测）：
+- 负控制：藏掉 `examples/hello/assets/icon.png` 再 `package`
+  ⇒ `warning|default|tray icon could not be loaded: assets/icon.png`、rc=**1**。
+- 正例：还原后 rc=**0**、83.6 MB，而它本身就带 2 条 warning ⇒ 白名单是必要的，不是装饰。
+
+复验：`php -l` 无错、`phpunit` **126 tests / 212 断言**、`lint` 契约一致。
+上一轮（F31 的 P1/P2 + 计划文件记账 + stash-pop 撞号理清：Windows 块 → F30、mac 打包块 → F31、
+Phase 26/27 换位重编号）已提交为 `ed6f2e5`（10 files changed）。
+
+### 7. nano 模式体积实测（用户追问「走 nano 编出来多大」）
+
+结论分两半，**少说一半就是骗人**：
+
+- **编得出来，而且小得多**：nano 产物 4,370,536 B（4.17 MiB）、strip 后 3,639,504 B，
+  同一项目普通模式 `build/hello` 25,569,608 B（24.39 MiB）⇒ 二进制降 ~21 MB（83%）。
+  `otool -L` 只剩 Qt framework、系统框架、libiconv、libc++ —— 真的不链 libphp。
+  250 个 TU 里含 mac 的 `qt_webview_wk.mm` ⇒ WKWebView 后端在 nano 下也编得过。
+  我们的 PHP 侧全部通过 nano 前端能力策略（没有 eval/include/require/匿名类，也没撞禁用函数清单）。
+- **跑不起来**：`Unable to start PHP Nano extensions`、rc=1。写了个 5 行 nano 程序（`strlen`+`echo`）
+  同样中招 ⇒ 卡点与 Qt 代码无关，在上游生成的模块入口声明了 `ZEND_MOD_REQUIRED("Core")`，
+  而 php-nano 里唯一叫 "Core" 的入口是 `static`（`Zend/zend_builtin_functions.c:52`），
+  `find_available()` 又只在传入数组里按名字找 ⇒ 依赖永不可满足。机制三段都读到 file:line（F33 §3）。
+
+两条 nano 前置值得记（都要改配置，不改代码）：`--nano` 拒绝 C++20（示例 yml 是 c++20 ⇒ 加 `--cxx-std c++17`）；
+入口 yml 里的 `php-builder:` 段在 nano 下仍会去准备私有 embed 运行时（本机 curl 404 ⇒ rc=255），必须去掉。
+
+**我这轮的失败实验要如实写**：想正证「就是那一行的锅」，做法是删掉生成 `.cc` 里那一行再重编 —— 结果
+tpc 按 target 名把文件重新生成了回去（第三次用同名 `-o` 时 `grep -c` 回到 1、产物字节数与原一致），
+所以正证没做成。真要做得改 tpc 的 codegen，本轮没动。
+
+顺带记一条**读码结论（未做 Windows 实测）**：tinygui 的「Windows `--nano` 是假 nano（链完整 PHP DLL）」
+是 tpc v0.9.3 的事实；v0.9.4 源码里 `NanoBuildBackend::composesRuntimeSources()` 对所有平台返回 `true`，
+分流点 `src/Translator.php:497-505` 也不再按平台否决 `nanoMode` ⇒ 那条旧结论的**前提已变**，
+但 Windows 上是否真能出 freestanding 产物、以及是否也撞上同一个 `"Core"` 依赖死锁，本轮都没验。
+本轮验的是：「产物起不来」这一条在 mac arm64 + tpc v0.9.4 + php-nano v1.1.0 上成立。
+
 ### 教训
 1. **阳性对照不是可选项。** 如果只报「销毁后 0 个进程」，很可能只是过滤器没匹配上。
    先让 `--hold` 数到 6，后面的 0 才有意义。
@@ -112,6 +444,17 @@ offscreen `--selftest` passed；`phpunit` **126 tests / 212 断言**、`lint` �
 7. **`--shot` 的 sha256 只覆盖窗口像素，抓不到 bundle 里的资源缺失。** 打包后托盘图标加载失败时哈希仍与基线逐字节相同
    （托盘不进 `grab()` 范围）⇒ 打包验收需要一条独立判据：**stderr 不得出现 `qWarning`**。
    这条现在靠人眼看日志，是待补的自动化缺口。
+8. **量退出码时不要给被测命令加管道。** 第一次测负控制写成 `php bin/qtphp package … | tail -8`
+   再读 `${pipestatus[2]}` —— 那是 `tail` 的退出码，于是读到 rc=0，差点对 F31 的修复下「判据没抓到」的反结论。
+   要 rc 就 `cmd > log 2>&1; echo $?`，再单独看 log。
+9. **加判据必须两个方向都测**：只测「负例被抓住」不足以证明判据可用 —— 健康产物本身带
+   2 条 Qt 平台插件的无害 warning，不过白名单就会把正例判成失败。正例通过 + 负例被拦，两条凑齐才算数。
+10. **「编得出来」不等于「能发货」，体积数字必须先有一次真跑。** nano 那轮编译成功后我差点只回
+    「4.17 MB、降 83%」—— 而产物 rc=1 一句都跑不出来。凡是报尺寸/耗时这类「看着像成果」的数字，
+    先把产物执行一遍再报，否则数字是幻觉的赞助商。
+11. **拿「改生成物」做正证之前，先确认工具链不会重写那个文件。** 我删掉生成的 `extension-*.cc` 里那一行再重编，
+    tpc 按 target 名把它重新生成回去（第三次同名 `-o` 时 `grep -c` 回到 1、产物字节数与原一致）——
+    这样测到的是「tpc 的重写行为」，不是我的补丁效果。要么改上游 codegen，要么改输入让它生成出我要的东西。
 
 ---
 

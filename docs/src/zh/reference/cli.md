@@ -90,7 +90,46 @@ Windows 上编译成功后**自动部署运行时 DLL** 到 `build/`：
 
 ::: tip 首次构建会慢
 macOS/Linux 上第一次 `build` 会让 tpc 从 php-src 现编一份私有 embed 运行时，缓存在 `~/.typephp`。之后复用。注意 tpc 每次构建都要访问 php.net 核对源码 SHA-256 —— **纯离线机器第一次会失败**。
+[`--nano`](#nano) 不走这一步。
 :::
+
+## nano
+
+`qtphp build <path> --nano` 走 **nano 模式**：php-nano 与 PHPX 的源码直接编进产物，
+**完全不链接任何 PHP 运行时**。
+
+```bash
+qtphp build examples/hello --nano
+```
+
+Apple Silicon macOS 上用 `examples/hello` 实测（两种模式的产物都是 `-O2`，入口 yml 固化 `optimize: 2`；
+nano 数字为**清 `build/cache` 后的干净首建口径**）：
+
+| 模式 | 产物 | `strip -u -r` 后 |
+|---|---|---|
+| 默认（embed） | 25,569,608 B | — |
+| `--nano` | 4,370,328 B | 3,639,472 B |
+
+nano 产物的 `otool -L` 只有 Qt 三件套 + `Foundation`/`AppKit`/`WebKit` + brew `libiconv`
++ `libc++`/`libSystem` —— 没有 libphp、没有 phpx。行为不变：`--selftest`（25 例）、
+`--difftest`（20 例）全过，`--shot` 出图与 embed 基线**逐字节相同**；macOS 打包后
+`dist/Hello.app` 为 **64.1 MiB**（embed 版 83.6 MiB）。
+
+::: tip 同一 build/ 里先跑过 embed 再切 --nano 会脏 ~33 KB
+增量缓存会沿用 embed 轮的字面量字符串表风味，产物变 4,403,640 B。清掉 `build/cache/` 下的
+`objects`/`incremental`/`link` 三个目录后重建即回干净口径；前后只差体积，自检/出图逐字节相同。
+:::
+
+需要知道的：
+
+- **不用额外的 yml**。同一份入口 yml 直接可用：nano 下 tpc 会忽略 `php-builder:` 段
+  （nano 不链运行时，没有东西要现编）；C++ 标准也没问题 —— 入口 yml 固化了
+  `cxx-std: c++17`（nano 拒绝 `c++20`），`qtphp build --nano` 另外还会在命令行兜底覆盖成 `c++17`。
+- **`build/` 目录两种模式共用**：来回切换会重编受影响的编译单元并重链，不是 no-op。
+- Windows 上 nano 会**跳过运行时 DLL 部署** —— 产物不导入任何 `php*.dll`，
+  真出现了 tpc 自己的依赖审计会直接把构建判失败。
+- nano 装的是 PHP 运行时的**子集**：nano 不支持的函数在编译期就被 tpc 拒绝，而不是留到运行时炸。
+- **只有 Apple Silicon macOS 上过真机验证。** Windows/Linux 只是把选项原样透传给 tpc，未实测。
 
 ## `qtphp run <path> [应用参数…]`
 
@@ -111,6 +150,8 @@ qtphp run . --difftest
 | Linux | `ldd` 查 `not found` |
 
 退出码逐位传递（应用返回 7，`qtphp run` 也返回 7）。
+三个验收开关同样走退出码：全过 `0`，有 `FAIL` 或 `--shot` 出图失败 `1`
+（见 [无头验收 → 退出码](/zh/advanced/headless.md#退出码)）。
 
 ## `qtphp package <path>`
 

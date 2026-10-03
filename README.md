@@ -124,9 +124,19 @@ function main(int $argc, array $argv): void
 
 ```bash
 qtphp build .       # 编译（Windows 编译后自动部署运行时 DLL 到 build/）
+qtphp build . --nano # nano 模式：php-nano + PHPX 源码直接编进产物，不链任何 PHP 运行时（仅 Apple Silicon 实测）
 qtphp run .         # 运行；其后的参数原样透传给应用，如 `qtphp run . --selftest`
-qtphp package .     # 打包自包含产物：Windows → dist/，macOS → dist/MyApp.app，Linux → dist/<name>/
+qtphp package .     # 打包自包含产物：Windows → dist/，macOS → dist/<Name>.app，Linux → dist/<name>/
 ```
+
+`--nano` 下同一份入口 yml 直接可用（tpc 会忽略 `php-builder:` 段；C++ 标准由入口 yml 固化在 nano
+要求的 `c++17`），也不需要额外的 nano 专用配置。`examples/hello` 实测（清 `build/cache` 后的干净首建口径）：
+产物 **4,370,328 B**（`strip -u -r` 后 3,639,472 B），同项目默认（embed）模式是 25,569,608 B；macOS 打包
+产物 `dist/Hello.app` 为 **64.1 MiB**（embed 版 83.6 MiB，−23%）。`otool -L` 只剩 Qt 三件套 + 系统框架 +
+brew libiconv + libc++/libSystem，`--selftest` / `--difftest` / `--shot` 出图与 embed 基线逐字节相同。
+注意：同一 `build/` 先跑过 embed 再切 `--nano` 会多带 ~33 KB（4,403,640 B，字面量字符串表风味）——
+清掉 `build/cache/` 下的 `objects`/`incremental`/`link` 后重建即回干净口径，功能无差异。详见
+[CLI 参考 → nano](https://yangweijie.github.io/typephp-qt/zh/reference/cli.html#nano)。
 
 `qtphp new` 生成的新项目同时带 `project.yml`（Windows 段）、`project.macos.yml`（mac 入口）、
 `project.linux.yml`（Linux 入口，Debian 多架构路径按生成机推导）与 `Info.macos.plist`（打包 `.app` 用），
@@ -317,7 +327,7 @@ $w->patch([
 |------|------|
 | `qtphp doctor` | 检查工具链（PHP / tpc / PHP 运行时库 / Qt / C++ 编译器 / PHPUnit）。Qt 位置按平台探：Windows 装到 `C:/D:` 盘、macOS 是 brew keg-only、Linux 是 Debian 多架构 `/usr`；C++ 依次试 `clang++`、`g++`；Linux 额外查 12 项构建/打包前置（`bison`/`re2c`/`autoconf`/`pkg-config`/`xz`/`patchelf` + gmp/mpfr/onig/libxml2/sqlite3/zlib 头），缺哪些就打出 apt 包名与可直接粘贴的 `apt install -y …`（只 WARN，不影响 rc） |
 | `qtphp new <name>` | 创建新项目（`project.yml` + `project.macos.yml` + `project.linux.yml` + `Info.macos.plist` + Windows 三个 `.bat`） |
-| `qtphp build <path>` | 编译。入口 yml 按平台挑选（`project.macos.yml` / `project.linux.yml` → 回落 `project.yml`）；Windows 编译后自动部署运行时 DLL 与 `qwindows`/`qoffscreen`/`qminimal` 三个平台插件（offscreen 是无头验收的前提），并把 `assets/` 拷进 `build/` |
+| `qtphp build <path> [--nano]` | 编译。入口 yml 按平台挑选（`project.macos.yml` / `project.linux.yml` → 回落 `project.yml`）；Windows 编译后自动部署运行时 DLL 与 `qwindows`/`qoffscreen`/`qminimal` 三个平台插件（offscreen 是无头验收的前提），并把 `assets/` 拷进 `build/`。`--nano`：不链 PHP 运行时，产物小一个量级（Windows 下相应跳过 DLL 部署；仅 Apple Silicon 实测） |
 | `qtphp run <path> [应用参数…]` | 运行产物，其后的参数原样透传（`--selftest` / `--shot out.png`）；启动前做依赖自检（Windows 查 DLL，macOS 用 `otool -L` 查 bundle 外绝对路径，Linux 用 `ldd` 查 `not found`） |
 | `qtphp package <path>` | 打包自包含产物并自检：Windows → `dist/` 目录，macOS → `dist/<Name>.app`（macOS 会额外补 `libqoffscreen.dylib`，让产物能无头跑 `--selftest`/`--difftest`），Linux → `dist/<name>/`（`lib/` 装 `ldd` 传递闭包、`plugins/` 装 `platforms`+`xcbglintegrations`、`qt.conf` 指插件目录，需要 `patchelf`） |
 | `qtphp test` | 运行测试 |
@@ -363,6 +373,9 @@ qtphp run <path> --shot out.png   # 渲染几帧后存 PNG 退出（视觉验收
 qtphp run <path> --selftest       # 逐个触发所有事件，验证每个 handler 可调用
 qtphp run <path> --difftest       # 表格/树的差异更新边界（选中、行 id、列数、补丁）
 ```
+
+三个开关都按**退出码**报告结果：全部通过是 `0`，任何一条 `FAIL` 或出图失败是 `1`，
+`qtphp run` 原样透传 —— CI 判 `rc` 就行，不必 grep 输出文本。
 
 示例应用在 Windows / macOS / Linux 上都能通过三个开关（Windows 实测 `--selftest` 25/25、
 `--difftest` 20/20，全部 rc=0）。

@@ -255,6 +255,10 @@ function main(int $argc, array $argv): void
         $app->runFrames(3);
         $ok = $app->snapshot($shot);
         $app->destroy();
+        if (!$ok) {
+            echo "snapshot failed: $shot\n";
+            exit(1);
+        }
         return;
     }
 
@@ -265,20 +269,26 @@ function main(int $argc, array $argv): void
     // 无头自检：--selftest 逐个触发所有控件事件，验证每个 handler 都能正常调用。
     // 这能在无头环境覆盖"闭包参数个数不匹配"这类只在 AOT 下暴露的问题。
     if (has_flag($argv, '--selftest')) {
-        self_test($app);
+        $failed = self_test($app);
         // close_log_btn 只是关窗，实例还在 $state 里 —— 自检末尾补一次 destroy。
         if ($state['log'] instanceof QtApp) {
             $state['log']->destroy();
         }
         $app->destroy();
+        if ($failed > 0) {
+            exit(1);
+        }
         return;
     }
 
     // 无头验收：--difftest 断言表格/树的差异更新边界（选中、行 id、列数变化）。
     // 只有真 Qt 才谈得上「diff 边界」，所以这块不进 PHPUnit，走 AOT 二进制。
     if (has_flag($argv, '--difftest')) {
-        diff_test($app);
+        $failed = diff_test($app);
         $app->destroy();
+        if ($failed > 0) {
+            exit(1);
+        }
         return;
     }
 
@@ -340,7 +350,7 @@ function diff_tree_node(array $nodes, array $props = []): array
  *
  * 用独立窗口：主窗口的 view() 每帧重画整棵树，表格不在那棵树里会被 diff 直接销毁。
  */
-function diff_test(QtApp $app): void
+function diff_test(QtApp $app): int
 {
     $app->headless(true);
 
@@ -509,6 +519,8 @@ function diff_test(QtApp $app): void
 
     $w->destroy();
     echo $failed === 0 ? "difftest passed\n" : "difftest failed: $failed\n";
+
+    return $failed;
 }
 
 
@@ -518,7 +530,7 @@ function diff_test(QtApp $app): void
  * AOT 编译后的闭包对实参个数做精确校验，参数个数不匹配时
  * 只有在真正触发事件时才会暴露 —— 所以这个自检必须实际分发事件。
  */
-function self_test(QtApp $app): void
+function self_test(QtApp $app): int
 {
     // 自检必须无头：否则 msg_btn / menu.about 会弹模态框，
     // 在无终端环境下永久阻塞在 exec()。
@@ -576,6 +588,8 @@ function self_test(QtApp $app): void
     $app->dispatch(['type' => 'menu', 'id' => 'menu.quit']);
 
     echo $failed === 0 ? "selftest passed\n" : "selftest failed: $failed\n";
+
+    return $failed;
 }
 
 /** 命令行里是否存在某个布尔开关。 */

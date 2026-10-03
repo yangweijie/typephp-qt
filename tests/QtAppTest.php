@@ -605,6 +605,29 @@ final class QtAppTest extends TestCase
         $this->assertStringContainsString('boom', $this->app->lastError());
     }
 
+    /**
+     * lastError 只描述「这一次分发」：一次失败不能污染后续正常事件，
+     * 否则 --selftest 里一个坏 handler 会把整轮用例都报成 FAIL 并给出同一处行号。
+     */
+    public function testLastErrorIsScopedToTheDispatchThatFailed(): void
+    {
+        $this->app->headless(true);
+        $this->app->on('bad', 'click', function () {
+            throw new \RuntimeException('boom');
+        });
+        $seen = '';
+        $this->app->on('good', 'click', function () use (&$seen): void {
+            $seen = 'ran';
+        });
+
+        $this->app->dispatch(['type' => 'click', 'id' => 'bad']);
+        $this->assertStringContainsString('boom', $this->app->lastError());
+
+        $this->app->dispatch(['type' => 'click', 'id' => 'good']);
+        $this->assertSame('ran', $seen);
+        $this->assertSame('', $this->app->lastError());
+    }
+
     public function testClearErrorResets(): void
     {
         $this->app->headless(true);

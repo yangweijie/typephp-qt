@@ -72,7 +72,12 @@ $app->dispatch(['type' => 'click', 'id' => 'greet_btn']);
 $app->dispatch(['type' => 'submit', 'id' => 'name_input', 'value' => 'Ada']);
 // … 每个控件一条 …
 
-echo $app->lastError() === '' ? "selftest passed\n" : "selftest failed\n";
+$failed = $app->lastError();
+echo $failed === '' ? "selftest passed\n" : "selftest failed: $failed\n";
+$app->destroy();
+if ($failed !== '') {
+    exit(1);      // CI 按退出码判定，不去抓输出文本
+}
 ```
 
 ```bash
@@ -103,6 +108,19 @@ qtphp run . --difftest
 ```
 
 示例应用的 20 条断言就在 `examples/hello/src/main.php` 的 `diff_test()` 里，照着写自己应用的边界断言即可。
+
+## 退出码
+
+三个开关都通过进程退出码报告结果，CI 直接判 `rc`，不必去 grep 输出：
+
+| 开关 | `0` | `1` |
+|---|---|---|
+| `--selftest` | 全部用例 `ok` | 至少一条 `FAIL` |
+| `--difftest` | 全部断言 `ok` | 至少一条 `FAIL` |
+| `--shot <path>` | PNG 已写出 | `snapshot()` 返回 false（路径不可写 / 平台插件不可用） |
+
+`qtphp run` 原样透传应用的退出码；`qtphp package` 会把 bundle 内 `--selftest` 的非零退出码
+当成打包失败。
 
 ## 三个开关的分工
 
