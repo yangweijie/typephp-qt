@@ -1,5 +1,86 @@
 # Progress Log — typephp-qt
 
+## Session 26 — 2026-10-03（补交 .lib + WebView2 分支 W1–W5 真机验证）
+
+### 任务
+> 「补交 WebView2Loader.dll.lib + WebView2 分支 W1–W5 真机验证」
+
+两件都是 Session 25（macOS）留下的尾巴：那台机器既**没有**这个 `.lib`，
+也**跑不了** Windows 目标，只能交静态审查。
+
+### 1. 补交 .lib（已完成并真机验证）
+`.gitignore:9` 的 `*.lib`（构建产物规则）把 vendor 的
+`third_party/webview2/x64/WebView2Loader.dll.lib` 吞了 —— 而 `examples/hello/project.yml`
+与 `qtphp new` 模板都写死链接它。放行规则 `!third_party/**/*.lib` 上一轮已提交，
+本轮把**文件本身**从本机补进去。
+
+验证方式是最硬的那种 —— **克隆到干净目录再编译**：
+```
+git clone D:/git/php/typephp-qt D:/tmp/wvclone
+cd D:/tmp/wvclone && php bin/qtphp build examples/hello
+→ Build successful；链接命令行里 /LIBPATH 指向克隆自己的 third_party
+→ LNK1181 不再出现
+```
+文件是 3590 B 的导入库（`!<arch>` 头，含 `__imp_CreateCoreWebView2EnvironmentWithOptions`），
+不是空壳。
+
+### 2. W1–W5 真机验证（结论：3 条成立、1 条不成立、1 条窄窗口风险）
+
+写了个临时探针 `examples/wvprobe`（验完即删）。关键设计是**阳性对照** ——
+先证明「进程过滤/采样」本身有效（`--hold` 时数到 6 个），再谈「数到 0」才有意义。
+
+| # | 判定 | 真机证据 |
+|---|---|---|
+| W1 `loaded` value 恒空 + 泄漏 | ✅ 成立 | `value=[]` 两次都空，而 `title` 正确报 Page A/B |
+| W2 `navigating` 慢一拍 | ✅ 成立 | 报 `about:blank` → `a.html`，目标其实是 `b.html` |
+| W3 不调 Close 会攒进程 | ❌ **不成立** | 4 并发峰值 9 → 销毁 3 个后 6 → 全销毁 0 |
+| W4 回调裸捕 this | ⚠️ 真实但窗口窄 | 20 轮建完即销毁：40 回调 / 0 次 AFTER-DESTROY / 无崩溃 |
+| W5 三个动作是死代码 | ✅ 成立 | 确认无任何 PHP 入口 |
+
+**W3 的反例最值得记**：`cleanup()` 会 `delete window_`，宿主窗口一销毁，控制器跟着
+宿主 HWND 一起回收 ⇒ **实测不泄漏**。「不调 Close 就不释放」是文档约定，
+不等于本工程真会泄漏；审查只能说「依赖了未承诺的行为」，不能说「会泄漏」。
+
+**W4 也值得记**：回调能赢是因为环境是进程级单例 ⇒ 首个之后都走同步路径，
+而 render 在帧内同步建树、帧内消息泵把回调送达 ⇒ 窗口被压得很小。
+但代码缺陷是真的（确实 `delete window_`、确实裸捕 this），所以照修。
+
+### 3. 修复与复验（全部真机复验）
+- W1 → `takeCoTaskMemString(uri)`：`value=[file:///D:/tmp/wv/a.html]` ✅
+- W2 → `args->get_Uri()`：`navigating` 报 `a.html`→`b.html` ✅
+- W3 → 析构显式 `controller_->Close()`：峰值 9 → 全销毁 0，无回归 ✅
+- W4 → `shared_ptr<atomic<bool>> alive_` 生命周期旗标：20 轮无崩溃、无残留 ✅
+- W5 → 接进 `call` 表 + `qtWebViewCall` 分发 + PHP 三个薄封装：
+  真机 `goBack`→a.html、`goForward`→b.html、`reload`→重新导航 ✅
+
+**顺带修了一个新 API 的空洞**：WKWebView 本来就有 reload/goBack/goForward
+（`WKNavigation`），所以 `qtWebViewCall` 也给它接了实现，否则这个新方法在 macOS 上
+会静默失效。三个后端的能力矩阵已写进文档（中英）。
+
+### 4. 回归
+```
+补交验证  克隆到干净目录编译 → Build successful（LNK1181 消失）
+qtphp lint  契约一致
+qtphp test  126 tests / 212 assertions（+3：三个动作 + 未知 id 静默）
+hello       --selftest / --difftest / --shot 三个开关 exit 0，selftest 25/25
+QTextBrowser 关掉 /DQT_WEBVIEW2 重编 → 三个动作静默无操作、exit 0（符合文档）
+docs        63 页，链接与锚点全过
+清理        examples/wvprobe、/d/tmp/wv*、wv4.log 全部删除（未入库）
+```
+
+### 教训
+1. **阳性对照不是可选项。** 如果只报「销毁后 0 个进程」，很可能只是过滤器没匹配上。
+   先让 `--hold` 数到 6，后面的 0 才有意义。
+2. **别去 kill 不认识的进程。** 一开始看到 24 个 `msedgewebview2.exe` 差点当垃圾清掉，
+   查来源发现是 **Oray/向日葵**（`C:\ProgramData\Oray\Webview2\…`）。改成按
+   `--user-data-dir` 过滤自己的，精确且不碰别人的。
+3. **`g_alive` 这种进程级计数器会漏报 per-widget 的生命周期问题**：第 i 个控件的回调
+   若在第 i+1 个存活期间到达，计数器不为 0 ⇒ 漏报。判据必须绑到控件本身。
+4. **审查推断与真机结论可以背离，两边都要如实写。** W3 是我这轮唯一「推断错了」的一条，
+   而它恰好是最有价值的产出。
+
+---
+
 ## Session 25 — 2026-10-03（macOS 本机重编 + 真跑 webview）
 
 ### 任务

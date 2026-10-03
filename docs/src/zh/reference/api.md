@@ -74,6 +74,9 @@
 | `clipboardWrite(string $text): void` | 写剪贴板 |
 | `webViewBackend(): string` | `'webview2'` / `'wkwebview'` / `'textbrowser'` |
 | `webViewSupportsJs(): bool` | 当前后端能否运行 JavaScript |
+| `webViewReload(string $id): void` | 重新加载（QTextBrowser 上无操作） |
+| `webViewGoBack(string $id): void` | 后退（QTextBrowser 上无操作） |
+| `webViewGoForward(string $id): void` | 前进（QTextBrowser 上无操作） |
 
 ### 验收与诊断
 

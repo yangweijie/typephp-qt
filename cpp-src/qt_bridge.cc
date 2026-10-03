@@ -611,6 +611,13 @@ void QtWindowBox::patch(const Array &ops) {
                 forgetProps(id, {QStringLiteral("current")});
             } else if (method == QLatin1String("focus")) {
                 widget->setFocus();
+            } else if (type == QLatin1String("webview")
+                       && (method == QLatin1String("reload")
+                           || method == QLatin1String("goBack")
+                           || method == QLatin1String("goForward"))) {
+                // webview 的三个命令式动作。它们不改属性，所以不必 forgetProps。
+                // QTextBrowser 后端没有导航栈，qtWebViewCall 内部静默忽略。
+                qtWebViewCall(widget, method);
             }
         }
     }

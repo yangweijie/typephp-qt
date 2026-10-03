@@ -308,6 +308,30 @@ final class QtApp
         return \qt_webview_supports_js();
     }
 
+    /**
+     * 让 webview 重新加载当前页面。
+     *
+     * 这三个动作不是状态（没有「正在重载」这种属性可写），所以不走属性同步，
+     * 而是走 patch 的 call 通道 —— 与表格 appendRows / clear 同一类。
+     * QTextBrowser 后端没有导航栈，三个动作都是无操作，调用方无需先判断后端。
+     */
+    public function webViewReload(string $id): void
+    {
+        $this->patch([['op' => 'call', 'id' => $id, 'method' => 'reload']]);
+    }
+
+    /** 后退一页（无历史时无操作）。 */
+    public function webViewGoBack(string $id): void
+    {
+        $this->patch([['op' => 'call', 'id' => $id, 'method' => 'goBack']]);
+    }
+
+    /** 前进一页（无历史时无操作）。 */
+    public function webViewGoForward(string $id): void
+    {
+        $this->patch([['op' => 'call', 'id' => $id, 'method' => 'goForward']]);
+    }
+
     // ── 取值 ──
 
     /** 读取控件当前值；控件不存在返回 null。 */

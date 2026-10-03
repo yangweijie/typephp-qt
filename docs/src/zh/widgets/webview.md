@@ -67,6 +67,27 @@ $app->on('wv', 'link', function (array $event) use ($app) {
 });
 ```
 
+## 导航动作
+
+三个命令式动作，用来搭浏览器式的工具栏。它们**不是属性** —— 没有「正在重载」这种状态可写 ——
+所以是一次性调用：
+
+```php
+$app->webViewReload('wv');      // 重新加载当前页
+$app->webViewGoBack('wv');      // 后退（没有历史时无操作）
+$app->webViewGoForward('wv');   // 前进（没有历史时无操作）
+```
+
+它们走的是和表格 `appendRows` / `clear` 相同的 `call` 通道，立即生效，不必等下一帧重渲染。
+
+| 后端 | reload / goBack / goForward |
+|---|---|
+| WebView2 | ✅ |
+| WKWebView（macOS） | ✅ |
+| QTextBrowser | ❌ 静默忽略 —— 它没有导航栈 |
+
+「无操作」是刻意的，与「未知属性不报错」同一约定：调用前不需要先判断 `webViewBackend()`。
+
 ## 启用 WebView2
 
 Windows 上 `qtphp new` 生成的项目默认就开着。开关是 `project.yml` 里两行：

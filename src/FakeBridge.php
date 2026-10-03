@@ -45,6 +45,9 @@ namespace TypePHP\Qt\Fake {
         /** 测试替身报的 webview 后端；默认 textbrowser（与无 Qt 的环境一致）。 */
         public static string $webViewBackend = 'textbrowser';
 
+        /** @var array<int, array{window: mixed, id: string, method: string}> webview 命令式动作的调用轨迹 */
+        public static array $webViewCalls = [];
+
         public static int $seq = 0;
 
         /** @var string[] snapshot() 收到的路径 */
@@ -62,6 +65,7 @@ namespace TypePHP\Qt\Fake {
             self::$timers = [];
             self::$clipboard = '';
             self::$webViewBackend = 'textbrowser';
+            self::$webViewCalls = [];
             self::$seq = 0;
             self::$snapshots = [];
             self::$renders = [];
@@ -131,6 +135,15 @@ namespace {
             $type = (string) (FakeState::$props[$window][$id]['type'] ?? '');
 
             switch ($method) {
+                case 'reload':
+                case 'goBack':
+                case 'goForward':
+                    // webview 的三个命令式动作：真实桥接只转给 WebView2 后端，
+                    // 且没有可断言的返回值。这里记一笔调用轨迹，供测试断言
+                    // 「动作确实发出去了」，而不是断言某个属性变了。
+                    if ($type !== 'webview') break;
+                    FakeState::$webViewCalls[] = ['window' => $window, 'id' => $id, 'method' => $method];
+                    break;
                 case 'appendRows':
                     if ($type !== 'table') break;
                     $rows = (array) (FakeState::$props[$window][$id]['rows'] ?? []);

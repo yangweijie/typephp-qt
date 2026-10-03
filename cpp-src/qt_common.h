@@ -139,8 +139,7 @@ inline QString qtResolvePath(const QString &path) {
  *
  * 这样 `'assets/help.html'` 与 `'https://example.com'` 都能直接写。
  */
-inline QUrl qtResolveUrl(const QString &raw) {
-    const QString trimmed = raw.trimmed();
+inline QUrl qtResolveUrl(const QString &raw) {    const QString trimmed = raw.trimmed();
     if (trimmed.isEmpty()) return QUrl();
 
     // 带 scheme 的一律当 URL；`C:/x` 这种单字母盘符不算 scheme
@@ -267,9 +266,19 @@ bool qtWebViewSupportsJs();
 /** 把 url / html / zoom 应用到 webview 控件（后端差异封装在两个实现文件里）。 */
 void qtWebViewApplyProp(QWidget *widget, const QString &key, const Variant &value);
 
+/**
+ * webview 的命令式动作：reload / goBack / goForward。
+ *
+ * 与属性分开是因为它们不是状态 —— 没有「当前是否正在重载」这种属性可写，
+ * 只是一次性动作，所以走 qt_window_patch 的 call 通道。
+ * QTextBrowser 后端没有导航栈，静默忽略（与未知属性一致）。
+ */
+void qtWebViewCall(QWidget *widget, const QString &method);
+
 /** WKWebView 后端的对应实现，只在 QT_WEBVIEW_WK 下编译进链接（见 qt_webview_wk.mm）。 */
 QWidget *qtCreateWebViewWK(QtWindowBox *box, const QString &id);
 void qtWebViewApplyPropWK(QWidget *widget, const QString &key, const Variant &value);
+void qtWebViewCallWK(QWidget *widget, const QString &method);
 
 /** 读取控件当前值，供 qt_window_widget_value() 使用。 */
 Variant qtWidgetValue(QWidget *widget, const QString &type);

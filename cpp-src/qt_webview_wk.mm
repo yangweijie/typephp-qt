@@ -104,6 +104,20 @@ class WKWebViewWidget : public QWidget {
         else pendingZoom_ = factor;
     }
 
+    // ── 命令式动作（由 qtWebViewCall 分发）──
+    //
+    // 用 respondsToSelector 挡一道：goBack/goForward 是 macOS 11+ 才有的 API，
+    // 直接调会在旧系统上抛 unrecognized selector。
+    void callReload() {
+        if (web_ && [web_ respondsToSelector:@selector(reload)]) [web_ reload];
+    }
+    void callGoBack() {
+        if (web_ && [web_ respondsToSelector:@selector(goBack)]) [web_ goBack];
+    }
+    void callGoForward() {
+        if (web_ && [web_ respondsToSelector:@selector(goForward)]) [web_ goForward];
+    }
+
   protected:
     void showEvent(QShowEvent *event) override {
         QWidget::showEvent(event);
@@ -253,4 +267,13 @@ void qtWebViewApplyPropWK(QWidget *widget, const QString &key, const Variant &va
     if (key == QLatin1String("url")) view->setUrl(toQString(value));
     else if (key == QLatin1String("html")) view->setHtml(toQString(value));
     else if (key == QLatin1String("zoom")) view->setZoom(static_cast<double>(value.toFloat()));
+}
+
+/** 命令式动作：WKWebView 原生就有 reload / goBack / goForward。 */
+void qtWebViewCallWK(QWidget *widget, const QString &method) {
+    auto *view = dynamic_cast<WKWebViewWidget *>(widget);
+    if (!view) return;
+    if (method == QLatin1String("reload")) view->callReload();
+    else if (method == QLatin1String("goBack")) view->callGoBack();
+    else if (method == QLatin1String("goForward")) view->callGoForward();
 }

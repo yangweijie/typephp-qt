@@ -18,6 +18,9 @@
 #include <QTextBrowser>
 #include <QUrl>
 
+#include <atomic>
+#include <memory>
+
 #ifdef QT_WEBVIEW2
 #include <windows.h>
 #include <wrl.h>
@@ -166,6 +169,22 @@ class WebView2Widget : public QWidget {
         initAsync();
     }
 
+    /**
+     * 析构：显式关掉控制器，并让还在飞的回调立刻失效。
+     *
+     * 两件事都不是可选的：
+     *   * `Close()` 是 WebView2 的约定 —— 不调用就不保证释放浏览器渲染进程。
+     *     实测本工程里宿主窗口销毁也会连带回收（见 findings W3），但那是
+     *     「恰好如此」而非契约，显式 Close 才是可靠的那一半。
+     *   * 三级 COM 回调全部捕获 `this`。异步链没走完就销毁控件时，
+     *     回调会踩到已释放的 controller_/placeholder_。把 alive_ 置 false
+     *     后，回调一进来就自行返回，不再触碰任何成员。
+     */
+    ~WebView2Widget() override {
+        alive_->store(false);
+        if (controller_) controller_->Close();
+    }
+
     void setUrl(const QString &url) {
         if (!webview_) {
             pendingUrl_ = url;
@@ -189,17 +208,10 @@ class WebView2Widget : public QWidget {
         else pendingZoom_ = factor;
     }
 
-    void reload() {
-        if (webview_) webview_->Reload();
-    }
-
-    void goBack() {
-        if (webview_) webview_->GoBack();
-    }
-
-    void goForward() {
-        if (webview_) webview_->GoForward();
-    }
+    // 命令式动作（由 qtWebViewCall 分发；就绪前调用是无操作）。
+    void callReload() { if (webview_) webview_->Reload(); }
+    void callGoBack() { if (webview_) webview_->GoBack(); }
+    void callGoForward() { if (webview_) webview_->GoForward(); }
 
   private:
     /** WebView2 不参与 Qt 布局，尺寸要手动同步到宿主控件大小。 */
@@ -218,7 +230,8 @@ class WebView2Widget : public QWidget {
     void initAsync() {
         auto *host = &hostState();
 
-        auto onEnv = [this](HRESULT hr, ICoreWebView2Environment *env) {
+        auto onEnv = [this, alive = alive_](HRESULT hr, ICoreWebView2Environment *env) {
+            if (!alive->load()) return;  // 控件已析构，别再碰成员
             if (FAILED(hr) || !env) { showUnavailable(); return; }
             hostState().env = env;
             hostState().ready = true;
@@ -226,7 +239,8 @@ class WebView2Widget : public QWidget {
             env->CreateCoreWebView2Controller(
                 reinterpret_cast<HWND>(winId()),
                 Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                    [this](HRESULT hr2, ICoreWebView2Controller *ctrl) -> HRESULT {
+                    [this, alive](HRESULT hr2, ICoreWebView2Controller *ctrl) -> HRESULT {
+                        if (!alive->load()) return S_OK;  // 同上
                         if (FAILED(hr2) || !ctrl) { showUnavailable(); return S_OK; }
                         controller_ = ctrl;
                         controller_->get_CoreWebView2(&webview_);
@@ -269,15 +283,18 @@ class WebView2Widget : public QWidget {
         // 导航完成 → loaded（value = 最终 URL，payload.success 表示成功与否）
         webview_->add_NavigationCompleted(
             Callback<ICoreWebView2NavigationCompletedEventHandler>(
-                [this](ICoreWebView2 *sender, ICoreWebView2NavigationCompletedEventArgs *args) -> HRESULT {
+                [this, alive = alive_](ICoreWebView2 *sender, ICoreWebView2NavigationCompletedEventArgs *args) -> HRESULT {
+                    if (!alive->load()) return S_OK;
                     BOOL ok = FALSE;
                     args->get_IsSuccess(&ok);
                     LPWSTR uri = nullptr;
                     sender->get_Source(&uri);
                     Array payload;
                     payload.set("success", Variant(ok != FALSE));
+                    // value 必须真的放 URL，并且取完要释放 —— 否则每次导航泄漏一个
+                    // CoTaskMem 宽字符串，而 PHP 侧拿到的永远是空串（W1）。
                     box_->enqueue(QStringLiteral("loaded"), id_,
-                                  QString::fromWCharArray(L""), payload);
+                                  takeCoTaskMemString(uri), payload);
                     return S_OK;
                 })
                 .Get(),
@@ -316,9 +333,13 @@ class WebView2Widget : public QWidget {
         EventRegistrationToken tok4{};
         webview_->add_NavigationStarting(
             Callback<ICoreWebView2NavigationStartingEventHandler>(
-                [this](ICoreWebView2 *sender, ICoreWebView2NavigationStartingEventArgs *) -> HRESULT {
+                [this, alive = alive_](ICoreWebView2 *, ICoreWebView2NavigationStartingEventArgs *args) -> HRESULT {
+                    if (!alive->load()) return S_OK;
+                    // 取 args->get_Uri()（**本次要去的**地址），不是 sender->get_Source()。
+                    // 后者是导航**前**的源 —— 实测第一跳给 "about:blank"、之后永远慢一拍，
+                    // 拿它做「后退按钮可用性」会一直拿到上一个 URL（W2）。
                     LPWSTR uri = nullptr;
-                    sender->get_Source(&uri);
+                    args->get_Uri(&uri);
                     box_->enqueue(QStringLiteral("navigating"), id_,
                                   takeCoTaskMemString(uri));
                     return S_OK;
@@ -360,9 +381,11 @@ class WebView2Widget : public QWidget {
     QSize sizeHint() const override { return QSize(480, 320); }
     QSize minimumSizeHint() const override { return QSize(80, 60); }
 
+    /** 生命周期旗标：回调持有它的一份 shared_ptr，析构后据此判定「this 已悬空」。 */
+    std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
+
     QtWindowBox *box_ = nullptr;
-    QString id_;
-    QLabel *placeholder_ = nullptr;
+    QString id_;    QLabel *placeholder_ = nullptr;
     ComPtr<ICoreWebView2Controller> controller_;
     ComPtr<ICoreWebView2> webview_;
     QString pendingUrl_;
@@ -420,4 +443,27 @@ void qtWebViewApplyProp(QWidget *widget, const QString &key, const Variant &valu
             tb->setHtml(toQString(value));
         }
     }
+}
+
+/**
+ * webview 的命令式动作：reload / goBack / goForward。
+ *
+ * QTextBrowser 后端没有导航栈，三个动作一律静默忽略 —— 与「未知属性不报错」
+ * 的既有约定一致，应用侧不必先判断后端名。
+ */
+void qtWebViewCall(QWidget *widget, const QString &method) {
+#ifdef QT_WEBVIEW_WK
+    qtWebViewCallWK(widget, method);
+    return;
+#endif
+#ifdef QT_WEBVIEW2
+    auto *wv = dynamic_cast<WebView2Widget *>(widget);
+    if (!wv) return;
+    if (method == QLatin1String("reload")) wv->callReload();
+    else if (method == QLatin1String("goBack")) wv->callGoBack();
+    else if (method == QLatin1String("goForward")) wv->callGoForward();
+#else
+    Q_UNUSED(widget);
+    Q_UNUSED(method);
+#endif
 }

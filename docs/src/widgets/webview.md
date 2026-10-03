@@ -68,6 +68,29 @@ $app->on('wv', 'link', function (array $event) use ($app) {
 });
 ```
 
+## Navigation actions
+
+Three imperative actions, for building a browser-style toolbar. They are **not** properties —
+there is no "currently reloading" state to write — so they are one-shot calls:
+
+```php
+$app->webViewReload('wv');      // reload the current page
+$app->webViewGoBack('wv');      // go back (no-op when there is no history)
+$app->webViewGoForward('wv');   // go forward (no-op when there is no history)
+```
+
+They are driven through the same `call` channel as the table's `appendRows` / `clear`, so they
+take effect immediately rather than waiting for the next render.
+
+| Backend | reload / goBack / goForward |
+|---|---|
+| WebView2 | ✅ |
+| WKWebView (macOS) | ✅ |
+| QTextBrowser | ❌ silently ignored — it has no navigation stack |
+
+The no-op is deliberate, matching the "unknown property does not raise" convention: you do not
+need to branch on `webViewBackend()` before calling them.
+
 ## Enabling WebView2
 
 It is on by default in projects created by `qtphp new` on Windows. The switch is two lines in

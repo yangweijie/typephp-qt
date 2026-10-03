@@ -1406,3 +1406,61 @@ selftest 25/25（cocoa 与 offscreen 各一遍）、difftest 20/20、`php bin/qt
 `php-src/qt.stub.php`、`docs/src/{,zh/}reference/api.md`、`docs/src/{,zh/}guide/qt-setup.md` 的「两种后端」表述，
 本次一并改三。
 
+## F28. WebView2 分支 W1–W5 真机验证（Session 26，Windows）
+
+Session 25 在 macOS 上只能静态审查 W1–W5。本轮在 **Windows 真机**上逐条取证，结论与推断
+**一半相符、一半不符** —— 不符的两条正好说明「读代码推断」的边界在哪。
+
+### 取证方法
+写了一个临时探针应用 `examples/wvprobe`（验完即删，未入库），四种模式：
+- `--w12` 打 `navigating`/`loaded`/`title` 事件的 value
+- `--w3c`/`--w3d` 并发建 4 个带 webview 的窗口，用
+  `Get-CimInstance Win32_Process` 按 **`--user-data-dir` 路径**过滤 `msedgewebview2.exe` 计数
+- `--w4` 异步初始化未完成就 `destroy()`，反复 20 轮
+- `--hold` **阳性对照**：确认过滤/采样方式本身有效（关键，否则「数到 0」可能只是没测到）
+
+### 逐条结论
+
+| # | 静态审查的推断 | 真机实测 | 判定 |
+|---|---|---|---|
+| W1 | `loaded` 的 value 恒为空串 + 每次导航泄漏一个 CoTaskMem 串 | `evt=loaded value=[]` 两次都空，而 `title` 正确报出 `Page A`/`Page B`、`success=true` | ✅ **成立** |
+| W2 | `navigating` 取的是导航**前**的源 | 第一跳报 `about:blank`、第二跳报 `a.html`（目标其实是 `b.html`）—— 永远慢一拍 | ✅ **成立** |
+| W3 | 不调 `Controller::Close()` ⇒ 反复创建会攒浏览器子进程 | 4 个并发：峰值 **9** 个进程；销毁 3 个后 **6** 个（= 单个 webview 的代价）；全销毁后 **0** | ❌ **不成立**（见下） |
+| W4 | 三级 COM 回调裸捕 `this`，无生命周期保护 | 20 轮「建完立刻销毁」：40 次回调到达、20 次析构、**0 次 AFTER-DESTROY**，无崩溃 | ⚠️ **真实风险但窗口极窄** |
+| W5 | `reload`/`goBack`/`goForward` 在 PHP 侧无入口 = 死代码 | 确认无任何入口 | ✅ **成立** |
+
+### W3 为什么不成立（值得记住）
+`WebView2Widget` 确实没有析构、从不调 `ICoreWebView2Controller::Close()`，但实测**不泄漏**：
+`QtWindowBox::cleanup()`（`qt_bridge.cc:215`）会 `delete window_`，宿主窗口一销毁，
+WebView2 的控制器跟着宿主 HWND 一起被回收。**串行建/销时进程数稳定在 6，峰值从不增长。**
+
+教训：**「不调 Close 就不释放」是文档级的约定，不等于本工程里真会泄漏** ——
+宿主生命周期把这条兜住了。审查只能指出「依赖了未承诺的行为」，不能断言「会泄漏」。
+
+### W4 为什么只是「窄窗口风险」
+回调能赢过析构，是因为**环境是进程级单例**：第一个 webview 建好后 `host.ready=true`，
+之后每个控件走的都是同步路径（`onEnv(S_OK, host->env)` → `CreateCoreWebView2Controller`
+→ 回调），而 `render()` 是在帧内同步建树的，帧内 Qt 的消息泵会把回调送达。
+所以「建完立刻销毁」这个窗口被压得很小 —— 20 轮全过。
+
+但**代码层面的缺陷是真的**：`cleanup()` 确实 `delete window_`，回调确实裸捕 `this`。
+窗口窄 ≠ 不存在，所以照修。
+
+### 修复与复验
+
+| # | 修法 | 复验证据 |
+|---|---|---|
+| W1 | `takeCoTaskMemString(uri)` 真正取 URL 并释放 | `evt=loaded value=[file:///D:/tmp/wv/a.html]`、`…/b.html` |
+| W2 | 改用 `args->get_Uri()`（本次目标） | `navigating` 报 `a.html` → `b.html`（与目标一致） |
+| W3 | 析构里显式 `controller_->Close()` | 峰值 9 → 全销毁 0，未回归 |
+| W4 | 加 `std::shared_ptr<std::atomic<bool>> alive_`，回调先查再碰成员 | 20 轮竞态无崩溃、无残留进程 |
+| W5 | 接进 `qt_window_patch` 的 `call` 表 + `qtWebViewCall` 分发；PHP 侧加三个薄封装 | 真机：`goBack`→a.html、`goForward`→b.html、`reload`→重新导航 |
+
+**顺带**：WKWebView 后端本来就有 `reload`/`goBack`/`goForward`（`WKNavigation`），
+所以 `qtWebViewCall` 也给它接了实现（`respondsToSelector` 挡 macOS 11 以下的旧系统），
+否则这个新 API 在 macOS 上会静默失效。三个后端的支持矩阵已写进文档。
+
+### 另一条真机确认
+W1 的泄漏面比审查说的更大：`add_NavigationCompleted` 里 `get_Source` 取完既不释放也不用。
+修完复核了文件里**所有** `LPWSTR` 取用点，现在每一个都经 `takeCoTaskMemString` 释放。
+

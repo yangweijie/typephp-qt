@@ -74,6 +74,9 @@ A handler may declare 0 or 1 parameters (`array $event`) — the framework probe
 | `clipboardWrite(string $text): void` | Write the clipboard |
 | `webViewBackend(): string` | `'webview2'` / `'wkwebview'` / `'textbrowser'` |
 | `webViewSupportsJs(): bool` | Whether the compiled-in backend can run JavaScript |
+| `webViewReload(string $id): void` | Reload the webview (no-op on QTextBrowser) |
+| `webViewGoBack(string $id): void` | Go back (no-op on QTextBrowser) |
+| `webViewGoForward(string $id): void` | Go forward (no-op on QTextBrowser) |
 
 ### Verification and diagnostics
 

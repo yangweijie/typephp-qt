@@ -712,6 +712,36 @@ final class QtAppTest extends TestCase
         $this->assertSame('https://example.com', test_props($this->app->handle(), 'wv')['url']);
     }
 
+    /**
+     * W5：reload / goBack / goForward 三个命令式动作。
+     *
+     * 它们不是属性（没有「正在重载」这种状态可写），所以走 patch 的 call 通道。
+     * 断言的是「动作确实发到了桥接」，而不是某个属性变了 —— 真实后端里
+     * 这三个动作也不会改任何属性。
+     */
+    public function testWebViewImperativeActions(): void
+    {
+        $this->app->render(WidgetTree::vbox([
+            WidgetTree::webView('https://example.com', ['id' => 'wv']),
+        ]));
+        $this->app->run(1);
+
+        $this->app->webViewReload('wv');
+        $this->app->webViewGoBack('wv');
+        $this->app->webViewGoForward('wv');
+
+        $calls = \TypePHP\Qt\Fake\FakeState::$webViewCalls;
+        $this->assertSame(['reload', 'goBack', 'goForward'], array_column($calls, 'method'));
+        $this->assertSame(['wv', 'wv', 'wv'], array_column($calls, 'id'));
+    }
+
+    /** 对不存在的控件调动作应静默跳过（与真实桥接「控件不存在整条跳过」一致）。 */
+    public function testWebViewImperativeActionOnUnknownIdIsIgnored(): void
+    {
+        $this->app->webViewReload('nope');
+        $this->assertSame([], \TypePHP\Qt\Fake\FakeState::$webViewCalls);
+    }
+
     // ── 补丁 ──
 
     public function testPatchUpdatesProps(): void
