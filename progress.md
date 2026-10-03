@@ -68,6 +68,31 @@ docs        63 页，链接与锚点全过
 清理        examples/wvprobe、/d/tmp/wv*、wv4.log 全部删除（未入库）
 ```
 
+### 5. mac 打包侧收口：真实体积 + webview 是否可用 + 两处缺陷（用户追问「打包多少 MB、支不支持 webview」）
+
+**体积**：`qtphp package` 打印的 `99.8 MB` 是虚高的，真实 **83.6 MiB**（87,612,051 B / 54 文件），
+`du -sh` 84 M，`ditto -c -k` 压成 zip **29.3 MiB**。构成：`libicudata.78.dylib` 31.66 MiB（**38%，最大单项不是 PHP**）
+> 产物二进制 21.55 MiB（PHP/PHPX 静态链在里面，bundle 无 `libphp.dylib`）> Qt 三件套 15.6 MiB
+> icu i18n/uc 4.2 > brew 传递依赖约 5 > 平台插件 1.6。
+另发现 `macdeployqt` 会**顺手 strip** 产物：`build/hello` 25,564,904 B → bundle 内 22,594,160 B
+（`nsyms` 121,795 → 6,890、`__LINKEDIT` 3.59 → 0.62 MB，`__text` 不变）。
+
+**webview 在打包产物里可用**，三条独立证据（不靠单一判据）：
+① bundle 内 `--shot` 出图 sha256 = `2728fb1a6a06…`，与开发态 cocoa 基线逐字节相同，裁分组标题读图 =
+「WebView（backend=wkwebview，js=支持）」；② `otool -L` 里 Qt 三个 framework 全改写成 `@executable_path/…`、
+WebKit 指向 `/System/Library/Frameworks/…`（系统框架，故意不进 bundle）⇒ 目标机不需要装 brew Qt；
+③ `open Hello.app` 后**新起** `com.apple.WebKit.WebContent` 进程 ⇒ 内核真拉起来了，不只是链接通过。
+
+**两处缺陷都修了**（详见 F31、task_plan 28.1）：
+P1 `dirSize()` 跟随符号链接 ⇒ framework alias 重复计数（1 行修）；
+P2 打包后 assets 在 `Contents/Resources` 而 `qtResolvePath()` 只查 exe 目录 → cwd ⇒ 托盘图标静默丢。
+P2 按 bundle-aware 修，并把触发条件钉成「exe 目录的父目录名为 `Contents`」，
+这样 Linux/Windows 上项目根恰好有 `Resources/` 也不会被抢先命中。
+复验：`package` 打印 83.6 MB；bundle 从 `cwd=/tmp` 与 `cwd=/` 跑均无警告、哈希仍 `2728fb1a…`；
+**负控制**（把 `Resources/assets` 改名）警告立刻回来；开发态二进制行为不变；
+offscreen `--selftest` passed；`phpunit` **126 tests / 212 断言**、`lint` 契约一致、
+`codesign --verify --deep --strict` 通过（临时改名已还原）。中英 `packaging.md`/`dialogs.md` + README 同步。
+
 ### 教训
 1. **阳性对照不是可选项。** 如果只报「销毁后 0 个进程」，很可能只是过滤器没匹配上。
    先让 `--hold` 数到 6，后面的 0 才有意义。
@@ -78,6 +103,15 @@ docs        63 页，链接与锚点全过
    若在第 i+1 个存活期间到达，计数器不为 0 ⇒ 漏报。判据必须绑到控件本身。
 4. **审查推断与真机结论可以背离，两边都要如实写。** W3 是我这轮唯一「推断错了」的一条，
    而它恰好是最有价值的产出。
+5. **工具自己打印的数字也是待证假设。** 「打包 99.8 MB」这个数是 `dirSize()` 算的，我第一反应是引用它；
+   是 `du -sh`（84 M）与逐文件求和（83.6 MiB）两个**独立口径**都对不上，才逼出「尺子跟随符号链接」这条缺陷。
+   凡是交付物体积/耗时/百分比，报出来之前先找一个不由被审对象提供的量法。
+6. **两个对照口径算出完全相同的数 ⇒ 先怀疑实验写错了，而不是结论成立。** 第一次做「跳过符号链接」的对照时，
+   我把跳过那侧写成累加 8 字节，于是两种口径都得 83.6，差点下结论「不是重复计数」。
+   同数不等于同因，尤其当差异本该是十几 MB 时。
+7. **`--shot` 的 sha256 只覆盖窗口像素，抓不到 bundle 里的资源缺失。** 打包后托盘图标加载失败时哈希仍与基线逐字节相同
+   （托盘不进 `grab()` 范围）⇒ 打包验收需要一条独立判据：**stderr 不得出现 `qWarning`**。
+   这条现在靠人眼看日志，是待补的自动化缺口。
 
 ---
 
@@ -1120,6 +1154,11 @@ task_plan.md 的 macOS 环境段同步：私有 embed 运行时从「缺」改�
   selftest 走 `dispatch()` 绕开 Qt 信号，意味着「桥接 → PHP」这条主干**至今没有自动化回归**
 - **`--shot` 的「3 帧 + `snapshot()` 冻结」配方只在 mac 上收敛过**：Windows/Linux 侧要各自重跑 ×8 建自己的基线值
   （现有三条基线都是 macOS 的）。动画冻结是跨平台的 Qt 层改法，理论上等效，但**未实测**
+- ~~**打包缺陷 P1**~~ ✅ **已修（28.1）**：`dirSize()` 跳过符号链接，`package` 现在打印 83.6 MB（F31 §1）
+- ~~**打包缺陷 P2**~~ ✅ **已修（28.1）**：`qtResolvePath()` 变成 exe 目录 → bundle `Contents/Resources` → cwd
+  （第二层只在父目录名为 `Contents` 时启用），打包产物托盘图标恢复；负控制（改名 `Resources/assets`）能按需复现警告（F31 §3）
+- **打包验收缺一条自动化判据**：资源缺失只体现在 stderr 的 `qWarning`，而 `--shot` 哈希覆盖不到（托盘不进 `grab()`）
+  ⇒ 候选做法：`package` 自检里跑一次产物并断言 stderr 无 `could not be loaded`
 - **Windows / Linux 在新代码上复验**：断言集从 14 涨到 25（Phase 20/21）、单测 112 → 123、桥接函数
   24 → 26、示例加了 `webview` 分组（窗口高 560 → 720）。两侧都还停在 Session 14/13 的时点，
   Linux 侧容器 `tgl` 留着，重跑要先按 F20 起宿主代理并核对网关 IP

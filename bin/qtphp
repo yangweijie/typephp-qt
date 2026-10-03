@@ -1971,9 +1971,13 @@ function dirSize(string $dir): int
         new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
     );
     foreach ($iterator as $file) {
-        if ($file->isFile()) {
-            $size += $file->getSize();
+        // 符号链接必须跳过：SplFileInfo::isFile()/getSize() 会跟随到目标，
+        // 于是 macOS framework 里那些 alias 条目（`QtCore` → `Versions/A/QtCore`）
+        // 会把同一份文件重复计一遍，.app 体积虚高约 19%。
+        if ($file->isLink() || !$file->isFile()) {
+            continue;
         }
+        $size += $file->getSize();
     }
     return $size;
 }

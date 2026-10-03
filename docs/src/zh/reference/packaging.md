@@ -50,6 +50,8 @@ dumpbin /nologo /dependents <app>.exe | findstr /I /R /C:"\.dll"
 
 运行时读的文件放项目的 `assets/`。目录结构会保留（`assets/icon.png` → `<app目录>/assets/icon.png`），而且相对路径按**可执行文件所在目录**解析，所以同一句 `'assets/icon.png'` 在项目目录和 `dist/` 里都成立。
 
+macOS 的 `.app` 里可执行文件在 `Contents/MacOS`，而 assets 落在 `Contents/Resources/assets` —— 解析器会在这两种情况之间多查一层 `Contents/Resources`，完整顺序是：**exe 目录 → bundle 的 `Contents/Resources` → 工作目录**。所以打包产物里不必把 assets 再拷一份到 `MacOS/` 下。
+
 这个约定存在，是因为"图标也要拷"正是最容易忘的那一步。一个目录 + 一个负责拷它的打包脚本，胜过 README 里的一句话。
 
 ## macOS

@@ -1406,7 +1406,7 @@ selftest 25/25（cocoa 与 offscreen 各一遍）、difftest 20/20、`php bin/qt
 `php-src/qt.stub.php`、`docs/src/{,zh/}reference/api.md`、`docs/src/{,zh/}guide/qt-setup.md` 的「两种后端」表述，
 本次一并改三。
 
-## F28. WebView2 分支 W1–W5 真机验证（Session 26，Windows）
+## F30. WebView2 分支 W1–W5 真机验证（Session 26，Windows）
 
 Session 25 在 macOS 上只能静态审查 W1–W5。本轮在 **Windows 真机**上逐条取证，结论与推断
 **一半相符、一半不符** —— 不符的两条正好说明「读代码推断」的边界在哪。
@@ -1464,3 +1464,64 @@ WebView2 的控制器跟着宿主 HWND 一起被回收。**串行建/销时进�
 W1 的泄漏面比审查说的更大：`add_NavigationCompleted` 里 `get_Source` 取完既不释放也不用。
 修完复核了文件里**所有** `LPWSTR` 取用点，现在每一个都经 `takeCoTaskMemString` 释放。
 
+---
+
+## F31. mac 打包产物的真实体积、webview 是否在 bundle 里可用，以及两处打包缺陷（Session 26）
+
+问题：`qtphp package` 出来的独立 `.app` 到底多大？打包后 webview 还能不能用？
+
+### 1. 体积：`99.8 MB` 是虚高的，真实 **83.6 MiB**
+`php bin/qtphp package examples/hello` 打印 `打包完成: …Hello.app (99.8 MB)`，但同一棵树：
+
+| 量法 | 值 |
+|---|---|
+| `dirSize()`（工具自己打印的） | 99.8 MiB |
+| 跳过符号链接后的真实逻辑字节 | **83.6 MiB**（87,612,051 B，54 个文件） |
+| `du -sh`（磁盘块） | 84 M |
+| `ditto -c -k` 压成 zip（分发体积） | **29.3 MiB** |
+
+⇒ 缺陷 **P1（已修，28.1）**：`bin/qtphp` 的 `dirSize()` 用 `RecursiveIteratorIterator` + `$file->isFile()`，
+而 `SplFileInfo::isFile()/getSize()` **跟随符号链接** ⇒ `.framework` 里 12 个 alias 条目按目标文件重复计一次，
+虚高 ~19%。修法：`if ($file->isLink() || !$file->isFile()) continue;` ⇒ 现在打印 `83.6 MB`。
+（测量过程本身也翻了一次车：第一次做对照实验时把「跳过链接」那侧写成了累加 8 字节，
+于是两种口径都得到 83.6 ⇒ 差点结论成「不是符号链接的问题」。发现两个数**完全相同**就该怀疑尺子，
+改成「真实字节」与「工具原逻辑」两口径并排才算出 99.8 vs 83.6。）
+
+分解（真实字节）：`libicudata.78.dylib` **31.66 MiB（占 38%）** > `MacOS/hello` 21.55 MiB >
+QtGui 5.61 + QtWidgets 5.23 + QtCore 4.80 = 15.6 MiB > icu i18n/uc 4.2 MiB >
+brew 侧传递依赖（glib/iconv/harfbuzz/zstd/onig/gmp/mpfr…）约 5 MiB > PlugIns 1.6 MiB（cocoa 0.91 + offscreen）。
+另：`macdeployqt` 会**顺手 strip** 产物二进制 —— `build/hello` 25,564,904 B → bundle 内 22,594,160 B
+（`nsyms` 121,795 → 6,890、`__LINKEDIT` 3.59 → 0.62 MB，`__text` 不变）⇒ 交付物不含开发态符号表。
+PHP/PHPX 是静态链进那 21.55 MiB 的（`--enable-embed=static`），bundle 里没有 `libphp.dylib`。
+
+### 2. webview 在打包产物里可用（三条独立证据）
+1. 从 `Contents/MacOS/hello --shot` 出图 sha256 = `2728fb1a6a06…`，与开发态 cocoa 基线**逐字节相同**；
+   裁出 WebView 分组标题读图 = 「WebView（backend=wkwebview，js=支持）」。
+2. `otool -L` 产物：Qt 三个 framework 全部改写成 `@executable_path/../Frameworks/…`，WebKit 是
+   `/System/Library/Frameworks/WebKit.framework/…/WebKit`（系统框架，**故意不进 bundle**）
+   ⇒ 目标机不需要装 brew Qt；也没有任何一条 NEEDED 落在 `/opt/homebrew` 或 `~/.typephp`
+   （但 `LC_RPATH` 里仍留着这两个开发机路径，属无害残留，见下 P2 备注）。
+3. `open Hello.app` 后新起 `com.apple.WebKit.WebContent.xpc` 进程（pid 13267，启动时刻紧跟 hello 的 13263）
+   ⇒ WKWebView 在 bundle 上下文（ad-hoc 签名 + bundle 内 Qt）里**真的拉起了网页内核**，不只是链接通过。
+   注意：XPC 的父进程是 launchd（ppid=1），所以「按 ppid 找子进程」这条判据不成立，必须用**启动前后 PID 集合做差**。
+
+bundle 内 `--selftest` 在 cocoa 与 `QT_QPA_PLATFORM=offscreen` 下均 25/25、rc=0。
+
+### 3. 缺陷 P2：打包后 assets 路径断（托盘图标丢）
+`packageAppBundle` 把 assets 复制到 `Contents/Resources/assets`，而 `qt_common.h:114 qtResolvePath()`
+的解析顺序是 **exe 目录 → cwd**（`QCoreApplication::applicationDirPath()` 再 `QDir::currentPath()`），
+**从不看 bundle 的 Resources**。于是打包后 `main.php:54` 的 `'icon' => 'assets/icon.png'` 解析不到，
+启动即 `tray icon could not be loaded: assets/icon.png`。
+判别实验（证明是 exe 目录而不是 cwd）：开发态二进制从 `cwd=/tmp` 跑 `--shot` **无警告**、哈希与
+从 `examples/hello` 跑时相同（`2728fb1a…`）⇒ 它命中了 `build/assets/`（build 会把 assets 拷到 exe 旁边）。
+窗口像素不受影响（托盘不在 `grab()` 范围内）⇒ 所以这条**不会**被 `--shot` 基线抓到，只能靠日志/实跑。
+**已按 ② 修掉（28.1）**：`qtResolvePath()` 的顺序变成
+**exe 目录 → bundle 的 `Contents/Resources` → cwd**，且第二层只在「exe 目录的父目录名为 `Contents`」时启用
+—— 否则 Linux/Windows 上项目根恰好有个 `Resources/` 就会被抢先命中。
+证据：修后从 `cwd=/tmp` 与 `cwd=/`（等价 `open` 起的进程）跑 bundle 二进制均无警告、`--shot` 仍是 `2728fb1a…`；
+**负控制**把 `Contents/Resources/assets` 改名后警告立刻回来 ⇒ 生效的正是新加那层。
+文档三处（中英 `packaging.md`、`dialogs.md`、README）同步。
+
+（P2 备注：`LC_RPATH` 残留 `/opt/homebrew/opt/libiconv/lib` 与 `~/.typephp/php-builder/…/install/lib`
+不影响自包含性 —— 没有任何 NEEDED 走 `@rpath`；但它是「产物里带着开发机路径」的信息泄漏，
+`install_name_tool -delete_rpath` 可清。**未验**。）

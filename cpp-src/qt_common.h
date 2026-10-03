@@ -109,16 +109,27 @@ inline String toPhpString(const QString &value) {
  * 解析顺序：
  *   1. 空路径 → 原样返回（调用方据此走兜底逻辑）
  *   2. 绝对路径 → 归一化后直接用
- *   3. 相对路径 → 先试 exe 目录，再试 cwd（开发期从仓库根跑时有用）
+ *   3. 相对路径 → 先试 exe 目录，再试 macOS bundle 的 Contents/Resources，最后试 cwd
  */
 inline QString qtResolvePath(const QString &path) {
     if (path.isEmpty()) return path;
     const QString normalized = QDir::fromNativeSeparators(path);
     if (QFileInfo(normalized).isAbsolute()) return normalized;
 
-    const QString fromExe = QDir::fromNativeSeparators(
-        QCoreApplication::applicationDirPath() + QLatin1Char('/') + normalized);
+    const QString exeDir = QCoreApplication::applicationDirPath();
+    const QString fromExe = QDir::fromNativeSeparators(exeDir + QLatin1Char('/') + normalized);
     if (QFileInfo::exists(fromExe)) return fromExe;
+
+    // macOS bundle：可执行文件在 Contents/MacOS，而 `qtphp package` 把 assets 放进
+    // Contents/Resources —— 不查这一层的话，打包产物里的相对资源路径全部静默失效
+    // （托盘图标丢，而窗口像素不受影响，所以 `--shot` 基线抓不到）。
+    // 只认这个确切的目录形状，免得 Linux/Windows 上项目根恰好有个 Resources/ 就被抢先命中。
+    QDir contentsDir(exeDir);
+    if (contentsDir.cdUp() && contentsDir.dirName() == QLatin1String("Contents")) {
+        const QString fromBundle = QDir::fromNativeSeparators(
+            contentsDir.filePath(QStringLiteral("Resources/") + normalized));
+        if (QFileInfo::exists(fromBundle)) return fromBundle;
+    }
 
     // 回退到 cwd：`qtphp run` 不 chdir，用户可能从项目目录启动
     const QString fromCwd = QDir::fromNativeSeparators(

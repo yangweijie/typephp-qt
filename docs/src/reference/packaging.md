@@ -50,6 +50,8 @@ Then repeat on each non-system DLL until only `api-ms-win-*` / `KERNEL32` / `USE
 
 Put anything the app reads at runtime in the project's `assets/`. The structure is preserved (`assets/icon.png` → `<app-dir>/assets/icon.png`), and because a relative path resolves against the **executable's** directory, the same `'assets/icon.png'` string works from the project directory and from `dist/`.
 
+Inside a macOS `.app` the executable lives in `Contents/MacOS` while assets land in `Contents/Resources/assets`, so the resolver checks one extra level. Full order: **executable directory → bundle's `Contents/Resources` → working directory**. No need to duplicate assets under `MacOS/`.
+
 The convention exists because "copy the icon too" is exactly the step that gets forgotten. A directory plus a script that copies it beats a note in a README.
 
 ## macOS

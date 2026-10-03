@@ -217,7 +217,8 @@ while ($app->isOpen()) {
 
   `icon` 可以不传 —— 桥接会兜底用窗口图标，窗口也没图标时用系统标准图标：
   **macOS/Linux 上无图标的托盘项根本不显示**，兜底不是美化，是可用性。
-  相对路径的 `icon` 按**可执行文件所在目录**解析，所以 `build/` 和 `dist/` 里都成立
+  相对路径的 `icon` 按**可执行文件所在目录**解析（macOS `.app` 内再兜一层 `Contents/Resources`），
+  所以 `build/`、`dist/` 和打包好的 `.app` 里都成立
   （`qtphp build` 会自动把 `assets/` 拷进 `build/`）。
 - **看不到托盘图标？** 先看 Windows 是否把新图标收进了溢出区（`^` 箭头后面）——
   查注册表 `HKCU:\Control Panel\NotifyIconSettings` 里该 exe 的 `IsPromoted`，

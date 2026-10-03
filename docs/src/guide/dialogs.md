@@ -147,7 +147,7 @@ $app->setTray([
 - `menu` is optional. With it, right-click pops the menu and its items fire `menu` events (id-prefixed by convention, e.g. `tray.`).
 - `icon` is optional — the bridge falls back to the window icon, and to a standard system icon when the window has none either.
   **On macOS / Linux a tray item with no icon does not show up at all**, so that fallback is a usability requirement, not decoration.
-- A relative `icon` path resolves against the **executable's directory** (then the working directory), so `'assets/icon.png'` works from both `build/` and `dist/`.
+- A relative `icon` path resolves against the **executable's directory** — then, inside a macOS `.app`, `Contents/Resources` — and only then the working directory, so `'assets/icon.png'` works from `build/`, `dist/` and the packaged `.app` alike.
 
 ::: warning "I called setTray but I cannot see the icon"
 On Windows the notification area **hides newly appearing icons by default** — a brand-new app's icon lands in the overflow panel behind the `^` chevron, not on the visible taskbar. That is Windows' own behaviour, not the framework's.

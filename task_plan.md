@@ -79,8 +79,9 @@
 | 23 | 文档补 Qt 安装与编译（跨系统） | ✅ done：新增中英各一页 `guide/qt-setup.md`（共 +369 行）：最小模块集（只用 Core/Gui/Widgets，对着 `#include` 核过）、版本要求与 6.9.3 探测、Windows（官方安装器该勾什么 + aqtinstall）、macOS（keg-only + framework 布局，为何 `-I` 与 `-F` 必须同时给）、Linux（Debian 一条命令 + **Fedora/Arch/openSUSE 包名与扁平路径**）、`QT_DIR` 指定非默认版本、8 条排错表。**顺带修 2 个真问题**：① `findQt()` 把 `QT_DIR` 放在候选之后 → 有候选路径时被无视（最需要覆盖的场景），改为最优先；② `check-anchors.py` 的 slugify 把全角括号/斜杠直接删（VuePress 转成 `-`），把正确链接报成死锚点 —— 修后做了坏锚点注入反证 |
 | 24 | 增加 webview 支持 | ✅ done：新增 `webview` 控件，**两种后端编译期二选一**（Session 25 的 Phase 25 起是**三种**） —— Windows 用 **WebView2**（完整 Chromium + JS；SDK 从 NuGet 取 1.0.4258.31 并 vendor 到 `third_party/`，只留 3 个必需文件约 200KB 压缩后，**用户零额外下载**），其余平台用 **QTextBrowser**（QtWidgets 自带，HTML 子集无 JS）。PHP 侧同一套 API：`WidgetTree::webView()` / `html()`，`QtApp::webViewBackend()` / `webViewSupportsJs()` 供降级判断。`qtphp build` 自动部署 loader 并加进依赖自检；脚手架默认带 WebView2 配置。测试 123（+7）、示例 selftest 25/25、文档 +2 页（中英）。踩坑：无 moc 故不能用 `Q_OBJECT`（改 `dynamic_cast`）、无 WIL 头、lint 只认 `Bool` 不认 `bool`、**尺寸塌陷伪装成渲染失败**（694×16 → 需 `Expanding`+`sizeHint`+`minimumHeight`）。**macOS 本机复验（Session 25，见 24.1/24.2）**：`project.macos.yml` 零改动即落到 QTextBrowser 后端（`sources` 继承 + `cxx-flags` 整体替换 ⇒ 不带 `QT_WEBVIEW2`、不链 loader），build→`--selftest` 25/25→`--difftest` 20/20→cocoa 真窗口出图全 rc=0，`html` 与 `url` 两条分支都真机验过（F26 尾部）。**Session 25 补验（24.3/24.4，F27）**：`link` 接线 ✅、`zoom` ✅ 确认静默忽略、远程 `url` ❌ Qt 6 `QTextBrowser` 不支持（文档 `webview.md:44` 需按后端分列能力）；**WebView2 分支本机零运行时证据**（无任何 Windows 目标），只交静态审查 W1–W5，并修掉 **W0**：`.gitignore` 的 `*.lib` 吞掉 vendor 的 `WebView2Loader.dll.lib` ⇒ 新克隆 Windows 链接必报 `LNK1181`（规则已放行，**该文件需从 Windows 机器补交**） |
 | 25 | macOS 第三后端：WKWebView（`.mm`） | ✅ 实现 + 真机验收完成（24.8 / F29 §6）：新增 `cpp-src/qt_webview_wk.mm`（256 行），用**系统 WebKit** 做第三个编译期后端 —— 零安装、产物不涨（25,316,424 B vs 旧 25.5 MB 同一量级）、支持 JS + 远程 `https://` + `data:` + `zoom`。`url`/`html`/`zoom` 与 `navigating`/`loaded`/`title`/`link` 四事件全部按 `qt_webview.cc` 的契约对齐并**用事件读回**证明（`title=WK-JS-42`、`Example Domain`、`pageZoom=2.50`、链接点击 `type=0` 被拦下且未跳转）；不靠像素，因为原生子 view 不进 `QWidget::grab()`（F29 §5）。构建接线：mac 入口与 `qtphp new` 模板重写 `sources`（tpc 对 list 是**整体替换**）+ `-DQT_WEBVIEW_WK -fobjc-arc` + `-framework Foundation/AppKit/WebKit`。修掉一个新引入缺陷：offscreen 的 `winId()` 非 ObjC 指针 ⇒ `--shot` SIGSEGV(rc=139)，`attach()` 加 cocoa 平台闸门后 rc=0。控制组证明归因干净：关掉开关帧与旧基线 `a70cd7ae05b6…` 逐字节相同；开启后新基线 cocoa `2728fb1a6a06…`、offscreen `6c4832a6b738…`（各 8/8 稳定）。**控制组**：只注释 `-DQT_WEBVIEW_WK` 重建 ⇒ 帧与旧基线 `a70cd7ae05b6…` **逐字节相同**，开/关像素差 129,830 px（23.73%）、包围盒 x[33..726] y[454..664] 完全落在 WebView 分组内、y=454 以上零差异 ⇒ 其余控件未被触碰。 脚手架闭环：`qtphp new demo` → 生成的 mac yml 含 `.mm`/`-DQT_WEBVIEW_WK`/`-framework,WebKit` → `build .` rc=0（25,316,424 B）→ `--selftest` passed。第 ④ 步收口见 26 行 |
-| 26 | 补交 WebView2Loader.dll.lib + WebView2 分支 W1–W5 真机验证 | ✅ done：**补交** —— 该文件（3590 B 导入库）被 `.gitignore` 的 `*.lib` 吞掉未入库，本轮从 Windows 机器补进仓库，并用**克隆到干净目录编译**验证 LNK1181 消失。**真机验证 W1–W5**（Session 25 在 macOS 只能静态审查）：W1 ✅ 成立（`loaded` value 恒空 + 泄漏）、W2 ✅ 成立（`navigating` 慢一拍）、W3 ❌ **不成立**（实测不泄漏：4 并发峰值 9 → 全销毁 0，因 `cleanup()` 会 `delete window_` 连带回收控制器）、W4 ⚠️ 真实风险但窗口窄（20 轮 40 回调 0 次悬空，因环境是进程级单例）、W5 ✅ 成立。五条**全部修复并真机复验**；顺带补上 WKWebView 的 reload/goBack/goForward（否则新 API 在 macOS 静默失效）。测试 126（+3）、文档能力矩阵中英同步。**方法教训**：阳性对照（`--hold` 先数到 6）才让「数到 0」有意义；按 `--user-data-dir` 过滤自己的进程，别碰 Oray/向日葵 的 24 个 |
 | 26 | `--shot` 收口：三后端能力定稿 + 瞬态动画冻结 | ✅ done（24.9 + 24.10，F28 §4/§5）：① `webViewBackend()` 定为三值 `webview2｜wkwebview｜textbrowser`，新增「后端 × JS 能力」矩阵测试，并修掉**替身说谎**（`FakeBridge::qt_webview_supports_js()` 原写 `=== 'webview2'`，会把 wkwebview 报成不支持 JS）；stub / `QtApp` / `WidgetTree` / 中英 `reference/api.md` / `guide/qt-setup.md` / `php-src/qt.stub.php` 全部改三后端口径。② 示例里那段「无条件泵 120 帧」的 TEMP：先按后端收口 ⇒ **被控制组否证**（关开关后 3 帧 8 次跑出 4 种哈希），真因是 `QLineEdit` 清除按钮淡入淡出 ⇒ 最终解法是在 `snapshot()` 里 `findChildren<QAbstractAnimation*>()` 把在跑的动画 `setCurrentTime(totalDuration())`+`stop()`，配方降回 `runFrames(3)`。③ 三条基线值在新配方下**未漂移**（cocoa `2728fb1a…` 8/8、offscreen `6c4832a6…` 8/8、关开关 `a70cd7ae…` 8/8），`--shot` 445 ms；selftest 25/25、difftest 20/20、phpunit 124/**209**、lint 一致；脚手架 demo build rc=0 → selftest passed → `--shot` ×8 distinct=1。中英 `headless.md`、`bin/qtphp` 模板、技能 references 同步。**未验**：同一配方在 Windows / Linux 上的 ×8 收敛。 |
+| 27 | 补交 WebView2Loader.dll.lib + WebView2 分支 W1–W5 真机验证 | ✅ done：**补交** —— 该文件（3590 B 导入库）被 `.gitignore` 的 `*.lib` 吞掉未入库，本轮从 Windows 机器补进仓库，并用**克隆到干净目录编译**验证 LNK1181 消失。**真机验证 W1–W5**（Session 25 在 macOS 只能静态审查）：W1 ✅ 成立（`loaded` value 恒空 + 泄漏）、W2 ✅ 成立（`navigating` 慢一拍）、W3 ❌ **不成立**（实测不泄漏：4 并发峰值 9 → 全销毁 0，因 `cleanup()` 会 `delete window_` 连带回收控制器）、W4 ⚠️ 真实风险但窗口窄（20 轮 40 回调 0 次悬空，因环境是进程级单例）、W5 ✅ 成立。五条**全部修复并真机复验**；顺带补上 WKWebView 的 reload/goBack/goForward（否则新 API 在 macOS 静默失效）。测试 126（+3）、文档能力矩阵中英同步。**方法教训**：阳性对照（`--hold` 先数到 6）才让「数到 0」有意义；按 `--user-data-dir` 过滤自己的进程，别碰 Oray/向日葵 的 24 个 |
+| 28 | mac 打包侧收口：体积口径修正 + bundle 内资源解析 | ✅ done（28.1，F31）：先量真实体积 —— `qtphp package` 打印的 `99.8 MB` 虚高 ~19%，真实 **83.6 MiB**（87,612,051 B / 54 文件），`du -sh` 84 M，zip 分发 **29.3 MiB**；最大单项是 `libicudata.78.dylib` 31.66 MiB（38%），产物二进制 21.55 MiB（`macdeployqt` 会 strip：`nsyms` 121,795→6,890），PHP 静态链在里面、无 `libphp.dylib`。webview 在打包产物里**可用**，三条独立证据：bundle 内 `--shot` 与开发态基线逐字节同（`2728fb1a…`）且分组标题读图为 `backend=wkwebview，js=支持`、`otool -L` 显示 WebKit 走系统框架（目标机不需装 brew Qt）、`open` 后新起 `com.apple.WebKit.WebContent` 进程（XPC 父进程是 launchd ⇒ 判据必须是启动前后 PID 集合做差）。修掉两处打包缺陷：**P1** `dirSize()` 跟随符号链接 ⇒ framework alias 重复计数；**P2** 打包后 assets 在 `Contents/Resources` 而解析器只查 exe 目录 → cwd ⇒ 托盘图标静默丢（窗口像素不受影响，`--shot` 抓不到）。P2 走 bundle-aware 解析（exe 目录 → `Contents/Resources` → cwd，且只在父目录名为 `Contents` 时启用，避免非 bundle 平台被项目根的 `Resources/` 抢先命中），**负控制**：把 `Resources/assets` 改名后警告立刻回来。复验：package 打印 83.6 MB、bundle 从 `cwd=/tmp` 与 `cwd=/` 出图均无警告且哈希仍 `2728fb1a…`、offscreen `--selftest` passed、开发态二进制行为不变、`phpunit` **126/212**、`lint` 契约一致、`codesign --verify --deep --strict` 通过。中英 `packaging.md`/`dialogs.md` + README 同步解析顺序。 |
 
 ### Phase 10 分解（macOS）
 
@@ -390,6 +391,27 @@
   脚手架 `qtphp new demo` → `build .` rc=0（25,317,288 B）→ selftest passed → `--shot` ×8 distinct=1。
   文档四处（中英 `headless.md`、`bin/qtphp` 模板、两处技能 reference）同步回 `runFrames(3)` 并说明「动画由
   `snapshot()` 冻结」。已知语义变化：`--shot` 只能拿到动画**终点**，将来要验中间态得自己构造帧。
+
+### Phase 28 分解（Session 26：mac 打包体积与 bundle 资源解析）
+
+- [x] 28.1 量清打包产物 + 修 P1/P2（F31）：
+  **P1**（`bin/qtphp` 的 `dirSize()`）—— `SplFileInfo::isFile()/getSize()` 跟随符号链接，
+  `.framework` 的 12 个 alias 条目按目标文件重复计 ⇒ 体积虚高 ~19%（打印 99.8 MB，真实 83.6 MiB）。
+  修法：`if ($file->isLink() || !$file->isFile()) continue;`。
+  **P2**（`cpp-src/qt_common.h` 的 `qtResolvePath()`）—— 加一层 bundle `Contents/Resources`，
+  并把触发条件钉成「exe 目录的父目录名为 `Contents`」，这样 Linux/Windows 上项目根恰好有 `Resources/`
+  也不会被抢先命中。顺序：exe 目录 → bundle Resources → cwd → 报错时回给 exe 目录版本。
+  **证据链**：修前 bundle 启动必报 `tray icon could not be loaded: assets/icon.png`（实测）；
+  修后从 `cwd=/tmp` 与 `cwd=/`（等价于 `open` 起的进程）跑 bundle 二进制均无警告、`--shot` 哈希仍是
+  `2728fb1a6a06…` ⇒ 只补了资源解析，没动像素；**负控制**把 `Contents/Resources/assets` 改名后警告立刻回来
+  ⇒ 生效的正是新加的那一层，不是环境漂移。开发态二进制从 `cwd=/tmp` 跑仍命中 `build/assets/`、哈希不变。
+  复验：`package` 打印 83.6 MB、offscreen `--selftest` passed、`phpunit` 126 tests / **212** 断言、
+  `lint` 契约一致、`codesign --verify --deep --strict` 通过（临时改名后已还原）。
+  文档：中英 `reference/packaging.md`、`{,zh/}guide/dialogs.md`、README 三处口径同步成
+  「exe 目录 → bundle `Contents/Resources` → 工作目录」。
+  **未做**：`LC_RPATH` 里仍留着开发机路径（`/opt/homebrew/opt/libiconv/lib`、`~/.typephp/…/install/lib`），
+  不影响自包含性（无 NEEDED 走 `@rpath`），要清的话 `install_name_tool -delete_rpath` —— 未验。
+
 
 ## Errors Encountered
 
