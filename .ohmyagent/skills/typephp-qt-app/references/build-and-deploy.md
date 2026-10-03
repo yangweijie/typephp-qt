@@ -258,11 +258,13 @@ Render a few frames, save a PNG, exit:
 $shot = shot_path($argv);          // reads `--shot <path>` from argv
 if ($shot !== '') {
     $app->runFrames(3);
-    $app->snapshot($shot);
+    $app->snapshot($shot);         // clears focus + pushes running animations to their end value
     $app->destroy();
     return;
 }
 ```
+
+The frame count is no longer load-bearing: `snapshot()` freezes transient state itself (clears focus, clears `WA_UnderMouse`, and jumps any running animation to its end value). Before that, grabbing after a few frames caught the `QLineEdit` clear-button fade mid-flight — 8 runs produced 4 distinct hashes — and the only workaround was pumping ~120 frames (~3 s per shot).
 
 Read the PNG back and look at it — this is the fastest way to confirm a layout change. (Prefer an argument over an env var: passing an env var into a `.bat` from a shell is fragile, see the gotchas below.)
 

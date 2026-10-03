@@ -14,6 +14,19 @@
 include:
   - project.yml
 
+# tpc 的配置合并对**列表**是整体替换（只有 map 才递归合并），所以这里必须把
+# project.yml 的 sources 全量重写一遍再追加 mac 独有的 `.mm` —— 反过来说，
+# Windows / Linux 入口不列它，就绝不会拿 clang++ 去编 ObjC++。
+sources:
+  - src/main.php
+  - ../../src/QtApp.php
+  - ../../src/WidgetTree.php
+  - ../../php-src/qt.stub.php
+  - ../../cpp-src/qt_bridge.cc
+  - ../../cpp-src/qt_widgets.cc
+  - ../../cpp-src/qt_webview.cc
+  - ../../cpp-src/qt_webview_wk.mm
+
 include-paths:
   - ../../cpp-src
   - ../../php-src
@@ -30,12 +43,24 @@ cxx-flags:
   - -DQT_CORE_LIB
   - -DQT_GUI_LIB
   - -DQT_WIDGETS_LIB
+  # webview 走系统 WebKit（WKWebView）后端：完整 JS、远程 url、data: 都支持，
+  # 且零安装 —— 不像 brew 的 qtwebview 那样把 QtWebEngine（GB 级）拖进来。
+  # 去掉这两行就退回 QTextBrowser（HTML 子集、无 JS），一样能编译运行。
+  - -DQT_WEBVIEW_WK
+  # qt_webview_wk.mm 里 WKWebView* 是 C++ 类的成员，需要 ARC 才允许；
+  # 对纯 C++ 的 TU 无副作用（qt_webview.cc 里 #import 了 WebKit.h，故也要 ARC）。
+  - -fobjc-arc
 
 ld-flags:
   - -F/opt/homebrew/opt/qtbase/lib
   - -Wl,-framework,QtWidgets
   - -Wl,-framework,QtGui
   - -Wl,-framework,QtCore
+  # qt_webview_wk.mm 直接使 NSString/NSURL/NSView 这些原生类；QtGui 虽然依赖
+  # AppKit，但 ld 不会替我们的目标文件去它的依赖里找符号 ⇒ 必须显式给。
+  - -Wl,-framework,Foundation
+  - -Wl,-framework,AppKit
+  - -Wl,-framework,WebKit
   # 私有 PHP 链的是 brew libiconv（keg-only，不软链到 /opt/homebrew/lib），
   # 所以搜索路径和 rpath 都要显式给。
   - -L/opt/homebrew/opt/libiconv/lib

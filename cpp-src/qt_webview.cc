@@ -1,15 +1,17 @@
 // TypePHP\Qt — webview 控件。
 //
-// 两种后端，编译期二选一：
+// 三种后端，编译期三选一：
 //
 //   * WebView2（Windows，需 third_party/webview2）—— 完整 Chromium（Edge 内核）：
 //     支持 JS、现代 CSS、SPA。运行时由系统提供（Win10/11 随 Edge 自带）。
-//   * QTextBrowser（其余平台 / 未启用 SDK）—— QtWidgets 自带，零新依赖：
+//   * WKWebView（macOS，QT_WEBVIEW_WK）—— 系统 WebKit，实现在 qt_webview_wk.mm：
+//     支持 JS、远程 url、data:，零安装（不引 QtWebEngine）。
+//   * QTextBrowser（其余平台 / 未启用任何开关）—— QtWidgets 自带，零新依赖：
 //     支持 HTML 子集、图片、链接，**不支持 JS**。
 //
 // 对外只暴露一个控件类型 "webview"，应用侧不关心后端 ——
-// 两者实现同一组属性（url / html / zoom）与事件（link / loaded / title）。
 // 后端名与 JS 能力可由 PHP 查询（见 qt_window_webview_backend / _supports_js）。
+// 能力并不完全对等（zoom / 远程 url / JS 只有前两者有），差异见 docs 的 webview 页。
 
 #include "qt_common.h"
 
@@ -28,6 +30,8 @@ using Microsoft::WRL::ComPtr;
 
 #ifdef QT_WEBVIEW2
 static const char *kWebViewBackend = "webview2";
+#elif defined(QT_WEBVIEW_WK)
+static const char *kWebViewBackend = "wkwebview";
 #else
 static const char *kWebViewBackend = "textbrowser";
 #endif
@@ -36,7 +40,7 @@ const char *qtWebViewBackend() { return kWebViewBackend; }
 
 /** 后端是否支持 JavaScript —— 应用据此决定要不要降级提示。 */
 bool qtWebViewSupportsJs() {
-#ifdef QT_WEBVIEW2
+#if defined(QT_WEBVIEW2) || defined(QT_WEBVIEW_WK)
     return true;
 #else
     return false;
@@ -373,6 +377,8 @@ class WebView2Widget : public QWidget {
 QWidget *qtCreateWebView(QtWindowBox *box, const QString &id) {
 #ifdef QT_WEBVIEW2
     return new WebView2Widget(box, id);
+#elif defined(QT_WEBVIEW_WK)
+    return qtCreateWebViewWK(box, id);
 #else
     return qtCreateWebViewTextBrowser(box, id);
 #endif
@@ -381,12 +387,17 @@ QWidget *qtCreateWebView(QtWindowBox *box, const QString &id) {
 /**
  * 把 url / html / zoom 应用到 webview 控件上。
  *
- * 两个后端的能力不同，但都接受同一组属性：
- *   - url  两边都支持（WebView2 走 Navigate，QTextBrowser 走 setSource）
- *   - html  两边都支持
- *   - zoom 只有 WebView2 支持（QTextBrowser 没有缩放因子），静默忽略
+ * 三个后端的能力不同，但都接受同一组属性：
+ *   - url   三边都支持（WebView2 走 Navigate，WKWebView 走 loadRequest，QTextBrowser 走 setSource）
+ *   - html  三边都支持
+ *   - zoom  WebView2 / WKWebView 支持，QTextBrowser 没有缩放因子 ⇒ 静默忽略
  */
 void qtWebViewApplyProp(QWidget *widget, const QString &key, const Variant &value) {
+#ifdef QT_WEBVIEW_WK
+    qtWebViewApplyPropWK(widget, key, value);
+    return;
+#endif
+
     if (key == QLatin1String("zoom")) {
 #ifdef QT_WEBVIEW2
         if (auto *wv = dynamic_cast<WebView2Widget *>(widget)) wv->setZoom(static_cast<double>(value.toFloat()));

@@ -18,8 +18,9 @@
 
 ::: tip webview 控件不需要额外的 Qt 模块
 `WidgetTree::webView()` 在 **Windows 上用 WebView2**（微软 Edge 内核，不是 Qt 模块 ——
-SDK 已 vendor 在 `third_party/`，运行时随 Windows 自带），**其余平台用 QTextBrowser**，
-它是 QtWidgets 的一部分。所以启用 webview 永远不需要装 QtWebEngine —— 那会多出 1.5–2 GB。
+SDK 已 vendor 在 `third_party/`，运行时随 Windows 自带），在 **macOS 上用 WKWebView**（系统自带的
+WebKit 框架，同样不是 Qt 模块），**其余平台用 QTextBrowser**，它是 QtWidgets 的一部分。
+所以启用 webview 永远不需要装 QtWebEngine —— 那会多出 1.5–2 GB。
 详见 [WebView](/zh/widgets/webview.md)。
 :::
 

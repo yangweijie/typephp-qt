@@ -1,5 +1,334 @@
 # Progress Log — typephp-qt
 
+## Session 25 — 2026-10-03（macOS 本机重编 + 真跑 webview）
+
+### 任务
+> 「尝试重新编译运行 hello，我增加了 QTextBrowser 和 webview2」+「我说的编译是运行 mac 本机版，不是 linux 版」
+
+即：用户侧完成 Phase 24（webview 双后端）后，在 **Apple Silicon 本机**重新编译并运行示例。
+Linux 那条线（12.x 之后的跨发行版复验）本轮**不动**，容器 `tgl` 原样留着。
+
+### 先看清代码面（不凭提交信息猜）
+`git show 7f573fb` + 读 `cpp-src/qt_webview.cc`（412 行）：一个 `webview` 控件、`QT_WEBVIEW2`
+编译期二选一；mac 上 `#else` 分支 = `QTextBrowser`（`anchorClicked` → `link` 事件、
+`url`/`html` 都吃、`zoom` 静默忽略）。PHP 侧 `WidgetTree::webView()`/`html()` +
+`QtApp::webViewBackend()`/`webViewSupportsJs()`，stub 两个新函数（`Bool` 不是 `bool`）。
+
+### 实测（全部真 rc，`out=$(…); rc=$?`）
+| 步骤 | 结果 |
+|---|---|
+| `php bin/qtphp lint` | ✅ 契约一致，**26 个桥接函数**（+`qt_webview_backend`/`_supports_js`） |
+| `php bin/qtphp test` | ✅ **123 tests / 201 assertions**（用户 +7 条 webview 测试） |
+| `php bin/qtphp build examples/hello` | ✅ rc=0，入口 `project.macos.yml`，**11 个 TU**，产物 Mach-O arm64 **25.5 MB** |
+| `--selftest`（offscreen） | ✅ **25/25** rc=0 |
+| `--difftest`（offscreen） | ✅ **20/20** rc=0 |
+| `--shot`（cocoa 真窗口） | ✅ rc=0，3 秒出 760×720 PNG |
+| `./build/hello`（实跑） | ✅ 窗口起来、事件循环正常，终止后 rc=0 |
+
+读图确认：分组标题 `WebView（backend=textbrowser，js=不支持）`，`html` 里 `<h1>` 蓝色、`<b>` 加粗、
+「加粗 · 斜体 · 中文」中文渲染，其余控件（菜单/三个分组/进度条/底部三按钮/状态栏「心跳 2 跳」）无回归。
+
+### 关键结论：mac 入口 yml 一行都不用改
+`sources` 继承 ⇒ `qt_webview.cc` 自动进 mac 编译；`cxx-flags`/`link-libs` 整体替换 ⇒
+`/DQT_WEBVIEW2`、`/I…webview2/include`、`WebView2Loader.dll.lib` 全被清掉 ⇒ 编译期自动落到
+QTextBrowser 分支。**代价是反过来的**：若哪天把 mac 段改成「追加」，MSVC 的 `/D` 会直接进 clang 而编译失败。
+
+### 补验 `url` 分支（示例只用了 `html`，`url` 在 mac 上没人碰过）
+临时把示例换成 `url => 'assets/webview_url_probe.html'`（含 `<code>`、相对 `<img src="icon.png">`、
+`<a href>`）重编出图 —— **渲染成功**，相对图片按文档 base URL 解析正确 ⇒ `qtResolveUrl()` 的
+「无 scheme → `QUrl::fromLocalFile(qtResolvePath())`」在 mac 上成立。
+**第一次探针失败是我自己的路径写错**：裸文件名相对 **exe 目录**（`build/`）解析，而 assets 在
+`build/assets/` ⇒ 文件不存在。这条暴露了一个真实差异：**QTextBrowser 后端在文件缺失时零诊断**
+（不报错、不警告、rc 仍 0），而 WebView2 会发 `loaded` + `success=false`（见 F26 尾部）。
+探针已全部还原：`git checkout -- examples/hello/src/main.php` + 删两处临时 html + 重编，
+复验 `--selftest` 25/25、`--difftest` 20/20、`--shot` 出图与探针前逐内容一致。
+
+### 补验清单三项（F26 尾部那三条「未 mac 验」→ F27 第 1–3 条）
+> 「继续 未在 mac 验的清单」
+
+| 项 | 结论 | 证据 |
+|---|---|---|
+| `anchorClicked` → `link` 的真实接线 | ✅ **成立** | `--selftest` 走 `$app->dispatch()`，**绕过 Qt 信号**，所以这条此前零覆盖。Accessibility 关、无 `cliclick` ⇒ 应用内合成：`qtWebViewProbeFirstLink()` 找 anchor → `cursorRect()` → 自证 `anchorAt()` 非空 → `sendEvent(viewport, press+release)`。probe 与 `PROBE-LINK-EVENT` 各打印一行。**鉴别力反证**：摘掉 `enqueue` 后 `anchorAt` 仍命中、事件消失 |
+| `zoom` | ✅ **确认静默忽略、零副作用** | 设 `zoom=2.0` 与不设，两次 `--shot` 的 PNG **sha256 相同**（`633da154…`），rc 均 0 |
+| 远程 `url` | ❌ **Qt 6 `QTextBrowser` 不支持**，且**文档在过度承诺** | Qt 打 `QTextBrowser: No document for …`、区空白、rc 仍 0。逐项排除：`curl` 200（有网）／补 `-framework QtNetwork` 后 PNG 一字不变／换 `http` 同样失败／`QT_TEXTBROWSER_SYNCHRONOUS=1` 无效／`file://` 对照能走渲染。⇒ `sourceInfo()` 只做本地与 `qrc:`。**查出** `docs/src/zh/widgets/webview.md:44`「带 scheme 的原样使用」在非 Windows 平台是错的（`data:` 未实测） |
+
+**被追问「`source` 是 QUrl，你拿纯字符串测的吗？」之后重做到对象级**（F27 3.1/3.2）：桥接层本来就是
+`tb->setSource(qtResolveUrl(...))` 传 QUrl（`qt_webview.cc:407`），而那句 Qt 警告打印的正是 `url.toString()`；
+为排除「解析错」与「异步没等到」两种可能，另写**不经 PHP/AOT 的独立 Qt 程序**
+（`/tmp/qtb_probe/qtbtest.cc` + `scheme.cc`，brew Qt 6.11.2 framework 直链，offscreen）实测：
+`QUrl("https://example.com/")` → `valid=1 scheme=https host=example.com isLocalFile=0`、警告在 `setSource` **同步**出现、
+真 `QEventLoop` 跑满 6 秒（50 ms 轮询）文档恒为 0 字符、同进程 `QNetworkAccessManager` 却 `err=0 http=200 bytes=577`、
+`loadResource(remote img)` 返回 null；再加 `otool -L QtWidgets` 的 NEEDED **不含 QtNetwork** ⇒ 该后端发不出请求。
+scheme 矩阵顺带量掉那条「未实测」：**`data:` 与 `data:;base64` 同样空白，只有 `file` 可用** ⇒ 文档缺陷范围比原先记的大。
+
+### WebView2：本机跑不了 ⇒ 边界探测 + 静态审查 + 一个「克隆即坏」缺陷（F27 第 4–5 条）
+先探可达边界，避免假装验过：`/Applications` 无 Parallels/VMware/UTM/Fusion、`~/.ssh/config` 只有 github、
+无 wine、Apple Container 只能跑 Linux；`brew install mingw-w64` 是 GB 级而**启动卷只剩 3.5 Gi** ⇒
+连「交叉语法检查」这条路都不成立 ⇒ `QT_WEBVIEW2` 分支在本机**不可能有运行时证据**。
+
+改成读代码交出 W1–W5（详见 F27 第 4 节）：W1 `loaded` 的 value 恒为空串且每次导航泄漏一个 CoTaskMem 宽字符串、
+W2 `navigating` 取的是导航**前**的源、W3 无析构函数从不调 `Controller::Close()`、
+W4 三级 COM 回调裸捕 `[this]` 无生命周期保护、W5 `reload`/`goBack`/`goForward` 在 PHP 侧无入口 = 死代码。
+
+**最硬的缺陷是环境外的 W0**：`.gitignore:9` 的 `*.lib`（本意排 MSVC 产物）把 `third_party/webview2/x64/WebView2Loader.dll.lib`
+一起吞了，而 `examples/hello/project.yml:39` 与 `bin/qtphp:470` 的 `qtphp new` 模板都写死链接它、
+`third_party/webview2/README.md:13` 还声称已 vendor ⇒ **新克隆在 Windows 上链接必报 `LNK1181`**。
+本轮加 `!third_party/**/*.lib` 放行并用 dummy 文件三重确证（`check-ignore` rc=1、`git add -n` 可收、
+`/build/` 规则未削弱）。**文件本身只能从 Windows 那台机器补交**（本机磁盘上没有）。
+
+### 追问之后自查出的两条测量学缺陷（F28）
+重做 QUrl 那件事时顺手复核了自己的证据，两把尺子都有问题：
+
+1. **`--shot` 的 PNG sha256 跨次不稳定**。同一个二进制连跑 6 次 → 5 次 `fc9319b597…` + 1 次 `0876b10bf0…`。
+   用 PIL `ImageChops.difference().getbbox()` 定位：行 62–83 是 **QLineEdit 光标闪烁**，行 362–380 是
+   「打开日志窗口」按钮的 **hover/焦点描边**；PNG 无 `tIME` chunk ⇒ 差异是真实像素。
+   ⇒ 之前所有「两次 sha256 相同」的证据只能**单向**读：相等 ⇒ 无变化（成立，噪声只会让哈希不同、不会抹平真实变化）；
+   不同 ⇒ 回归（**不成立**）。今天自己就撞了一次假警报：两次干净重建分别出 `3c39bdc8…` 与 `fc9319b5…`。
+2. **那次「还原探针后重编」不干净**。产物里仍查得到 `--linkprobe`/`WVURL`/`webview_url_probe`，
+   `build/extension-hello.cc` 的 mtime 停在探针期。用一次性标记 `Hello, INCR-CACHE-MARKER!` 做可复现实验：
+   改源码 → 增量构建会重写生成物（增量本身没坏）；**还原**源码 → 增量构建**不重写**生成物、
+   字面量池只增不减（残留全在无引用的池条目里），而编出的代码是新的（还原后产物与全清重建产物
+   标题行区域 `bbox=None`）。⇒ 已改成**删掉整个 `build/` 全清重建**重测：`build` rc=0（11 TU）、
+   `--selftest` **25/25**、`--difftest` **20/20**、`--shot` rc=0、产物内探针字符串 **0 处**，
+   出图哈希落回 `fc9319b597…`。工作树只剩 `.gitignore` + 三份计划文件。
+
+### 记账
+`task_plan.md`：新增「Phase 24 分解（webview 后端，macOS 本机复验）」24.1/24.2/24.3/24.4、Phases 表 24 行补 mac 复验、
+Errors 表 +3 行（url 空白与两后端可诊断性不对等 / 远程 url 不支持 + 文档过度承诺 / `.gitignore` 吞掉 vendor 的 import lib）、
+目标产物补 webview 行并把 stale 的
+「112 tests」「selftest 14/14」改成 123/201 与 25/25、规模表 5221 → **6039**（cpp-src 2676 含
+`qt_webview.cc`、src 1109、CLI 2097、stub 157）。`findings.md`：F26 尾部补三小节
+（mac 复验数字 / 可诊断性不对等 / **仍未在 mac 上验的清单**）、新增 **F27**（link 接线 / zoom / 远程 url 排除表 /
+WebView2 静态审查 W1–W5 / `.gitignore` 吞 `.lib` 的证据）。
+`.gitignore`：WebView2 块后加 `!third_party/**/*.lib` + 3 行说明（唯一的产品代码侧改动）。
+
+### 24.5 让 `--shot` 出图可复现（接上一条「下一步」第一条，F28 §3）
+
+**先补 forcing function**：`--shot` 分支加 TEMP 探针 `SHOTDELAY=<ms>`（每 10ms 泵一帧），把 grab 推到墙钟
+不同相位。这一步顺带解释了上一条记录里那个反证失败（「摘掉冻结 16/16 同哈希」）—— 不额外延时时 grab 太快，
+噪声根本没机会出现，**不是**冻结有效。
+
+五轮全清重建（① 冻结+心跳定时器 → ⑤ 控制组，逐轮数字见 F28 §3 表格）逼出**两层**噪声，
+**都不是** F28-1 当时记的 caret/hover：
+
+| 层 | 现象 | 改法 |
+|---|---|---|
+| 应用自己的 1 秒心跳 | 差异带 `(25,366)–(159,714)`，读图是「心跳 2 跳 → 3 跳」 | `main.php` 把 `setTimer('clock',1000)` 移到 `--shot` 分支之后 |
+| 输入框有没有焦点 | 整行 QLineEdit 边框 `#b6b6b6` ↔ Fusion 焦点高亮 `#7e9dc2` + 光标有无 | `snapshot()` grab 前 `clearFocus()`、抓完还原 |
+
+**关键更正**：F28-1 那版 `qtFreezeTransientUi`（`setCursorFlashTime(0)` + `clearFocus(); setFocus();`）
+实测**不收敛** —— 有焦点时它把焦点留着、没焦点时它什么都不做，冻结开/关两轮跑出**同一对哈希值**。
+harness `focus3.cc`（`none`/`refocus`/`clear` × 两个起点）量化：2 种 / **2 种** / **1 种**
+⇒ 判据是「从不同瞬态起点必须收敛成同一帧」，函数已删、逻辑内联进 `snapshot()`。
+
+两条差点写进去的**错归因**被控制组否掉：`repaint()` 版稳定 19 样本，但它在第一次 grab **之前**只多两次
+`focusWidget()` 读取，不可能改像素 ⇒ 那是环境漂移（去掉 repaint 的 ⑤ 同样 15 样本 1 种）；
+`WA_UnderMouse`/hover 在本机无法按需复现（只置属性不改变像素），保留 1 行清理并**如实标未证**。
+
+终验（删探针 + 全清重建）：`--selftest` 25/25、`--difftest` 20/20、`phpunit` 123/123（201 断言）、
+`--shot` cocoa 8/8 → `a70cd7ae05b6…`、offscreen 8/8 → `4b777e2ed74e…`；`a70cd7ae` 与修复前那几轮的灰框哈希
+逐字节相同 ⇒ 干净帧未被改动，只是不再取决于激活竞态与秒针。**sha256 现在可以当 CI 基线**（按平台各存一份）。
+
+### 24.6 mac 上「走 Qt WebView 类」的路线勘查（F29，未动任何安装）
+
+用户给的新方向。三条路线的事实先量完（启动卷只剩 **2.5 Gi**，所以这一轮不装东西）：
+
+| 路线 | 实测事实 | 结论 |
+|---|---|---|
+| 装 `brew qtwebview` | 依赖表里写着 `qtwebengine`（+ `qtdeclarative`/`qtpositioning`/`qtwebchannel`），本机只有 `qtbase`；QtWebEngine 沿用仓库既有口径 1.5–2 GB | ❌ 磁盘装不下，且它在 mac 上只是 WKWebView 的 QML 壳 ⇒ **零净收益** |
+| 直接用系统 WKWebView（`.mm` 桥） | 探针实测 JS / 远程 https / `data:` 三条全过（`title='JS-RAN-3'` / `'Example Domain'` / `'DATA-OK'`），**零安装**；tpc 原生支持 `.mm`（`Translator.php:2313-2323`、`examples/apple-native/`） | ✅ 能力已钉死；缺的是工程接线：`bin/qtphp:1995` 只 `glob('cpp-src/*.cc')`、脚手架清单 `:448-450` 同样写死，且 NSView 嵌进 `QWidget::winId()` 未跑通 |
+| `QNetworkAccessManager` 取字节再 `setHtml` | 能补远程与 `data:`，但**永远没有 JS**，mac/Linux 要引入 QtNetwork 依赖 | ⚠️ 只算半个方案 |
+
+Qt 官方文档口径（F29 §1）：「On macOS, the system web view is used in the same manner as iOS」
+⇒ 「Qt WebView 类」在 mac 上就是 WKWebView，所以真问题不是「能不能拿到那个类」，
+而是「要不要给本仓加第三个后端（`.mm`）」。已把选择权交回用户，**未擅自开工**。
+
+### 24.7 WKWebView 嵌入 spike（用户选定 `.mm` 后端后的 #9 第 ① 步，F29 §5）
+
+路线勘查里唯一没跑通的一环就是「NSView 能不能嵌进 `QWidget::winId()` 并真的合成」，先把它钉死再动本仓。
+探针在工作区外（`/tmp/wkv_probe/spike.mm`、`spike2.mm`），纯 AppKit + brew Qt6，不碰仓库文件。
+挂载就三行，ARC 下 `WId → NSView *` 必须走 `(__bridge NSView *)(void *)wid`（`reinterpret_cast` 直接编译失败）：
+
+```objc
+NSView *parent = (__bridge NSView *)(void *)host->winId();
+auto *web = [[WKWebView alloc] initWithFrame:parent.bounds];
+web.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+[parent addSubview:web];
+```
+
+四条实测（800×600 窗口、宿主 bounds 760×510，判据全部数值化）：
+
+| 待证 | 手段 | 结果 |
+|---|---|---|
+| 引擎在 Qt 宿主里活着 | `evaluateJavaScript:"document.title"` | `js_title=WK-JS-42` |
+| **真的合成进 Qt 窗口**（不是只挂在层级里） | `screencapture -x -R<global rect>` + 读图/采样 | 中心 `#88bcdd`（网页蓝），洋红宿主底色 `#ff00ff` **一点没露** ⇒ frame 与坐标换算正确 |
+| 缩放跟随 | `resize(420,300)` 后打印 frame + 再抓 | `host.bounds=380x210 web.frame=0,0,380,210`，再抓仍是蓝 ⇒ `autoresizingMask` 够用，Qt 侧不必同步几何 |
+| `--shot` 取帧路径 | 同一时刻 `window.grab()` / `host->grab()` 存 PNG 采样 | 中心均 `#ff00ff` ⇒ **原生子 view 不进 `QWidget::grab()`**，抓出来是宿主底色空洞 |
+
+最后一行是 F27 已记的「`--shot` 截不到 WebView2」的**第二次确认**（同根因：独立原生表面，Qt 绘制引擎看不见）。
+新信息在于**基线回退**：mac 当前默认后端 QTextBrowser 是 Qt 自己画的、能截到，换成 WKWebView 后
+`--shot` 帧里的 webview 区域会变成空洞，刚锁定的 mac 基线 `a70cd7ae05b6…` 必然改变。
+所以 #9 第 ④ 步要连带把 webview 的验收手段从像素换成 `evaluateJavaScript` 读回 —— 这比像素更强
+（像素只能证明「画了」，读回属性能证明「页面真的加载并执行了脚本」）。
+备选（未做，成本高）：`WKWebView takeSnapshotWithConfiguration:` 能把页面渲成 `NSImage`，
+理论上可合成回 snapshot，但 `QtWindowBox::snapshot()` 是同步接口、要接异步回调。
+
+### 24.8 WKWebView 第三后端落地 + 构建接线（#9 第 ②③ 步，F29 §6）
+
+用户裸「继续」→ 按上一步留下的计划做第 ②③ 步：写 `cpp-src/qt_webview_wk.mm`（256 行）并把 mac 的
+构建链打通（`examples/hello/project.macos.yml` + `bin/qtphp` 里 `qtphp new` 的模板两处同步）。
+验收**不看像素、看事件** —— §5 已经量过原生子 view 不进 `QWidget::grab()`，而 `title` 只有 JS 真跑了才会出现。
+
+| 契约项 | 实测（verbatim，临时探针 `[wkev]`，验完已删） |
+|---|---|
+| `html` + JS | `navigating value=about:blank` → `loaded value=about:blank` → `title value=WK-JS-42` |
+| 远程 `url` | `navigating value=https://example.com/` → `title value=Example Domain` → `loaded value=https://example.com/` |
+| `zoom` | `flushPending -> pageZoom=2.50`、`didFinish -> pageZoom=2.50`（对照 1.00，跨导航保持） |
+| 链接点击 | `decidePolicy type=0` → `link value=https://link-probe.invalid/x`，之后无 `navigating` ⇒ 拦下且未跳转 |
+
+一次编译吐 12 条 ObjC++ 错（`@interface` 不能进匿名 namespace、ivar 名 `link` 撞 POSIX `::link`、
+Qt6 `toNSString()` 无参、`QUrl` 没有 `toNSString`），链接再吐 `_OBJC_CLASS_$_NSString/NSURL/NSView` 未定义
+⇒ 显式 `-framework Foundation/AppKit`；**QtGui 自己依赖 AppKit 不等于 ld 会替目标文件去它的依赖里找符号**。
+配置侧的坑是 tpc 的 `mergeConfig` 对 **list 整体替换** ⇒ mac 入口必须把整份 `sources` 重写一遍才加得进 `.mm`。
+
+**新引入的真缺陷（已修）**：`QT_QPA_PLATFORM=offscreen --shot` SIGSEGV（rc=139、PNG 不生成）——
+offscreen 的 `winId()` 不是 NSView。修法是在 `attach()` 首行按 `platformName()` 设闸门，而不是加 `isKindOfClass:` 兜底。
+
+终验（删探针 + 全清重建）：selftest 25/25（cocoa 与 offscreen 各一遍）、difftest 20/20、
+`php bin/qtphp test` 123 tests / **203** 断言、`lint` 契约一致；
+cocoa `--shot` ×8 → `2728fb1a6a06…`、offscreen ×8 → `6c4832a6b738…`。
+**控制组**：只注释 `-DQT_WEBVIEW_WK` 重建 ⇒ 帧与 24.5 的旧基线 `a70cd7ae05b6…` 逐字节相同；
+开/关像素差 129,830 px（23.73%），差异包围盒 x[33..726] y[454..664] 全在 WebView 分组内、y=454 以上零差异。
+脚手架闭环：`qtphp new demo` → 生成的 mac yml 含 `.mm`/`-DQT_WEBVIEW_WK`/`-framework,WebKit` → `build .` rc=0
+（25,316,424 B）→ `--selftest` passed。文档同步改了 6 处（中英 `widgets/webview.md`、中英 `reference/api.md`、
+中英 `guide/qt-setup.md`）+ `php-src/qt.stub.php` + `WidgetTree`/`QtApp` docblock。
+**顺带揪出测试替身在说谎**：`FakeBridge::qt_webview_supports_js()` 写死 `=== 'webview2'`，
+会把 `wkwebview` 报成不支持 JS —— 正好骗过它自己注释里说要防的那类误判，已改为两个原生后端都算支持。
+
+### 24.9 第 ④ 步收口：一次「按后端优化泵帧」被实测否掉（F28 §4）
+
+计划里第 ④ 步写着「把 `main.php` 那段无条件泵 120 帧的 TEMP 按 `webViewBackend()` 收口」。
+照做（`webViewSupportsJs() ? 120 : 3`）→ 全清重建 → **控制组直接炸**：关开关（QTextBrowser）那一版
+cocoa `--shot` 8 次跑出 **4 种**哈希（`2fec2364`×1 / `4393a1b2`×2 / `a2dd7139`×3 / `db380cff`×2）。
+
+定位：PIL 两两 `difference().getbbox()` ⇒ 四张图**所有**差异都在 `(622,66)-(636,80)` 一个 14×14 的格子里，
+放大看图是 `name_input` 右边的**清除按钮（灰底 ✕ 圆圈）**，四种帧只差它的不透明度
+（同格主灰阶 `#bababa`/`#ededed`/`#eeeeee`/`#dcdcdc`）⇒ Qt 的 `QLineEdit` 清除按钮自带淡入淡出动画，
+3 帧抓到的是动画中途。**所以那句 `// TEMP: 给 WebView2 异步初始化留时间` 是错归因**：泵帧数真正管的是
+「瞬态动画停下来」，与 webview 后端无关 ⇒ 改回无条件 120 帧，注释换成实测出来的两条真理由。
+
+连带发现**文档在教一条会坏基线的配方**：`headless.md`、`qtphp new` 模板、技能 references 里都写
+`$app->runFrames(3)`。四处全改成「泵到动画停（120 帧）」，并在中英 `advanced/headless.md` 新增
+「把 PNG 变成 CI 基线」一节：三条前置条件（无墙钟内容 / 泵到动画停 / 抓前清焦点）+
+收敛判据（×8 必须 1 种）+ 当前三条基线值（cocoa `2728fb1a…`、offscreen `6c4832a6…`、
+关开关 `a70cd7ae…`）+ 「哈希只能单向证明没变」。
+
+能力侧收口：`webViewBackend()` 三值定稿，`QtAppTest` 新增后端 × JS 能力矩阵测试。
+
+终验（恢复开关 + 全清重建）：cocoa ×8 → `2728fb1a6a06…`、offscreen ×8 → `6c4832a6b738…`（各 1 种），
+两平台 `--selftest`/`--difftest` 全 rc=0，`php bin/qtphp test` **124 tests / 209 assertions**、`lint` 契约一致；
+脚手架 `qtphp new demo` → `build .` rc=0 → `--selftest` passed → `--shot` ×3 同哈希（临时目录已清）。
+
+### 24.10 #10「关瞬态动画」：把动画推到终点，泵帧从 120 降回 3（F28 §5）
+
+24.9 的收口是**止血**（多等 117 帧），不是终解 —— 用户直接点破：「#10 先做，关瞬态动画」。
+
+先撞上三条 Qt6 API 事实（都是编译期纠正的，不是查文档得来的）：
+`Qt::UIEffect` 只有 menu/combo/tooltip/toolbox 五种，**没有**我在 24.9 里猜的
+`QT_UI_EFFECT_ANIMATE_UI_CHANGE`；`QAbstractAnimation::State` 是 `{Stopped, Paused, Running}`，
+**没有** `NotRunning`；`jumpToEnd()` 只在 `QPropertyAnimation` 上。
+可用的通路是：`QLineEdit` 那条淡入淡出是 parented 到该 line edit 的 `QTimeLine` ⇒
+`window_->findChildren<QAbstractAnimation *>()` 抓得到，对在跑的做 `setCurrentTime(totalDuration())` + `stop()`。
+另一条因果链值得记：那条动画**正是上一句 `clearFocus()` 自己触发的**（焦点丢了清除按钮才淡出），
+所以「清焦点」和「3 帧不稳定」是同一根链上的两端，不是两个独立噪声。
+
+**阶梯测量（每步只动一个变量，都是全清重建 + cocoa ×8）**：
+| 冻结 | 泵帧 | 结果 |
+|---|---|---|
+| ✗ | 120 | 1 种 `2728fb1a…`（= 24.9 基线） |
+| ✓ | 120 | 1 种 `2728fb1a…` ⇒ 120 帧时动画本就停妥，冻结是 no-op（与首行的比对是**跨时间窗**比同一串哈希，按 F28 §1 单向读法成立） |
+| ✓ | **3** | cocoa 8/8 `2728fb1a…`、offscreen 8/8 `6c4832a6…` ⇒ **两条基线值未漂移** |
+| **✗**（控制组 A） | 3 | **4 种**：`a70ad48f`×1 / `1b586809`×3 / `e8f85628`×3 / `4b9d1455`×1 ⇒ 冻结承重 |
+| ✓ + 关 WK 开关（控制组 B） | 3 | 8/8 `a70cd7ae…` ⇒ 24.9 那次「3 帧 4 种」确实只由动画引起，与后端无关 |
+
+**控制组必须在同一时间窗、同一配置下跑** —— 24.5 的教训是「现象消失可能是环境漂移」，
+这次反过来用：去冻结的那 8 次是在装好冻结代码之后的同一个窗口里跑的，跑出 4 种才排除掉漂移。
+
+终验：两平台 `--selftest` 25/25、`--difftest` 20/20 rc=0；`--shot` **445 ms**；
+`php bin/qtphp test` 124/209、`lint` 契约一致；恢复开关后全清重建 cocoa/offscreen ×8 各 1 种；
+脚手架 `qtphp new demo` → `build .` rc=0（25,317,288 B）→ selftest passed → `--shot` ×8 distinct=1。
+文档/模板/技能四处配方从「泵到动画停（120 帧）」改回 `runFrames(3)` + 说明动画由 `snapshot()` 冻结。
+已知语义变化（写进注释与文档）：`--shot` 只能拿到动画**终点**，将来要验中间态得自己构造帧。
+
+### 教训
+**「编译运行通过」不等于「新分支被走过」**。示例只喂 `html`，`url` 那条（含 `qtResolveUrl` 的
+scheme 判定、相对路径解析）在 mac 上是零覆盖 —— 一验就撞出「文件缺失静默空白」这种没有信号的失败形态。
+以后加控件属性时，**每个属性都要在示例里至少出现一次**，否则它就没有真机覆盖。
+
+**「文档写了」不等于「平台都能用」**。`webview.md` 那句「带 scheme 的原样使用」把两个后端的能力压成一句，
+而真正决定行为的是编译期二选一的后端：`url` 带 `https://` 在 QTextBrowser 上是**能力缺口**，不是配置问题。
+跨平台控件的文档得按后端分列能力，否则用户在 mac/Linux 上照文档写就只有空白。
+
+**可达边界要先探，再决定给什么证据**。Windows 目标探测（VM/ssh/wine/交叉工具链 + 磁盘余量）5 分钟就结论
+「本机不可能有运行时证据」——此时正确交付物是静态审查 + 一条可复现的构建期缺陷，而不是含混地说「应该没问题」。
+
+**「排除到组件」不等于「组件内部契约验过」**。被追问「`source` 是 QUrl，你用字符串测的吗」才暴露：
+我之前只把外部变量（网络/QtNetwork/TLS/异步开关）排掉，没有直接看 `QUrl` 对象的解析结果，也没排除
+「`setSource` 之后异步填充」这条 —— 结论虽然没变，但证据链有洞。补的方法是**把 PHP/AOT 从回路里摘掉**：
+一个 100 KB 的独立 Qt 程序 + 6 秒真事件循环 + `otool -L` 三条就把问题钉死，成本远低于在 AOT 应用里加探针。
+以后判「某控件某能力不存在」，先问自己：对象层面看过了吗、异步路径等过了吗、库级依赖链能不能支撑该能力。
+
+**追问的价值不止于改结论，还在于暴露尺子坏了**。这次结论一条没翻（远程 url 确实不支持），
+但复核过程揪出两条测量学缺陷：`--shot` 的 PNG sha256 跨次不稳定（光标闪烁 + hover 描边，6 次里 1 次不同），
+以及 tpc 增量构建在源码回退时不重写生成物（探针字符串留在无引用的字面量池里）。
+⇒ 立两条纪律：sha256 相等只用于**证明无变化**，不用于证明有回归；自证「还原干净」必须**删 `build/` 全清重建**
+＋行为比对，不能靠 `strings 产物`。
+**（24.5 勘误）** 这条里括注的成因「光标闪烁 + hover 描边」后来被推翻：真噪声是**应用自己的 1 秒心跳文案** +
+**输入框有没有焦点**，而当时那版冻结写法根本不收敛。详见 F28 §3。
+
+**给「是这一步改动让输出稳定了」这种归因配一个控制组**。24.5 里加了 `repaint()` 的那版连 19 个样本全同，
+差点就被写成解法；但它在第一次 grab **之前**只多了两次 `focusWidget()` 读取，按代码路径不可能改像素，
+于是去掉 `repaint()` 只留状态打印再跑一轮 —— 同样 15 样本全同 ⇒ 那是**环境漂移**，不是改动生效。
+凡是「改完之后现象消失」的结论，先问：不改的这一版在同一时间窗里还出不出得来。
+
+**换渲染后端时，spike 要连「我的验收尺子还量得到吗」一起测**。24.7 的 spike 如果只验「WKWebView 能不能显示」
+就会得出「通过，开工」；顺手在同一时刻跑一次 `QWidget::grab()` 才发现抓出来是空洞 ——
+而 `--shot` 的 sha256 基线正是上一轮刚锁的。功能可用性验收通过、验收手段本身却失效，这种组合
+不在「先跑通功能再管测试」的直觉路径上，所以要在 spike 阶段就把两条判据并列写出来。
+代价：一次改动会同时改基线哈希，得提前想好新的验收手段（这里是 `evaluateJavaScript` 读回），别等改完再补。
+
+**「原生窗口句柄」在非原生平台上不是同一种东西**。`winId()` 在 cocoa 下是 NSView，在 offscreen 下是一个
+非 ObjC 的指针 —— 类型系统不报错、编译器不警告，第一次真跑就 SIGSEGV（rc=139）。凡是拿 `WId` 去发消息的代码，
+**必须显式按 `QGuiApplication::platformName()` 设闸门**；而且无头路径要一起进验收矩阵（这次是
+`QT_QPA_PLATFORM=offscreen --shot` 跑出来的，只看 cocoa 就漏了）。
+
+**改契约时把「替身」当第二个实现来审，不是当测试脚手架**。新增 `wkwebview` 后端后，C++ 侧
+`qtWebViewSupportsJs()` 变成「两个原生后端都返回 true」，而 `FakeBridge` 仍写死 `=== 'webview2'` ——
+它的注释恰好说明「报错误导会骗过应用侧能力判断」，自己却成了那个误导源。
+以后扩枚举型契约（后端名、平台、能力位）时，同一次改动里 grep 出**所有**对该值做相等判断的地方，
+包括测试替身与 stub 文档。
+
+**别人写的注释归因，要当成待证假设而不是事实**。`// TEMP: 给 WebView2 异步初始化留时间` 这句话让
+「120 帧」看起来只服务于 webview，于是自然的优化就是按后端收口 —— 一收口就炸出第三类噪声
+（QLineEdit 清除按钮的淡入淡出）。省事的证伪办法不是读代码猜，而是**把那个数调小再看哈希分不分叉**：
+一次改动、8 次运行就定位到 14×14 的格子。凡是「某个魔法数字/延时/重试是为了 X」的注释，
+只要它决定了正确性，就该用「去掉它还成立吗」来验，而不是默认成立。
+
+**止血方案要标明它是止血，并且别把它写进文档当配方**。24.9 我把「无条件泵 120 帧」连同
+「泵到动画停（120 帧）」这条配方一起写进了中英文档、`qtphp new` 模板和技能 references ——
+现象是不再分叉，但真正的不变量是「grab 时动画必须已停」，而不是「必须泵 120 帧」。
+把副作用（慢 —— 本轮 3 帧实测 445 ms，120 帧配方早前记的是「3 秒出图」，两个数不在同一时间窗背靠背测的，
+只作量级参考；另外它还依赖具体控件树里恰好没有更长动画）当成契约教出去，下次就得再改一遍四处文档。
+⇒ 记录里区分三层：真不变量（动画停在终点）／当前实现（`snapshot()` 冻结）／使用者该怎么写（`runFrames(3)`）。
+
+**对上游 API 的记忆要当成待编译的假设**。这轮按 Qt4/Qt5 的直觉写了
+`QAbstractAnimation::NotRunning` 和 `anim->jumpToEnd()`，两条都是编译错 —— 而 24.9 结尾我甚至把
+「先 spike 确认 `QT_UI_EFFECT_ANIMATE_UI_CHANGE` 是否存在」列成了未做项，却仍然凭记忆写了它不存在会怎样。
+最省事的确认方式不是查文档，而是**让编译器回答**：一次 `#include` + 三个符号名的编译尝试 30 秒就出结论，
+且顺带暴露了真正可用的通路（`findChildren<QAbstractAnimation *>()`）。
+
+---
+
 ## Session 24 — 2026-10-03（增加 webview 支持）
 
 ### 任务
@@ -637,12 +966,22 @@ TypePHP 编译器仓库的 `examples/qt-taskboard`。它**完全不知道**我�
 
 ---
 
-## 当前状态（Session 14：Phase 1–11 完成，Phase 12.1–12.9 完成）
+## 当前状态（Session 25：Phase 1–12 + 13–24 完成，最新为 macOS webview 本机复验）
+
+> **本表是 Session 14 时点的快照**，只有下面加粗/更新的行是 Session 25（2026-10-03）在 macOS 上重测的。
+> 标着 `14/14`、`112/183`、`24 个函数` 的 Windows 与 Linux 行**都是 Phase 20/21/24 之前的时点**：
+> 断言集此后从 14 涨到 25（托盘手势 + 补全信号）、单测 112 → 123、桥接函数 24 → 26，
+> 那两个平台**没有在新代码上复验过**，别把旧数字当现状。
 
 | 项 | 状态 |
 |---|---|
 | 全部 9 个 Phase（Windows 路线） | ✅ done |
-| **Windows 端到端（Session 14 复验）** | ✅ `build` → `--selftest` 14/14 → `--shot` 21KB PNG（读图确认）→ `test` 112/183 → `lint` 契约一致；`doctor` 6 项全 OK |
+| **macOS 端到端（Session 25 复验，含 webview）** | ✅ `build`（11 TU，Mach-O arm64 25.5 MB）→ `--selftest` **25/25** → `--difftest` **20/20** → cocoa `--shot` 760×720 PNG（读图确认 webview 分组渲染）→ `test` **123/201** → `lint` **26 个函数**契约一致，全部真 rc=0 |
+| **`--shot` 可复现（24.5，F28 §3）** | ✅ 修好两层噪声（应用 1 秒心跳文案 + 输入框焦点瞬态），终验全清重建：cocoa 8/8 → `a70cd7ae05b6…`、offscreen 8/8 → `4b777e2ed74e…`，`--selftest` 25/25、`--difftest` 20/20、`phpunit` 123/123 同时全绿 ⇒ **sha256 可按平台当 CI 基线** |
+| **`webview` 控件（Phase 24，mac 侧）** | ✅ mac 入口 `project.macos.yml` **零改动**即落到 QTextBrowser 后端（`sources` 继承 + `cxx-flags` 整体替换）；`html` 与 `url`（本地文件，相对 exe 目录）两条分支都真机出图，相对 `<img>` 解析正确。补验三条全部收口（F27）：`link` 接线 ✅（含鉴别力反证）、`zoom` ✅ 确认静默忽略（PNG sha256 相同）、**远程 `url` ❌ Qt 6 `QTextBrowser` 不支持**（追问后重做到对象级：`QUrl` 解析正常、警告同步出现、6 秒真事件循环恒 0 字符、同进程 QNAM 可 200/577、`otool -L QtWidgets` 不含 QtNetwork；scheme 矩阵另查出 `data:` 也不支持，**只有 `file` 可用**），并据此把 `docs/src/zh/widgets/webview.md:44` 的过度承诺范围确定下来 |
+| **WebView2 后端（`QT_WEBVIEW2` 分支）** | ⚠️ **本机零运行时证据**（无 Windows 目标：VM/ssh/wine 皆无、Apple Container 只跑 Linux、启动卷 3.5 Gi 使交叉工具链不可行）。只交静态审查 W1–W5（F27 第 4 节）。附带抓出并修好 **W0**：`.gitignore` 的 `*.lib` 吞掉 vendor 的 `WebView2Loader.dll.lib` ⇒ 新克隆 Windows 链接必报 `LNK1181`；规则已加 `!third_party/**/*.lib` 并验证，**那 3.5 KB 的 `.lib` 需从 Windows 机器补交** |
+| **WKWebView 第三后端（`.mm`，用户选定路线）** | 🟡 **第 ① 步 spike ✅**（24.7 / F29 §5）：合成、缩放跟随、`evaluateJavaScript` 三条实测通过；同时量出**代价** —— 原生子 view 不进 `QWidget::grab()`，换默认后端后 mac `--shot` 帧里 webview 区域变空洞、`a70cd7ae05b6…` 必改。第 ②–④ 步（后端实现 / `bin/qtphp` 认 `.mm` / 优先级与文档）**未开工** |
+| Windows 端到端（Session 14 复验） | ✅ `build` → `--selftest` 14/14 → `--shot` 21KB PNG（读图确认）→ `test` 112/183 → `lint` 契约一致；`doctor` 6 项全 OK |
 | tpc 供给路线解析（Session 14） | ✅ 改按运行时体检选路，不再硬编码路径（F24）；带运行时的原生包不再被 composer 驱动抢占 |
 | Phase 10（macOS 原生编译路线） | ✅ done：`qtphp build examples/hello` 在 mac 上产出真实 Mach-O arm64 可执行文件，`--selftest` 10/10、`--shot` 出图 |
 | Phase 11（macOS 运行/打包/脚手架） | ✅ done：11.1–11.6 全绿，见下三行 |
@@ -660,7 +999,7 @@ TypePHP 编译器仓库的 `examples/qt-taskboard`。它**完全不知道**我�
 | **Linux（Debian 12 arm64 + Qt 6.4.2）build→run→验收** | ✅ 12.7 真实测：tpc 自建 embed 运行时、产出 ELF PIE aarch64 58 MB，offscreen 下 `--selftest` 14/14、`--difftest` 20/20、`--shot` 760×560 PNG，全部 rc=0（F21） |
 | `qtphp test` / `lint` / `new` / `doctor`（Linux） | ✅ 112 tests / 183 assertions、契约一致、`project.linux.yml` 三元组推导正确、doctor 7 项全 OK（12.9 起含「Linux 构建前置」探测） |
 | `qtphp package`（Linux） | ✅ 12.8 真实测：`dist/hello/` = 二进制 + 85 个 `.so` + 10 个 Qt 插件 + `qt.conf`，140.3 MB；`readelf -d` 只剩 `(RPATH) [$ORIGIN/lib]`，`ldd`（含 `libqxcb.so` 自己那次）没有一行落在产物外；`env -i QT_QPA_PLATFORM=offscreen` 下 `--selftest` 14/14、`--difftest` 20/20、`--shot` 全 rc=0，且 PNG 与开发产物**逐字节一致**（F22） |
-| 代码规模 | 5221 行（C++ 2052 / PHP 框架 1032 / CLI 1986 / 契约 151） |
+| 代码规模 | **6039 行**（C++ 2676 含 `qt_webview.cc` / PHP 框架 1109 / CLI 2097 / 契约 157）；Session 14 时点为 5221 |
 
 **Phase 11 收尾复验（2026-10-02，无代码改动）**
 `php bin/qtphp test` → OK (103 tests / 162 assertions)；`lint` → 契约一致（24 个函数）；
@@ -668,12 +1007,48 @@ TypePHP 编译器仓库的 `examples/qt-taskboard`。它**完全不知道**我�
 task_plan.md 的 macOS 环境段同步：私有 embed 运行时从「缺」改为「已建成并缓存」，标题改为「Phase 10–11 交付环境」。
 
 **下一步（可选，未开始）**
+- **WKWebView 第三后端 #9 的第 ②–④ 步**（用户已定路线，① spike 已收口见 24.7）：
+  ② 写 `cpp-src/qt_webview_wk.mm`，把 `url`/`html`/`zoom`/`link` 对齐现有两后端契约
+  （QTextBrowser 的 `zoom` 是静默忽略，WKWebView 有真 `pageZoom` ⇒ 这条能力首次三后端不对等，文档要按后端分列）；
+  ③ 构建接线：`bin/qtphp:1995` 的 `glob('cpp-src/*.cc')` 与脚手架清单 `:448-450` 要认 `.mm`，
+  mac 入口 `link-libs` 加 `-framework WebKit`、`cxx-flags` 加 `-fobjc-arc`；
+  ④ 后端优先级 `webview2 > wkwebview > textbrowser` + `webViewBackend()` 返回值 + 测试，
+  **并且**按 24.7 量出的代价把 webview 的验收从 `--shot` 像素换成 `evaluateJavaScript` 读回
+  （换默认后端会让 mac 基线 `a70cd7ae05b6…` 改变，得同时更新基线与文档）
+- ~~**让 `--shot` 可复现**（F28 第 1 节）~~ ✅ **已做（24.5）**：但当时记的成因是错的 —— 真噪声两层
+  （应用 1 秒心跳文案 + 输入框焦点有无），不是 caret/hover；sha256 现在可按平台当 CI 基线
+  （cocoa `a70cd7ae05b6…` 8/8、offscreen `4b777e2ed74e…` 8/8）
+- **`--shot` 基线的两个前提别忘**（24.5 的边界）：① 被测应用**不能在截图路径上注册墙钟定时器**，
+  否则文案跳字照样翻哈希（框架管不了应用自己的状态）；② 基线**按平台各存一份**，
+  cocoa 与 offscreen 的产物本来就不同（`a70cd7ae` vs `4b777e2e`），不能互相比
+- **`strings 产物` 不能自证干净**（F28 第 2 节）：tpc 增量构建在源码回退到「曾构建过的状态」时不重写
+  `build/extension-hello.cc`，字面量池只增不减 ⇒ 验「还原是否彻底」要**删 `build/` 全清重建**再做行为比对。
+  上游改进点（生成文件不重写 / 池不收缩）属 `typephp-compiler` 侧，**未验**、未提 issue
+- **Windows：补交 `third_party/webview2/x64/WebView2Loader.dll.lib`**（3.5 KB，`.gitignore` 规则本轮已放行、
+  本机磁盘上没有）。不补上，新克隆在 Windows 上 `build` 必报 `LNK1181`
+- **Windows：`QT_WEBVIEW2` 分支的运行时验证 + W1–W5 修复**（F27 第 4 节）。其中 W3（不调 `Controller::Close()`）
+  与 W4（COM 回调裸捕 `this`）是同一根因 —— webview 控件的析构路径没被设计，需真机确认是否攒浏览器子进程
+- **修文档**：`docs/src/zh/widgets/webview.md:44`（及英文版）那句「带 scheme 的（`http(s)://`、`file://`、`data:`）
+  原样使用」要按后端分列 —— 实测 QTextBrowser **只认本地文件**（`file:`/裸路径），`http://`、`https://`、
+  `data:`（含 base64 变体）三种都是「空白 + 一句 Qt 警告、rc 仍 0」，而 WebView2 三种都吃
+- **要不要给 QTextBrowser 后端补网络/`data:` 能力**（产品决策，未动）：自己用 `QNetworkAccessManager` 取字节
+  再喂 `setHtml`（`data:` 可直接解码），代价是 mac/Linux 引入 QtNetwork 依赖
+- **QTextBrowser 后端在本地文件不存在时零诊断**（空白、无警告、rc 仍 0），而 WebView2 会发
+  `loaded(success=false)` ⇒ 要么 `qWarning`，要么补发同一事件，让两后端可诊断性对齐
+- **`--linkprobe` 式的信号接线验法要不要长期保留**：本轮为临时探针（已 `git checkout` 还原）。
+  selftest 走 `dispatch()` 绕开 Qt 信号，意味着「桥接 → PHP」这条主干**至今没有自动化回归**
+- **`--shot` 的「3 帧 + `snapshot()` 冻结」配方只在 mac 上收敛过**：Windows/Linux 侧要各自重跑 ×8 建自己的基线值
+  （现有三条基线都是 macOS 的）。动画冻结是跨平台的 Qt 层改法，理论上等效，但**未实测**
+- **Windows / Linux 在新代码上复验**：断言集从 14 涨到 25（Phase 20/21）、单测 112 → 123、桥接函数
+  24 → 26、示例加了 `webview` 分组（窗口高 560 → 720）。两侧都还停在 Session 14/13 的时点，
+  Linux 侧容器 `tgl` 留着，重跑要先按 F20 起宿主代理并核对网关 IP
 - Linux 产物的**跨发行版**验证：现在只有 Debian 12 → Debian 12，「glibc 家族留系统 + 其余全搬」在
   Ubuntu 24.04 / Fedora 上成不成还没测；`xcb` 插件也只在**没有 X server** 的容器里验过依赖闭包，真实桌面未验
 - Windows 的 `vendorWindowsOffscreenPlugin()` 待有 Windows 环境时实测（12.5 写了但未跑过）
 - `FakeBridge::qt_fake_default_value()` 对 `table`/`tree`/`list`/`combo` 的返回值形态与真实桥接不一致（F13 尾部）
 - `--selftest`/`--difftest` 失败时退出码仍是 0，CI 里得靠 grep 判定
-- `call` 的方法表还可以长：`insertRow`/`removeRow`/`appendText`（日志流）目前都只能用整表重建绕
+- `call` 的方法表还可以长：`insertRow`/`removeRow`/`appendText`（日志流）目前都只能用整表重建绕；
+  W5 那三个 `reload`/`goBack`/`goForward` 也该接进同一张表（或删掉）
 
 ---
 

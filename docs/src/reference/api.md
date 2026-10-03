@@ -72,7 +72,7 @@ A handler may declare 0 or 1 parameters (`array $event`) — the framework probe
 |---|---|
 | `clipboardRead(): string` | Read the clipboard |
 | `clipboardWrite(string $text): void` | Write the clipboard |
-| `webViewBackend(): string` | `'webview2'` or `'textbrowser'` |
+| `webViewBackend(): string` | `'webview2'` / `'wkwebview'` / `'textbrowser'` |
 | `webViewSupportsJs(): bool` | Whether the compiled-in backend can run JavaScript |
 
 ### Verification and diagnostics

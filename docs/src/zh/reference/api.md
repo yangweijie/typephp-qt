@@ -72,7 +72,7 @@
 |---|---|
 | `clipboardRead(): string` | 读剪贴板 |
 | `clipboardWrite(string $text): void` | 写剪贴板 |
-| `webViewBackend(): string` | `'webview2'` 或 `'textbrowser'` |
+| `webViewBackend(): string` | `'webview2'` / `'wkwebview'` / `'textbrowser'` |
 | `webViewSupportsJs(): bool` | 当前后端能否运行 JavaScript |
 
 ### 验收与诊断

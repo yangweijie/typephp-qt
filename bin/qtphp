@@ -500,8 +500,20 @@ YML;
 # 内部又是限定 include，所以 -I（解裸名）与 -F（解限定名）必须同时给，缺一必失败。
 #
 # include 合并时列表是**整体替换、不是追加**，故框架内两条 include 路径要在下面重写一遍。
+# sources 同理 —— 所以 mac 独有的 .mm 只能这样全量重写加进去，Windows/Linux 入口不列它就
+# 绝不会被拿去编 ObjC++。
 include:
   - project.yml
+
+sources:
+  - src/main.php
+  - {$pkgDir}/src/QtApp.php
+  - {$pkgDir}/src/WidgetTree.php
+  - {$pkgDir}/php-src/qt.stub.php
+  - {$pkgDir}/cpp-src/qt_bridge.cc
+  - {$pkgDir}/cpp-src/qt_widgets.cc
+  - {$pkgDir}/cpp-src/qt_webview.cc
+  - {$pkgDir}/cpp-src/qt_webview_wk.mm
 
 include-paths:
   - {$pkgDir}/cpp-src
@@ -519,12 +531,23 @@ cxx-flags:
   - -DQT_CORE_LIB
   - -DQT_GUI_LIB
   - -DQT_WIDGETS_LIB
+  # webview 走系统 WebKit（WKWebView）后端：支持 JS、远程 url、data:，且零安装
+  # （不像 brew 的 qtwebview 会把 QtWebEngine 拖进来）。去掉下面两行就退回
+  # QTextBrowser（HTML 子集、无 JS），一样能编译运行。
+  - -DQT_WEBVIEW_WK
+  # qt_webview_wk.mm 里 WKWebView* 是 C++ 类的成员，需要 ARC；对纯 C++ 的 TU 无副作用。
+  - -fobjc-arc
 
 ld-flags:
   - -F{$macQt}/lib
   - -Wl,-framework,QtWidgets
   - -Wl,-framework,QtGui
   - -Wl,-framework,QtCore
+  # .mm 直接使 NSString/NSURL/NSView；QtGui 虽依赖 AppKit，但 ld 不会替我们的目标文件
+  # 去它的依赖里找符号 ⇒ 必须显式给。
+  - -Wl,-framework,Foundation
+  - -Wl,-framework,AppKit
+  - -Wl,-framework,WebKit
   # brew 的 libiconv 是 keg-only，不会软链进 brew 的 lib，搜索路径与 rpath 都得显式给。
   - -L{$brewOpt}/libiconv/lib
   - -liconv
@@ -723,6 +746,8 @@ function main(int $argc, array $argv): void
     // 无头验收：--shot <path> 渲染几帧后存 PNG 退出，便于自动化检查
     $shot = shot_path($argv);
     if ($shot !== '') {
+        // 3 帧就够：snapshot() 抓帧前会把还在跑的瞬态动画推到终点
+        // （否则抓到 QLineEdit 清除按钮的淡入淡出中途，同一产物连跑会出多种哈希）。
         $app->runFrames(3);
         $ok = $app->snapshot($shot);
         echo $ok ? "snapshot: $shot\n" : "snapshot failed\n";

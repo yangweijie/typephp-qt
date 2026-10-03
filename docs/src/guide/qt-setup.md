@@ -19,9 +19,10 @@ So a **minimal Qt Widgets install is enough**, which is what the commands below 
 
 ::: tip The webview widget does not need extra Qt modules
 `WidgetTree::webView()` uses **WebView2 on Windows** (Microsoft's Edge engine, not a Qt module —
-the SDK is vendored in `third_party/`, and the runtime ships with Windows) and **QTextBrowser
-elsewhere**, which is part of QtWidgets. So enabling the webview never means installing
-QtWebEngine — which would add 1.5–2 GB. See [WebView](/widgets/webview.md).
+the SDK is vendored in `third_party/`, and the runtime ships with Windows), **WKWebView on macOS**
+(the system WebKit framework, also not a Qt module), and **QTextBrowser elsewhere**, which is part
+of QtWidgets. So enabling the webview never means installing QtWebEngine — which would add
+1.5–2 GB. See [WebView](/widgets/webview.md).
 :::
 
 ::: tip Version

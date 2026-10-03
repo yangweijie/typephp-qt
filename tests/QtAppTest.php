@@ -676,6 +676,30 @@ final class QtAppTest extends TestCase
         test_set_webview_backend('webview2');
         $this->assertSame('webview2', $this->app->webViewBackend());
         $this->assertTrue($this->app->webViewSupportsJs());
+
+        test_set_webview_backend('wkwebview');
+        $this->assertSame('wkwebview', $this->app->webViewBackend());
+        $this->assertTrue($this->app->webViewSupportsJs());
+    }
+
+    /**
+     * 三个后端与 JS 能力的对应关系钉死。
+     *
+     * 这张表必须与 `cpp-src/qt_webview.cc` 的 `qtWebViewSupportsJs()` 一致：
+     * 应用侧只按 `webViewSupportsJs()` 分支，替身报错了就会在真 Qt 上走空。
+     */
+    public function testWebViewJsCapabilityMatrix(): void
+    {
+        $matrix = ['webview2' => true, 'wkwebview' => true, 'textbrowser' => false];
+        foreach ($matrix as $backend => $supportsJs) {
+            test_set_webview_backend($backend);
+            $this->assertSame($backend, $this->app->webViewBackend());
+            $this->assertSame(
+                $supportsJs,
+                $this->app->webViewSupportsJs(),
+                "backend={$backend} 的 JS 能力与契约不符"
+            );
+        }
     }
 
     public function testWebViewRendersIntoTree(): void

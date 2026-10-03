@@ -26,6 +26,40 @@ qtphp run . --shot out.png
 往 `.bat` 里从 shell 传环境变量要穿过好几层引号，很脆。参数是可靠的。示例的 `run.bat shot.png` 就是这么做的。
 :::
 
+## 把 PNG 变成 CI 基线
+
+一张可复现的 PNG 就是一条免费的回归测试。三件事必须同时成立，每条都在 `examples/hello` 上实测过：
+
+1. **屏幕上不能有随墙钟变的东西。** 那个 1 秒心跳标签让相邻两次出图差在 `(25,366)–(159,714)`，
+   直到把定时器注册点移到 `--shot` 分支**之后**才消失；打印时间的控件同理。
+2. **瞬态动画必须已经停下来 —— 这件事 `snapshot()` 替你做掉。** 以前只泵几帧时抓图是抛硬币：
+   8 次跑出 **4 种哈希**，差异全在 `(622,66)-(636,80)` 那一格 —— 抓到的是 QLineEdit 清除按钮
+   淡入淡出的中途。泵满 120 帧能把它藏住（代价是白等多帧、出图从几百毫秒变成秒级）；现在 `snapshot()` 在抓之前
+   把还在跑的动画**直接推到终点值**，所以 3 帧就够，帧也不再取决于墙钟相位。
+3. **抓帧前要清焦点。** 有焦点的 QLineEdit 画的是 Fusion 高亮框（`#7e9dc2`）加光标，
+   没焦点是普通 `#b6b6b6` 边框，落到哪一边是竞态。`snapshot()` 自己做了 `clearFocus()` 与还原。
+
+然后先验证收敛，再信那个数 —— 判据是**从不同瞬态起点必须收敛成同一帧**：
+
+```bash
+for i in $(seq 8); do ./build/hello --shot /tmp/s$i.png; done
+shasum -a 256 /tmp/s*.png | awk '{print $1}' | sort -u | wc -l   # 必须输出 1
+```
+
+`examples/hello` 在 Apple Silicon 上当前的值（改一次界面就会变，把它当「这个产物的指纹」，不是常量）：
+
+| 平台 / 后端 | sha256 |
+|---|---|
+| `cocoa`，启用 WKWebView | `2728fb1a6a0652625483166097bda44a23f051f48e629b7acf9dac793ce1e4d7` |
+| `QT_QPA_PLATFORM=offscreen`，启用 WKWebView | `6c4832a6b738145ef902a131f98ff832e769d2eb5aa1485b2295502ec9b0111b` |
+| `cocoa`，把 `-DQT_WEBVIEW_WK` 注释掉（QTextBrowser） | `a70cd7ae05b6f3099ee799204547ba040d35be4f93cc3bc8af4494e81a7d9bbc` |
+
+::: warning 哈希只能证明「没变」，是单向的
+两次哈希相同 ⇒ 像素没变（成立）。但**它不能证明功能是对的**：原生 webview 后端画在 Qt 之外，
+`QWidget::grab()` 那里永远是空洞，页面显示什么都一样
+（见 [WebView](/zh/widgets/webview.md)）。验那条路要用事件，不要用像素。
+:::
+
 ## `--selftest` —— 行为验收
 
 逐个触发所有已注册事件，每个用例报 `ok` / `FAIL`：

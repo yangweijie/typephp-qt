@@ -247,18 +247,20 @@ function main(int $argc, array $argv): void
         log_append($log, '日志窗口已打开');
     });
 
-    // 定时器放在所有 handler 之后注册：到 run() 里才会真的开始跳。
-    $app->setTimer('clock', 1000);
-
     // 无头验收：--shot <path> 渲染几帧后存 PNG 退出。
     $shot = shot_path($argv);
     if ($shot !== '') {
-        // TEMP: 给 WebView2 异步初始化留时间
-        for ($i = 0; $i < 120; $i++) { $app->runFrames(1); }
+        // 3 帧就够：瞬态动画由 snapshot() 推到终点（见 cpp-src/qt_bridge.cc），
+        // 不靠多泵帧等它跑完，所以出图不再取决于墙钟相位。
+        $app->runFrames(3);
         $ok = $app->snapshot($shot);
         $app->destroy();
         return;
     }
+
+    // 注册点在 --shot 分支之后：心跳文案会随墙钟跳字，截图基线要求画面不随之变化。
+    // 自检分支用 dispatch() 手动触发 timer，不依赖这里的注册。
+    $app->setTimer('clock', 1000);
 
     // 无头自检：--selftest 逐个触发所有控件事件，验证每个 handler 都能正常调用。
     // 这能在无头环境覆盖"闭包参数个数不匹配"这类只在 AOT 下暴露的问题。

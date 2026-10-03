@@ -26,6 +26,47 @@ Read the PNG back and look at it — the fastest way to confirm a layout change.
 Passing an env var into a `.bat` from a shell has to survive several layers of quoting, and it is fragile. An argument is reliable. The example's `run.bat shot.png` does exactly this.
 :::
 
+## Turning the PNG into a CI baseline
+
+A PNG you can hash is a regression test you get for free. Three things must hold, each measured
+on `examples/hello`:
+
+1. **Nothing wall-clock driven may be on screen.** The 1-second heartbeat label made consecutive
+   shots differ by `(25,366)–(159,714)` until the timer registration moved *after* the `--shot`
+   branch. Same for anything that prints the time.
+2. **Transient animations must be settled — `snapshot()` does this for you.** Grabbing used to be
+   a coin toss after only a few frames: 8 runs produced **4 distinct hashes**, all differing inside
+   `(622,66)-(636,80)` — the `QLineEdit` clear button's fade animation caught mid-flight. Pumping
+   120 frames hid it (at ~3 s per shot); `snapshot()` now pushes any running animation to its end
+   value before grabbing, so 3 frames are enough and the frame no longer depends on wall-clock
+   phase.
+3. **Focus is cleared before grabbing.** A focused `QLineEdit` paints a Fusion highlight (`#7e9dc2`)
+   and a caret instead of the plain `#b6b6b6` border, and which one you get is a race.
+   `snapshot()` does the `clearFocus()`/restore itself.
+
+Then verify convergence before trusting a number — the acceptance criterion is *different starting
+points must converge to one frame*:
+
+```bash
+for i in $(seq 8); do ./build/hello --shot /tmp/s$i.png; done
+shasum -a 256 /tmp/s*.png | awk '{print $1}' | sort -u | wc -l   # must print 1
+```
+
+Current values for `examples/hello` on Apple Silicon (they change with any UI edit — treat them as
+"this build's fingerprint", not as constants):
+
+| Platform / backend | sha256 |
+|---|---|
+| `cocoa`, WKWebView enabled | `2728fb1a6a0652625483166097bda44a23f051f48e629b7acf9dac793ce1e4d7` |
+| `QT_QPA_PLATFORM=offscreen`, WKWebView enabled | `6c4832a6b738145ef902a131f98ff832e769d2eb5aa1485b2295502ec9b0111b` |
+| `cocoa`, `-DQT_WEBVIEW_WK` commented out (QTextBrowser) | `a70cd7ae05b6f3099ee799204547ba040d35be4f93cc3bc8af4494e81a7d9bbc` |
+
+::: warning Hashes prove "no change", one direction only
+Equal hashes mean the pixels did not change. They do **not** prove a feature works: the native
+webview backends paint outside Qt, so `QWidget::grab()` leaves a hole there no matter what the page
+shows ([WebView](/widgets/webview.md)). Verify those with events, not pixels.
+:::
+
 ## `--selftest` — behavioural
 
 Fire every registered event once and report `ok` / `FAIL` per case:

@@ -289,7 +289,8 @@ final class QtApp
     /**
      * 当前编译进去的 webview 后端名。
      *
-     * `'webview2'` = 完整 Chromium（Windows），`'textbrowser'` = HTML 子集（其余平台）。
+     * `'webview2'` = 完整 Chromium（Windows），`'wkwebview'` = 系统 WebKit（macOS），
+     * `'textbrowser'` = Qt 自带的 HTML 子集（Linux 与未启用原生后端时）。
      */
     public function webViewBackend(): string
     {
@@ -299,7 +300,7 @@ final class QtApp
     /**
      * 当前后端是否支持 JavaScript。
      *
-     * QTextBrowser 后端不支持 —— 需要 JS 的页面在它上面渲染不出来，
+     * 只有 QTextBrowser 后端不支持 —— 需要 JS 的页面在它上面渲染不出来，
      * 应用可据此给用户一个降级提示，而不是白屏。
      */
     public function webViewSupportsJs(): bool

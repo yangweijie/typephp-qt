@@ -208,12 +208,13 @@ final class WidgetTree
     /**
      * 内嵌网页视图。
      *
-     * 后端按平台自动选：Windows 上是 WebView2（完整 Chromium，支持 JS），
-     * 其余平台是 QTextBrowser（HTML 子集，**不支持 JS**）。
-     * 可用 `QtApp::webViewBackend()` / `webViewSupportsJs()` 查询。
+     * 后端按平台在编译期选：Windows 上是 WebView2（完整 Chromium，支持 JS），
+     * macOS 上是系统 WebKit 的 WKWebView（支持 JS），其余平台是 QTextBrowser
+     * （HTML 子集，**不支持 JS**）。可用 `QtApp::webViewBackend()` / `webViewSupportsJs()` 查询。
      *
      * `$props['url']` 既可以是远程地址，也可以是本地文件路径（相对 exe 目录解析）；
      * 也可以改用 `$props['html']` 直接给 HTML 字符串。
+     * 注意 QTextBrowser 后端只认本地文件，`http(s)://` 与 `data:` 在它上面加载不出来。
      */
     public static function webView(string $url = '', array $props = []): array
     {

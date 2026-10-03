@@ -231,7 +231,7 @@ bool snapshot(const QString &path) {
 $shot = shot_path($argv);      // reads `--shot <path>`
 if ($shot !== '') {
     $app->runFrames(3);
-    $app->snapshot($shot);
+    $app->snapshot($shot);     // clears focus + pushes running animations to their end value
     $app->destroy();
     return;
 }

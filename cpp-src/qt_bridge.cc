@@ -11,6 +11,7 @@
 
 #include "qt_common.h"
 
+#include <QAbstractAnimation>
 #include <QAction>
 #include <QCloseEvent>
 #include <QDesktopServices>
@@ -244,10 +245,38 @@ void QtWindowBox::cleanup() {
     events_.clear();
 }
 
+/**
+ * 抓一帧窗口像素存成 PNG。为了让同一份代码每次抓出同一张图（sha256 能当基线），
+ * grab 前把三类「与代码无关」的瞬态按掉，抓完再还原，不影响正在运行的应用：
+ *   * 焦点：cocoa 上窗口何时被激活、Qt 是否已自动把焦点落到第一个可聚焦子控件，
+ *     取决于激活事件与 grab 的先后。有焦点就多一圈蓝色描边和一根会闪的光标。
+ *     必须**清掉**而不是重设 —— 重设会把两种起点分别留成两种产物，清掉才收敛成一种。
+ *   * hover：Fusion 的 mouseOver 读的就是 WA_UnderMouse，不清就取决于宿主鼠标停在哪。
+ *   * 瞬态动画：上面那句 clearFocus() 自己就会启动 QLineEdit 清除按钮的淡出，
+ *     于是 grab 抓到动画中途（实测只泵 3 帧时 8 次跑出 4 种哈希，差异全在
+ *     `(622,66)-(636,80)` 那一格）。把还在跑的动画直接推到终点值，帧就不再取决于墙钟相位。
+ */
 bool QtWindowBox::snapshot(const QString &path) {
     if (!window_) return false;
     qt_application->processEvents();
-    return window_->grab().save(path, "PNG");
+    QWidget *focused = window_->focusWidget();
+    if (focused) focused->clearFocus();
+    const QList<QWidget *> widgets = window_->findChildren<QWidget *>() << window_;
+    for (QWidget *w : widgets) w->setAttribute(Qt::WA_UnderMouse, false);
+    const QList<QAbstractAnimation *> animations = window_->findChildren<QAbstractAnimation *>();
+    for (QAbstractAnimation *anim : animations) {
+        if (anim->state() == QAbstractAnimation::Stopped) continue;
+        // jumpToEnd() 只有 QPropertyAnimation 有；QAbstractAnimation 上的通用写法是
+        // 把当前时间推到终点，让动画自己把终值同步发出去（QTimeLine 的 currentValue 连着淡入淡出）。
+        const int total = anim->totalDuration();
+        if (total > 0) {
+            anim->setCurrentTime(total);
+            anim->stop();
+        }
+    }
+    QPixmap shot = window_->grab();
+    if (focused) focused->setFocus();
+    return shot.save(path, "PNG");
 }
 
 // ────────────────────────────── 渲染遍历 ──────────────────────────────

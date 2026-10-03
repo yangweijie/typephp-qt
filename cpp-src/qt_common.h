@@ -1,9 +1,11 @@
 // TypePHP\Qt — 桥接共享头。
 //
-// 只放声明与 inline 工具函数；实现分在两个翻译单元里，用来验证 tpc 能编译
-// cpp-src/ 下的多个 .cc 并正确链接：
+// 只放声明与 inline 工具函数；实现分在几个翻译单元里，用来验证 tpc 能编译
+// cpp-src/ 下的多个源文件并正确链接：
 //   qt_bridge.cc   应用/窗口/事件循环/渲染遍历/装饰与对话框
 //   qt_widgets.cc  控件工厂与属性应用（控件目录）
+//   qt_webview.cc  webview 的统一入口 + WebView2/QTextBrowser 后端
+//   qt_webview_wk.mm  WKWebView 后端（仅 macOS，且仅在 QT_WEBVIEW_WK 下进 sources）
 //
 // 设计约束（与 php-src/qt.stub.php 一一对应）：
 //   * 每个 PHP 函数 `qt_foo()` ⇄ C++ 符号 `php_qt_foo()`。
@@ -248,19 +250,26 @@ void qtApplyProp(QtWindowBox *box, QWidget *widget, const QString &type, const Q
 /** 该 type 是否是容器（有自己的子布局/子页）。 */
 bool qtIsContainer(const QString &type);
 
-// ── webview（实现在 qt_webview.cc，后端按编译期开关二选一）──
+// ── webview（后端按编译期开关三选一）──
+//   QT_WEBVIEW2   Windows + vendor 的 SDK  → cpp-src/qt_webview.cc 的 WebView2Widget
+//   QT_WEBVIEW_WK macOS + 系统 WebKit      → cpp-src/qt_webview_wk.mm
+//   都不定义                               → cpp-src/qt_webview.cc 的 QTextBrowser
 
-/** 创建 webview 控件：Windows 且启用 SDK 时是 WebView2，否则 QTextBrowser。 */
+/** 创建 webview 控件。 */
 QWidget *qtCreateWebView(QtWindowBox *box, const QString &id);
 
-/** 当前编译进去的后端名："webview2" 或 "textbrowser"。 */
+/** 当前编译进去的后端名："webview2" / "wkwebview" / "textbrowser"。 */
 const char *qtWebViewBackend();
 
-/** 该后端是否支持 JavaScript（QTextBrowser 不支持，应用可据此降级提示）。 */
+/** 该后端是否支持 JavaScript（只有 QTextBrowser 不支持）。 */
 bool qtWebViewSupportsJs();
 
-/** 把 url / html / zoom 应用到 webview 控件（后端差异封装在 qt_webview.cc 里）。 */
+/** 把 url / html / zoom 应用到 webview 控件（后端差异封装在两个实现文件里）。 */
 void qtWebViewApplyProp(QWidget *widget, const QString &key, const Variant &value);
+
+/** WKWebView 后端的对应实现，只在 QT_WEBVIEW_WK 下编译进链接（见 qt_webview_wk.mm）。 */
+QWidget *qtCreateWebViewWK(QtWindowBox *box, const QString &id);
+void qtWebViewApplyPropWK(QWidget *widget, const QString &key, const Variant &value);
 
 /** 读取控件当前值，供 qt_window_widget_value() 使用。 */
 Variant qtWidgetValue(QWidget *widget, const QString &type);

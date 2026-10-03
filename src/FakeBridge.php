@@ -293,7 +293,7 @@ namespace {
      *
      * 这是刻意的：它跑在普通 PHP 上、没有 Qt，报 "webview2" 会骗过应用侧的能力判断
      * （比如以为能用 JS）。测试里要验「不支持 JS 时的降级路径」也靠它。
-     * 想模拟 WebView2 可用时，用 test_set_webview_backend() 覆盖。
+     * 想模拟原生后端可用时，用 test_set_webview_backend() 覆盖。
      */
     function qt_webview_backend(): string
     {
@@ -302,7 +302,8 @@ namespace {
 
     function qt_webview_supports_js(): bool
     {
-        return FakeState::$webViewBackend === 'webview2';
+        // 与 cpp-src/qt_webview.cc 的 qtWebViewSupportsJs() 同口径：两个原生后端都支持 JS。
+        return in_array(FakeState::$webViewBackend, ['webview2', 'wkwebview'], true);
     }
 
     // ── 测试辅助（真实桥接没有这些） ──

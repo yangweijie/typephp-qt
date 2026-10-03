@@ -34,6 +34,11 @@ examples/hello/dist/
 /.webview2/
 **/.webview2/
 
+# 上面的 `*.lib`（构建产物规则）会把 vendor 的 import lib 一起吞掉：
+# `examples/hello/project.yml` 与 `qtphp new` 模板都写死链接 `WebView2Loader.dll.lib`，
+# 缺了它新克隆在 Windows 上链接必失败（LNK1181），而 README 声称该文件已 vendor。
+!third_party/**/*.lib
+
 # Editor / OS
 .idea/
 .vscode/
