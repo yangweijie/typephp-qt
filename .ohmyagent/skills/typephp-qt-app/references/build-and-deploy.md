@@ -11,9 +11,12 @@ The package's CLI does all of the below, on all three platforms, including the p
 ```bash
 qtphp doctor            # verify PHP / tpc / Qt / C++ compiler / PHPUnit, and print the resolved tpc + runtime dir
 qtphp build .           # picks the right entry yml per platform; deploys runtime DLLs on Windows
+qtphp build . --nano    # nano mode: php-nano + PHPX are compiled into the artifact — it links NO PHP runtime
 qtphp run . [args…]     # runs the artifact, args pass through; does a dependency self-check first
 qtphp package .         # self-contained bundle + self-check
 ```
+
+`--nano` is the size lever when the client complains about a 25 MB binary: the artifact drops to ≈4.4 MB (Apple Silicon measured, `-O2`) and a packaged `.app` from 83.6 to 64.1 MiB. No extra yml is needed — nano ignores a `php-builder:` section, and the package templates already pin `cxx-std: c++17` (nano rejects `c++20`) plus `optimize: 2`. **Only Apple Silicon has been verified on real hardware**; Windows/Linux pass the flag through untested. What nano cannot shrink is Qt: ICU alone is ~56% of the `.app`.
 
 What follows is the manual route — read it when you are hand-writing the bridge (SKILL.md route 1), when you need to understand what `qtphp` is doing, or when a package build fails and you have to drop a level.
 
@@ -57,6 +60,8 @@ tpc.exe project.windows.yml --job 2 --no-progress
 ```
 
 Expect `Build successful: <name>.exe` in the working directory.
+
+`tpc` optimizes at `-O0` unless the entry yml pins `optimize: 2` — the package's own templates and `examples/hello` do pin it, together with `cxx-std: c++17` (which `--nano` requires).
 
 ### Step 5 — deploy Qt
 
@@ -119,6 +124,7 @@ open "examples/qt-taskboard/dist/TypePHP Taskboard.app"
 - Distributing to other Macs needs a real signing identity and notarization — the ad-hoc signature is for local testing only.
 - **PHP is linked fully statically on macOS**, so unlike Windows there are no PHP/PHPX runtime libraries to copy into the bundle.
 - **`macdeployqt` only copies the platform plugin for the target platform.** A bundle with just `libqcocoa.dylib` aborts (rc=134) if you set `QT_QPA_PLATFORM=offscreen`. To make the packaged artifact headlessly verifiable, copy `libqoffscreen.dylib` into `Contents/PlugIns/platforms/` and rewrite its Qt references to `@executable_path` (about +156 KB). `qtphp package` does this automatically.
+- **Rewrite references in *every* Mach-O, not just the executable.** `macdeployqt` leaves absolute build-machine paths *inside* the frameworks: measured, `QtCore` referenced `/opt/homebrew/opt/icu4c@78/lib/libicu{i18n,uc,data}.78.dylib`, so the bundle's own ICU copies were never loaded and the app died on any Mac without that brew install (`dyld: Library not loaded`, rc=134) — while passing every check run on the build machine. `qtphp package` now walks all bundled Mach-O, rewrites those references to `@executable_path`, and fails `rc=1` if any absolute non-system path survives. A framework's own install name (`otool -D`) is not a load reference; those may stay absolute.
 
 ---
 
@@ -240,7 +246,10 @@ dependency.
 - **macOS**: `package-macos-app.sh` in the TypePHP repo example collects the
   binary, Qt frameworks and plugins, and the PHP/PHPX libraries into a `.app`.
   Apply the same rule: your `assets/` must be copied into
-  `Contents/Resources/` explicitly.
+  `Contents/Resources/` explicitly. And apply the reference rule too: run
+  `otool -L` on **every** Mach-O in the bundle, not just the executable — an
+  absolute path left inside a framework ships a bundle that only launches on
+  the machine that built it.
 - **Linux**: there is no `windeployqt` equivalent; assemble the bundle yourself
   (or use `linuxdeploy`), and copy `assets/` alongside.
 
@@ -282,7 +291,7 @@ echo $app->lastError() === '' ? "selftest passed\n" : "selftest failed\n";
 
 **This is the switch that earns its keep.** The handler-arity trap (`aot-pitfalls.md` #1) is invisible to unit tests and to a smoke run that clicks nothing — it only fires when a control is actually exercised. `--selftest` exercises them all, headlessly, in seconds.
 
-Have the app expose the last error programmatically (`lastError()`) so the check can print *why* a case failed instead of just that it did.
+Have the app expose the last error programmatically (`lastError()`) so the check can print *why* a case failed instead of just that it did — and **exit non-zero when a case fails**. The package's examples and `qtphp new` scaffolds `exit(1)` on failure; a self-check that always returns 0 is decoration, not a gate, because CI reads the exit code.
 
 ### Running the packaged artifact headlessly
 
@@ -294,7 +303,11 @@ env -i QT_QPA_PLATFORM=offscreen PATH=/usr/bin:/bin HOME="$HOME" \
     dist/Hello.app/Contents/MacOS/hello --selftest          # packaged bundle
 ```
 
-`env -i` strips the environment so nothing leaks in from the build machine — the same idea as reducing `PATH` to `C:\Windows\System32` on Windows.
+`env -i` strips the environment — the same idea as reducing `PATH` to `C:\Windows\System32` on Windows. **It does not isolate the filesystem, so it is not a self-containment proof.** A bundle whose frameworks still point at build-machine paths (measured: `QtCore` → Homebrew's ICU) passes `env -i` cleanly and dies at `dyld: Library not loaded` on the next Mac. Trustworthy criteria, in order of convenience:
+
+1. **the package's own scan** — `qtphp package` walks every Mach-O in the bundle and fails `rc=1` on any absolute non-system path;
+2. **hide the dependency** — rename the brew opt symlink (or the DLL's directory) just for the run, then restore it and re-verify the restore;
+3. **a clean machine** — the real thing, when you have one.
 
 ---
 

@@ -26,8 +26,9 @@ qtphp doctor            # check PHP / tpc / Qt / compiler / PHPUnit before anyth
 qtphp new myapp         # scaffold a project that compiles as-is
 cd myapp
 qtphp build .           # tpc compile (+ auto-deploys runtime DLLs on Windows)
+qtphp build . --nano    # nano mode: php-nano + PHPX compiled in, links NO PHP runtime (Apple Silicon verified)
 qtphp run .             # run; args after the path pass straight through
-qtphp package .         # self-contained bundle + self-check
+qtphp package .         # self-contained bundle + self-check (scans every Mach-O, not just the exe)
 ```
 
 ## The shape of a package app
@@ -72,10 +73,11 @@ function main(int $argc, array $argv): void
 - **Give every control you touch an `id`.** Nodes without one get a structural-path id (`_p0.1.2`), which is stable but unreadable; `text('name_input')` needs a real id.
 - **Containers**: `vbox hbox grid form group frame scroll tabs tab stack page split spacer separator`.
 - **Controls**: `label button lineedit textedit spin doublespin slider progress checkbox radio combo list table tree image link`.
-- **Events**: `click change submit toggle select activate tab menu timer tray`. Register with `on($id, $type, $handler)` or `onAny($type, $handler)`.
+- **Embedded web**: `webview` — the backend is picked at compile time per platform: Windows = WebView2 (full Chromium + JS), macOS = the system WKWebView (JS + remote `https://`), anything else = QTextBrowser (HTML subset, **no JS**, remote `url` unsupported). Ask at runtime with `QtApp::webViewBackend()` (`webview2` / `wkwebview` / `textbrowser`) and `webViewSupportsJs()` and degrade instead of failing silently; history is driven by `webViewReload()` / `webViewGoBack()` / `webViewGoForward($id)`.
+- **Events**: `click press release change submit commit toggle select activate itemClick cell expand collapse tab close menu timer tray loaded navigating title`. Register with `on($id, $type, $handler)` or `onAny($type, $handler)` — when both match **both fire** (specific first, then the wildcard), which is why `onAny` is the place for logging and telemetry.
 - **`patch()`** is the imperative escape hatch for hot paths (log streams, progress ticks): `set` props or `call` one of `appendRows / clear / setText / setValue / select / focus`. It is a bypass — the next `render()` re-syncs from the tree, so write long-lived changes back into state.
 
-Full control/property/event tables: the package `README.md`. Multi-window, tray and timers: also there — one `QtApp` is one window, so `run()` only pumps its own; multi-window apps pump each in a `while` loop.
+Full control/property/event tables: the package `README.md`. Multi-window and timers: also there — one `QtApp` is one window, so `run()` only pumps its own; multi-window apps pump each in a `while` loop. The tray is declarative too: `setTray(['icon' => …, 'tooltip' => …, 'visible' => …, 'menu' => […]])`. Activation arrives as an **id-less** `tray` event — catch it with `onAny('tray', …)`, the gesture is in `$event['value']` (`left` / `right` / `double` / `middle`) — and once you pass `menu`, Qt owns the right-click and items fire ordinary `menu` events.
 
 ## Why this route first
 

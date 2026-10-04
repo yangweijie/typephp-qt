@@ -36,6 +36,18 @@
       "prompt": "qtphp build 报错：The PHPX runtime library was not found at: D:\\git\\php\\tpc_v0.9.4_windows_x64\\phpx\\build\\phpx.dll。我什么都没改，上次还好好的。",
       "expected_output": "Explain the two tpc supply routes (aot-pitfalls.md): a self-contained native release package vs the Composer driver that needs a swoole/phpx source tree with built artifacts. The message means the Composer driver was selected and its runtime is not built. Point at `qtphp doctor` (prints resolved tpc + runtime dir) and TPC/TPC_DIR overrides. Should recognize that 'it worked last time' points at environment resolution, not a code regression.",
       "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "我要在 Qt 窗口里内嵌一个网页，Windows 和 macOS 都要能跑 JS，还要能加载远程 https 页面。平台差异怎么处理？",
+      "expected_output": "Package route: WidgetTree::webView(). Must name the three compile-time backends and what each supports — WebView2 on Windows (full Chromium + JS), the system WKWebView on macOS (JS + remote https), QTextBrowser elsewhere (HTML subset, no JS, remote url unsupported) — and branch at runtime on QtApp::webViewBackend() / webViewSupportsJs() to degrade instead of failing silently. Bonus: webViewReload/goBack/goForward for history, loaded/navigating/title events, and that native child views are not captured by --shot pixels.",
+      "files": []
+    },
+    {
+      "id": 8,
+      "prompt": "typephp 编出来的 Qt 程序 25 MB，客户嫌大。有没有办法完全不链接 PHP 运行时，把产物压到几 MB？",
+      "expected_output": "`qtphp build . --nano`: php-nano and PHPX sources are compiled straight into the artifact so it links no PHP runtime at all (Apple Silicon verified: ~4.4 MB artifact vs ~25 MB embed; packaged .app 64.1 vs 83.6 MiB). Should add that the same entry yml works (nano ignores php-builder:, templates pin cxx-std: c++17 + optimize: 2), that only Apple Silicon is verified on real hardware, and that the remaining bulk is Qt + ICU (ICU ~56% of the .app), not PHP — so nano is not a way to shrink Qt.",
+      "files": []
     }
   ]
 }

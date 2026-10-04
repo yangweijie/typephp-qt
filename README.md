@@ -268,7 +268,7 @@ while ($app->isOpen()) {
 
 **控件**：`label` `button` `lineedit` `textedit` `spin` `doublespin` `slider` `progress` `checkbox` `radio` `combo` `list` `table` `tree` `image` `link`
 
-**内嵌网页**：`webview`（Windows 用 WebView2 = 完整 Chromium + JS；其余平台用 QTextBrowser = HTML 子集，无 JS）
+**内嵌网页**：`webview`（后端编译期按平台三选一：Windows = **WebView2**（完整 Chromium + JS）；macOS = 系统 **WKWebView**（JS + 远程 `https://`）；其余平台 = **QTextBrowser**（HTML 子集，无 JS，不支持远程 `url`）。运行时用 `QtApp::webViewBackend()` / `webViewSupportsJs()` 查询并降级）
 
 ## 常用属性
 

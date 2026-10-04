@@ -5,6 +5,12 @@ gives you the Windows notification area, the macOS menu-bar item, and the Linux
 StatusNotifierItem. Writing it once and getting all three is the whole point;
 do not reach for `Shell_NotifyIcon` or platform APIs directly.
 
+**On the `typephp-qt` package route (SKILL.md route 0) you write none of this.**
+`$app->setTray(['icon' => 'assets/icon.png', 'menu' => [...]])` gives you the icon,
+the context menu and the events declaratively — the gesture lands in
+`$event['value']` (`left` / `right` / `double` / `middle`) and menu items fire
+`menu` events. Everything below is the hand-written bridge route.
+
 > **Confidence:** the Windows path here was built and run end-to-end. The macOS
 > and Linux notes are Qt's documented behaviour, not verified on this machine —
 > treat them as "expected, confirm on target".

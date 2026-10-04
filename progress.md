@@ -277,6 +277,25 @@ diff；引用体积/行为前先确认是干净态还是脏态，尺子取「尺
 
 收尾：brew symlink 已还原复核；`/tmp/hello-icu-fixed.app` 对照副本已清理；项目记忆已更新为「已修」。
 
+### 追加 9：更新 `typephp-qt-app` 技能（Session 28，Phase 35）
+
+技能上次同步停在 756df8a（10-03 10:50），其后 4 个提交（WebView2 vendor + W1–W5 真机、F31 资源路径、
+F36–F39 的 nano 接入 / `-O2` 固化 / 打包链验收 / 自包含修复）都没进技能。本轮补齐：
+
+- **SKILL.md** — CLI 加 `--nano`；控件补「Embedded web」三后端条目；事件 10 → 21 个并写明
+  `on` + `onAny` 双触发；托盘改成 `setTray([...'menu'=>…])` 声明式口径（手势在 `$event['value']`）。
+- **build-and-deploy.md** — nano 段（4.4 MB / `.app` 64.1 MiB / 同一份 yml / 只 Apple Silicon 实测 /
+  ICU 才是大头）；F39 的「改写**每个** Mach-O」bullet（含 install name ≠ 加载引用）；
+  **纠正 `env -i` 那句假判据**（清环境变量不清文件系统 ⇒ 不是自包含证明），给出三档可信判据；
+  selftest 失败必须非零退出；`optimize: 2`（tpc 默认 `-O0`）。
+- **system-tray.md** — 顶部加包路线交叉引用（Route 0 不用手写这些）。
+- **evals.json** — +2 条（webview 三后端 / nano 体积）⇒ 共 8 条，`json_decode` 校验通过。
+- 顺带更正 **README**：webview 行仍写两后端、缺 WKWebView —— 站点 `widgets/webview.md` 早是三口径，
+  只有 README 漏网。
+
+教训 23：**技能里「本机全绿」式的验收话术最容易烂掉** —— `env -i 什么都漏不进来` 这句在被 F39 证伪前
+已经在技能里写了一段时间。文档同步时要把「这条判据能测出什么、测不出什么」写清楚，而不是只写「通过了」。
+
 
 ## Session 26 — 2026-10-03（补交 .lib + WebView2 分支 W1–W5 真机验证）
 
