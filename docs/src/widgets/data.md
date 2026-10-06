@@ -32,6 +32,7 @@ WidgetTree::table(array $columns, array $rows, array $props = [])
 | `columns` | Header text list |
 | `rows` | Row data; each row is a list of cells |
 | `row_ids` | Row id list (**strongly recommended**) |
+| `row_colors` | Per-row background color (`''` = default, no fill); e.g. `['#f8d7da', '', '#d4edda']` |
 | `current` | Current selection (**a row id**) |
 | `headers_visible` | Show the header row |
 | `multi` | Allow multi-select |
@@ -70,6 +71,19 @@ $app->on('tbl', 'select', function (array $event) use ($state) {
     $state->selectedId = (string) $event['value'];
 });
 ```
+
+With `select_mode` set to `multi` (or `extended`), the `select` payload also carries the **whole
+selection**, so you can act on more than the row under the cursor:
+
+| Field | Meaning |
+|---|---|
+| `rows` | Selected **row indexes**, comma-joined (e.g. `"0,2,3"`) |
+| `row_ids` | The corresponding **row ids**, comma-joined |
+| `count` | Number of selected rows |
+
+Comma-joined strings rather than arrays: the bridge `Array` only reliably carries scalars, so the
+PHP side does `explode(',', $event['row_ids'])`. In single-select mode `rows` is always one entry,
+so this is backwards compatible.
 
 ## `tree` — tree
 

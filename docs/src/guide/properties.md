@@ -65,6 +65,7 @@ WidgetTree::label('Hello', ['id' => 'greeting', 'style' => 'color:red', 'align' 
 | `columns` | table | Header text list |
 | `rows` | table | Row data (each row is a list of cells) |
 | `row_ids` | table | Row id list |
+| `row_colors` | table | Per-row background color (`''` = default, no fill); e.g. `['#f8d7da', '', '#d4edda']` |
 | `nodes` | tree | Tree nodes |
 | `headers` | tree | Column headers |
 | `headers_visible` | table, tree | Show the header row |

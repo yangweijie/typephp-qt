@@ -4,6 +4,8 @@
 // 每个信号处理都只调 box->enqueue()，把"用户干了什么"交给 PHP 决定。
 
 #include "qt_common.h"
+#include <QColor>
+#include <QBrush>
 
 #include <QTextOption>
 #include <QTreeWidgetItemIterator>
@@ -344,6 +346,24 @@ QWidget *qtCreateWidget(QtWindowBox *box, const QString &type, const Variant &no
             if (!first) return;
             Array payload;
             payload.set("row", Variant(static_cast<Int>(row)));
+            // ── 选区上报 ──
+            // 开了 select_mode=multi/extended 之后，只报 currentRow() 的话上层
+            // 拿不到「选中了哪几行」，批量填充之类的操作就无从下手。
+            // 这里按行序扫一遍被选中的行（selectionBehavior 是 SelectRows，
+            // 所以判第 0 列是否被选中即可），把行号与行 id 一起带上去。
+            // 用逗号串而不是嵌套数组：桥接的 Array 只稳定承载标量，
+            // 上层 explode(',', …) 还原。
+            QStringList rows;
+            QStringList rowIds;
+            for (int r = 0; r < table->rowCount(); ++r) {
+                QTableWidgetItem *cell = table->item(r, 0);
+                if (!cell || !cell->isSelected()) continue;
+                rows << QString::number(r);
+                rowIds << cell->data(Qt::UserRole).toString();
+            }
+            payload.set("rows", toPhpString(rows.join(QLatin1Char(','))));
+            payload.set("row_ids", toPhpString(rowIds.join(QLatin1Char(','))));
+            payload.set("count", Variant(static_cast<Int>(rows.size())));
             box->enqueue(QStringLiteral("select"), id, first->data(Qt::UserRole).toString(), payload);
         });
         QObject::connect(table, &QTableWidget::itemDoubleClicked, ctx, [box, id](QTableWidgetItem *item) {
@@ -398,6 +418,7 @@ void qtRebuildTable(QtWindowBox *box, QTableWidget *table, const Variant &node) 
     const QStringList columns = toStringList(qtField(node, "columns"));
     const Variant rowsValue = qtField(node, "rows");
     const QStringList rowIds = toStringList(qtField(node, "row_ids"));
+    const QStringList rowColors = toStringList(qtField(node, "row_colors"));
 
     QSignalBlocker blocker(table);
     if (!columns.isEmpty()) {
@@ -437,6 +458,10 @@ void qtRebuildTable(QtWindowBox *box, QTableWidget *table, const Variant &node) 
             r < static_cast<size_t>(rowIds.size()) ? rowIds.at(static_cast<int>(r)) : QString::number(r);
         for (size_t c = 0; c < cells.count(); ++c) {
             auto *item = new QTableWidgetItem(toQString(cells.get(c)));
+            // ── 行背景色 ──
+            if (r < static_cast<size_t>(rowColors.size()) && !rowColors.at(static_cast<int>(r)).isEmpty()) {
+                item->setBackground(QBrush(QColor(rowColors.at(static_cast<int>(r)))));
+            }
             if (c == 0) item->setData(Qt::UserRole, rowId);
             table->setItem(static_cast<int>(r), static_cast<int>(c), item);
         }

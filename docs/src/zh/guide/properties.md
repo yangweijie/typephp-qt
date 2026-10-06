@@ -65,6 +65,7 @@ WidgetTree::label('你好', ['id' => 'greeting', 'style' => 'color:red', 'align'
 | `columns` | table | 表头文本列表 |
 | `rows` | table | 行数据（每行是单元格列表） |
 | `row_ids` | table | 行 id 列表 |
+| `row_colors` | table | 每行背景色（`''` = 默认不著色），如 `['#f8d7da', '', '#d4edda']` |
 | `nodes` | tree | 树节点 |
 | `headers` | tree | 列标题 |
 | `headers_visible` | table, tree | 是否显示表头 |
