@@ -288,6 +288,25 @@ function tpcCommand(string $tpc): string
 }
 
 /**
+ * composer 装的 tpc.php（能看见 vendor 里的 swoole/php-nano）。
+ *
+ * 原生 tpc.exe 的 TYPEPHP_ROOT_PATH 是编译时写死的（CI 上常是 D:\a\typephp\typephp），
+ * InstalledVersions 找不到本项目 vendor 里的 php-nano。`--nano` 必须走这条。
+ */
+function findComposerTpc(): ?string
+{
+    foreach ([
+        $GLOBALS['rootDir'] . '/vendor/bin/tpc.php',
+        $GLOBALS['rootDir'] . '/vendor/swoole/typephp/bin/tpc.php',
+    ] as $path) {
+        if (is_file($path)) {
+            return $path;
+        }
+    }
+    return null;
+}
+
+/**
  * Debian 系的多架构三元组（x86_64-linux-gnu / aarch64-linux-gnu），非这种布局返回 null。
  * 判定依据是 Qt6 的 CMake 配置目录存在，不是只猜 uname —— 发行版把 Qt 装在哪都能否决。
  */
@@ -448,6 +467,7 @@ sources:
   - {$pkgDir}/cpp-src/qt_bridge.cc
   - {$pkgDir}/cpp-src/qt_widgets.cc
   - {$pkgDir}/cpp-src/qt_webview.cc
+  - {$pkgDir}/compat/msvc/php_nano_win_stubs.c
 
 build-dir: build
 
@@ -992,7 +1012,8 @@ function cmdBuild(string $path, array $flags = []): int
 
     info('编译项目: ' . $path . '（入口 ' . basename($projectYml) . '）');
 
-    $tpc = findTpc();
+    // nano 必须用 composer tpc.php：原生 tpc.exe 看不到本项目 vendor 的 php-nano。
+    $tpc = $nano ? (findComposerTpc() ?? findTpc()) : findTpc();
     if (!$tpc) {
         error('未找到 tpc');
         return 1;
@@ -1009,7 +1030,16 @@ function cmdBuild(string $path, array $flags = []): int
         // yml 已固化 c++17，这里保留 CLI 覆盖作兜底：yml 仍写 c++20 的老项目走 nano 不至于直接死。
         // `php-builder:` 段在 nano 下由 tpc 自己忽略（CompilerBase::isPhpBuilderBuild()）。
         $tpcCmd .= ' --nano --cxx-std c++17';
+        if (PHP_OS_FAMILY === 'Windows') {
+            // php-nano 的 php_compat.h 在 Windows 走 config.w32.h，而 HAVE_SLOW_HASH3
+            // 只写在 php_config.h。不设这个宏，hash_sha3.c 会去 include KeccakHash.h，
+            // 但 typephp-native.include-dirs 没有 sha3/generic*lc，编译直接死。
+            $tpcCmd .= ' -DHAVE_SLOW_HASH3=1';
+            // 不能给 tpc 传 -I：applyCommandLineArguments 会整表覆盖 userIncludePaths，
+            // YAML 里的 Qt include 会被冲掉。MSVC 用 INCLUDE 找 <stdalign.h> 即可。
+        }
         info('nano 模式：不链接 PHP 运行时（产物内不链 libphp/phpx）');
+        info("tpc: $tpc");
     }
 
     // Homebrew 的 include/lib 得靠环境变量递给 clang：phpx 的 sapi-static/CMakeLists.txt
@@ -1024,18 +1054,30 @@ function cmdBuild(string $path, array $flags = []): int
         }
     }
 
+    $msvcStdalign = PHP_OS_FAMILY === 'Windows' && $nano
+        ? $GLOBALS['rootDir'] . DIRECTORY_SEPARATOR . 'compat' . DIRECTORY_SEPARATOR . 'msvc'
+        : null;
+
     if ($vcvars && !msvcEnvironmentReady()) {
         $bat = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'qtphp-build-' . getmypid() . '.bat';
         $lines = [
             '@echo off',
             'call "' . $vcvars . '" >nul 2>&1',
-            'cd /d "' . (realpath($path) ?: $path) . '"',
-            $tpcCmd,
         ];
+        if ($msvcStdalign) {
+            // vcvars 会重写 INCLUDE，必须接在 call 后面。
+            $lines[] = 'set "INCLUDE=' . $msvcStdalign . ';%INCLUDE%"';
+        }
+        $lines[] = 'cd /d "' . (realpath($path) ?: $path) . '"';
+        $lines[] = $tpcCmd;
         file_put_contents($bat, implode("\r\n", $lines) . "\r\n");
         passthru('cmd /c "' . $bat . '" 2>&1', $exitCode);
         @unlink($bat);
     } else {
+        if ($msvcStdalign) {
+            $cur = getenv('INCLUDE') ?: '';
+            putenv('INCLUDE=' . $msvcStdalign . ($cur !== '' ? ';' . $cur : ''));
+        }
         passthru($tpcCmd . ' 2>&1', $exitCode);
     }
 

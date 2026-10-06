@@ -18,6 +18,8 @@ sources:
   - ../../cpp-src/qt_bridge.cc
   - ../../cpp-src/qt_widgets.cc
   - ../../cpp-src/qt_webview.cc
+  # Windows nano：php-nano 缺 crc32 SIMD / Fiber CE / MSVC inline seed256 的目标文件
+  - ../../compat/msvc/php_nano_win_stubs.c
 
 build-dir: build
 

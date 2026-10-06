@@ -2125,3 +2125,71 @@ brew 的 ICU，bundle 内拷贝全程没被加载（死重）。**未装 brew ic
 **顺带回答案「不支持 webview 会不会小」**：不会。mac 上 webview 走系统 WebKit.framework/AppKit
 （不进 bundle），关掉 WKWebView 后端只省 `qt_webview_wk.mm.o`（60,056 B）；ICU 是 QtCore 的固有
 依赖，与 webview 无关。
+
+## F40. Windows 上的 nano：缺的三个符号、以及「这份 stub 在非 nano 构建里必须编成空 TU」（Session 29）
+
+### §1 链接期缺的三个符号（全实测）
+
+`qtphp build examples/hello --nano` 在 Windows 上首建，264 个 TU 全过，链接期缺三个符号：
+
+| 符号 | 为什么没人提供 |
+|---|---|
+| `crc32_x86_simd_update` | `ext/standard/crc32_x86.c` **不在 php-nano 的 composer 源码表**里；而 `ZEND_INTRIN_SSE4_2_PCLMUL_RESOLVER` 在 Win32 上恒为真，于是 `crc32.c` 的那个调用点没人兜 |
+| `zend_ce_fiber` | `Zend/zend_fibers.c` 不在源码表里，但 `ext/reflection/php_reflection.c` 引用它 |
+| `php_random_xoshiro256starstar_seed256` | 原文是 `PHPAPI inline`（`ext/random/engine_xoshiro256starstar.c`），**MSVC 的 C11 `inline` 语义不外发符号**，同 TU 的调用者也没生成外部定义 |
+
+补法：`compat/msvc/php_nano_win_stubs.c` —— CRC32 SIMD 回落标量循环（返回 0 让调用方走表驱动路径）、
+`zend_ce_fiber` 给个 BSS 符号、seed256 按同语义写四行。**注意 `composer.json` 里本来就有 `HAVE_SLOW_HASH3=1`**，
+说明上游早知道 SHA-3 要回落，但 CRC32 这条没走同一机制。
+
+### §2 这份 stub 必须在非 nano 构建里编成空编译单元（这是用户报的那个 C2491）
+
+`compat/msvc/php_nano_win_stubs.c` 是挂在 `sources` 里的，**非 nano 构建也会编到它**，而那时：
+
+- 头文件来自官方 SDK（`...\tpc_v0.9.4_windows_x64\SDK\include`），编译行里没有 `PHP_NANO`；
+- 于是 `PHPAPI`（`main/php.h:64`）与 `ZEND_API`（`Zend/zend_config.w32.h:49`）展开成 `__declspec(dllimport)`；
+- 在 `.c` 里定义 `dllimport` 的函数 ⇒ **`error C2491`**；就算绕过，这些符号本就由 libphp/phpx 提供，
+  重复定义还会撞符号。
+
+分叉依据：`PHP_NANO` 由 php-nano 的 `main/php_config.h:7` 定义（**头文件宏，不是编译行开关**），
+且 nano 下 `PHPAPI`/`ZEND_API` 都是空（`main/php.h:60`、`Zend/zend_config.w32.h:44`）。
+所以整份实现包在 `#if defined(PHP_NANO)` 里最省事。
+
+**为什么不用 YAML 的 `if:`**：`ProjectYamlLoader::evaluateCondition()` 只实现 `PHP_VERSION*` 与 `PHP_OS_FAMILY`
+两类比较（`ProjectYamlLoader.php:131-199`），**没有「nano 模式」这个变量**，表达不出来。
+
+**负向复验**（证明空 TU 真生效，不是「碰巧能编」）：用官方 SDK 头 + 同样的 flags 单编这一份 `.c`：
+
+```
+cl /c /TC compat/msvc/php_nano_win_stubs.c /I <SDK>\include … /DZEND_WIN32 /DPHP_WIN32 /DZTS /O2 /MD
+⇒ CL_EXIT=0；dumpbin /SYMBOLS 的非 UNDEF External 只剩 5 个 ZEND_VM_KIND_* 字符串字面量
+```
+
+即 `.obj` 里**没有** `zend_ce_fiber` / `seed256` / `crc32_x86_simd_update` —— 正是想要的空壳。
+
+### §3 Windows nano 的验收数字（与 mac 对照）
+
+| 项 | macOS arm64（30/32/33） | Windows x64（本轮） |
+|---|---|---|
+| TU 数 | 250 | 264（多出 `qt_webview_wk.mm` 换成 WebView2 分支的差 + stub 1 个） |
+| 产物 | 4,370,328 B（干净首建，`-O2`） | **3,790,848 B** |
+| 不链 PHP 的证据 | `otool -L` 无 libphp/phpx | **PE import 表**无 php/phpx（只有 Qt 三件套 + WebView2Loader + MSVC CRT + 系统 DLL） |
+| `--selftest` / `--difftest` | 25/25 / 20/20 | **25/25 / 20/20** |
+| `--shot` | cocoa `2728fb1a…` / offscreen `6c4832a6…` | 760×720 出图，读图确认；标注 `backend=webview2，js=支持` |
+
+### §4 自包含验收怎么做才算数（呼应教训 22 / F39）
+
+`build/` 里躺着 6 个非 nano 构建留下的 PHP 运行时 DLL（`phpx.dll`、`php8ts.dll`、`gmp-10.dll`、
+`mpfr-6.dll`、`libmpdec-4.0.1.dll`、`libmpdec++-4.0.1.dll`）。它们**不在 import 表里**，但只要文件还在 exe 目录，
+「产物不依赖 PHP 运行时」就只是**静态读数**。把 6 个文件移出 DLL 搜索路径（`build\.stale\`，DLL 搜索不进子目录）
+后 `--selftest` 25/25、`--difftest` 20/20 全过；再把 `PATH` 砍到只剩 `C:\Windows\system32;C:\Windows`
+（连 Qt bin 兜底也断掉）仍 passed ⇒ Qt/CRT/WebView2 全部从 exe 自身目录解析。
+
+**注意 Windows 的 DLL 搜索顺序**是「exe 所在目录 → 系统目录 → PATH」，所以「藏进同级子目录」就行，
+不需要删文件 —— 可逆是附赠的。
+
+### §5 顺带发现的陈旧断言
+
+`progress.md` 的「下一步」里还挂着两条本轮已作废的：① `--selftest`/`--difftest` 失败仍 rc=0（Phase 31 已修）；
+② WebView2 分支「本机零运行时证据」（Session 26 的 W1–W5 已在 Windows 真机验过，本轮出图又直证 `backend=webview2`）。
+**规划文件里的「未验」清单本身会烂** —— 它是按当时时点写的，改完不回填就会一直挂着，这也是本轮顺手清它的原因。

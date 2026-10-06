@@ -1,5 +1,53 @@
 # Progress Log — typephp-qt
 
+## Session 29 — 2026-10-05（Windows：把 `--nano` 真正编出来 + 自包含硬证据）
+
+### 任务
+> 「继续」——接 Session 28 的 nano 收尾：此前 nano 只有 Apple Silicon 实测，Windows 侧未验（Phase 32/33 的
+> 「未验」清单里都挂着）。本轮在 Windows 上把它编出来、跑起来，并把「不依赖 PHP 运行时」从静态读数变成硬证据。
+
+### 交付结果（全部 Windows 本机实测）
+
+- **新增 `compat/msvc/php_nano_win_stubs.c`**（F40 §1）：补 php-nano 在 Windows 链接期缺的三个符号 ——
+  `crc32_x86_simd_update`（`crc32_x86.c` 不在 composer 源码表，而 Win32 下 `ZEND_INTRIN_SSE4_2_PCLMUL_RESOLVER` 恒真）、
+  `zend_ce_fiber`（`zend_fibers.c` 不在源码表，`php_reflection.c` 却引用）、
+  `php_random_xoshiro256starstar_seed256`（原文 `PHPAPI inline`，MSVC 不外发 C11 inline 符号）。
+- **整份实现包在 `#if defined(PHP_NANO)` 里**（F40 §2）：这份文件挂在 `sources`，非 nano 构建也会编到它，
+  那时头文件来自官方 SDK、`PHPAPI`/`ZEND_API` = `__declspec(dllimport)` ⇒ 定义符号直接 `C2491`，
+  且这些符号本就由 libphp/phpx 提供。分叉依据是 php-nano `main/php_config.h` 的 `PHP_NANO`（头文件宏，不是编译行开关）；
+  没用 YAML `if:` 是因为 `evaluateCondition()` 只认 `PHP_VERSION*`/`PHP_OS_FAMILY`，表达不了「nano 模式」。
+- **接线**：`examples/hello/project.yml` + `bin/qtphp` 的 `qtphp new` 模板，`sources` 各加一行。
+
+### 验收
+
+| 检查 | 结果 |
+|---|---|
+| `php bin/qtphp build examples/hello --nano` | 264 TU + 链接 rc=0（`Auditing Nano runtime dependencies` 通过） |
+| 产物 | **3,790,848 B**（mac 干净首建 4,370,328 B，同为 `-O2`） |
+| PE import 表 | 只有 `Qt6Core/Gui/Widgets` + `WebView2Loader` + MSVC CRT + 系统 DLL —— **无 php/phpx** |
+| `--selftest` | **25/25 passed** |
+| `--difftest` | **20/20 passed** |
+| `--shot` | 760×720 出图，读图确认整树（菜单/分组/表格/树/webview 分组），标注 `backend=webview2，js=支持` |
+| **自包含（藏依赖）** | 6 个 PHP 运行时残留 DLL 挪进 `build\.stale\`（DLL 搜索不进子目录）⇒ 两测仍全过 |
+| **自包含（断 PATH）** | `PATH` 只留 `C:\Windows\system32;C:\Windows` ⇒ 仍 passed（Qt bin 兜底也断了） |
+| **负向互证（非 nano）** | 官方 SDK 头单编同一份 `.c` ⇒ `CL_EXIT=0`，`.obj` 无那三个符号 ⇒ 空 TU 真生效 |
+
+### 顺手清掉的两条陈旧断言
+
+本文件自己的「下一步」里挂着两条本轮已作废项（F40 §5）：`--selftest`/`--difftest` 失败仍 rc=0（Phase 31 已修）、
+WebView2 分支「本机零运行时证据」（Session 26 已真机验）。已就地改掉 —— **「未验」清单是按当时时点写的，
+改完不回填就会一直挂着。**
+
+### 未验 / 遗留
+
+- Linux 侧 nano（容器 `tgl` 还在，重跑要先按 F20 起宿主代理并核对网关 IP）。
+- `qtphp doctor` 仍报 native `tpc.exe`：`tpcHasRuntime()` 对 `.php` 入口返回 false 造成的**显示**问题，
+  不影响实际选路（本轮 nano 构建实际走的是 `vendor/bin/tpc.php`）。未改。
+
+教训 24：**「没链 PHP 运行时」不能靠「命令行里没写 `-lphp`」来断言，要看 PE import 表；而自包含更不能
+只测一遍成功 —— 必须把运行时 DLL 从搜索路径上挪走再跑（Windows 上「挪进同级子目录」就够，且可逆）。**
+（呼应教训 22）
+
 ## Session 27 — 2026-10-03（无头验收开关按退出码报失败）
 
 ### 任务
@@ -1456,9 +1504,9 @@ TypePHP 编译器仓库的 `examples/qt-taskboard`。它**完全不知道**我�
 | **macOS 端到端（Session 25 复验，含 webview）** | ✅ `build`（11 TU，Mach-O arm64 25.5 MB）→ `--selftest` **25/25** → `--difftest` **20/20** → cocoa `--shot` 760×720 PNG（读图确认 webview 分组渲染）→ `test` **123/201** → `lint` **26 个函数**契约一致，全部真 rc=0 |
 | **`--shot` 可复现（24.5，F28 §3）** | ✅ 修好两层噪声（应用 1 秒心跳文案 + 输入框焦点瞬态），终验全清重建：cocoa 8/8 → `a70cd7ae05b6…`、offscreen 8/8 → `4b777e2ed74e…`，`--selftest` 25/25、`--difftest` 20/20、`phpunit` 123/123 同时全绿 ⇒ **sha256 可按平台当 CI 基线** |
 | **`webview` 控件（Phase 24，mac 侧）** | ✅ mac 入口 `project.macos.yml` **零改动**即落到 QTextBrowser 后端（`sources` 继承 + `cxx-flags` 整体替换）；`html` 与 `url`（本地文件，相对 exe 目录）两条分支都真机出图，相对 `<img>` 解析正确。补验三条全部收口（F27）：`link` 接线 ✅（含鉴别力反证）、`zoom` ✅ 确认静默忽略（PNG sha256 相同）、**远程 `url` ❌ Qt 6 `QTextBrowser` 不支持**（追问后重做到对象级：`QUrl` 解析正常、警告同步出现、6 秒真事件循环恒 0 字符、同进程 QNAM 可 200/577、`otool -L QtWidgets` 不含 QtNetwork；scheme 矩阵另查出 `data:` 也不支持，**只有 `file` 可用**），并据此把 `docs/src/zh/widgets/webview.md:44` 的过度承诺范围确定下来 |
-| **WebView2 后端（`QT_WEBVIEW2` 分支）** | ⚠️ **本机零运行时证据**（无 Windows 目标：VM/ssh/wine 皆无、Apple Container 只跑 Linux、启动卷 3.5 Gi 使交叉工具链不可行）。只交静态审查 W1–W5（F27 第 4 节）。附带抓出并修好 **W0**：`.gitignore` 的 `*.lib` 吞掉 vendor 的 `WebView2Loader.dll.lib` ⇒ 新克隆 Windows 链接必报 `LNK1181`；规则已加 `!third_party/**/*.lib` 并验证，**那 3.5 KB 的 `.lib` 需从 Windows 机器补交** |
+| **WebView2 后端（`QT_WEBVIEW2` 分支）** | ✅ **已在 Windows 真机验（Session 26 的 W1–W5 + Session 29 出图直证）**：Session 26 拿到 Windows 环境后 W1–W5 逐条实测并修掉确认缺陷；Session 29 的 nano `--shot` 读图标注 `backend=webview2，js=支持`。此前那句「本机零运行时证据」是只有 macOS 单机时的描述（无 Windows 目标：VM/ssh/wine 皆无、Apple Container 只跑 Linux、启动卷 3.5 Gi 使交叉工具链不可行）。附带抓出并修好 **W0**：`.gitignore` 的 `*.lib` 吞掉 vendor 的 `WebView2Loader.dll.lib` ⇒ 新克隆 Windows 链接必报 `LNK1181`；规则已加 `!third_party/**/*.lib` 并验证，**那 3.5 KB 的 `.lib` 需从 Windows 机器补交** |
 | **WKWebView 第三后端（`.mm`，用户选定路线）** | 🟡 **第 ① 步 spike ✅**（24.7 / F29 §5）：合成、缩放跟随、`evaluateJavaScript` 三条实测通过；同时量出**代价** —— 原生子 view 不进 `QWidget::grab()`，换默认后端后 mac `--shot` 帧里 webview 区域变空洞、`a70cd7ae05b6…` 必改。第 ②–④ 步（后端实现 / `bin/qtphp` 认 `.mm` / 优先级与文档）**未开工** |
-| Windows 端到端（Session 14 复验） | ✅ `build` → `--selftest` 14/14 → `--shot` 21KB PNG（读图确认）→ `test` 112/183 → `lint` 契约一致；`doctor` 6 项全 OK |
+| Windows 端到端 | ✅ **Session 29 复验（含 nano）**：nano `build` 264 TU rc=0、产物 **3,790,848 B**、PE import 表无 php/phpx；`--selftest` **25/25**、`--difftest` **20/20**、`--shot` 760×720 出图（读图确认，`backend=webview2`）；把 6 个残留 PHP DLL 挪出搜索路径、并断掉 PATH 里的 Qt bin 后仍全过（F40 §4）。embed 路线 Session 14 时点为 `--selftest` 14/14 → `--shot` 21KB PNG → `test` 112/183 → `lint` 契约一致、`doctor` 6 项全 OK |
 | tpc 供给路线解析（Session 14） | ✅ 改按运行时体检选路，不再硬编码路径（F24）；带运行时的原生包不再被 composer 驱动抢占 |
 | Phase 10（macOS 原生编译路线） | ✅ done：`qtphp build examples/hello` 在 mac 上产出真实 Mach-O arm64 可执行文件，`--selftest` 10/10、`--shot` 出图 |
 | Phase 11（macOS 运行/打包/脚手架） | ✅ done：11.1–11.6 全绿，见下三行 |
@@ -1521,14 +1569,18 @@ task_plan.md 的 macOS 环境段同步：私有 embed 运行时从「缺」改�
   （第二层只在父目录名为 `Contents` 时启用），打包产物托盘图标恢复；负控制（改名 `Resources/assets`）能按需复现警告（F31 §3）
 - **打包验收缺一条自动化判据**：资源缺失只体现在 stderr 的 `qWarning`，而 `--shot` 哈希覆盖不到（托盘不进 `grab()`）
   ⇒ 候选做法：`package` 自检里跑一次产物并断言 stderr 无 `could not be loaded`
-- **Windows / Linux 在新代码上复验**：断言集从 14 涨到 25（Phase 20/21）、单测 112 → 123、桥接函数
-  24 → 26、示例加了 `webview` 分组（窗口高 560 → 720）。两侧都还停在 Session 14/13 的时点，
-  Linux 侧容器 `tgl` 留着，重跑要先按 F20 起宿主代理并核对网关 IP
+- **Windows 在新代码上复验** ✅ **已完成（Session 29）**：nano 路线 264 TU rc=0、`--selftest` **25/25**、
+  `--difftest` **20/20**、`--shot` 出图读图确认、自包含三项验证全过（F40）——断言集涨到 25、示例加 `webview` 分组
+  这些变动在 Windows 上不再是悬空项。**Linux 侧仍停在 Session 13 的时点**，容器 `tgl` 留着，
+  重跑要先按 F20 起宿主代理并核对网关 IP
 - Linux 产物的**跨发行版**验证：现在只有 Debian 12 → Debian 12，「glibc 家族留系统 + 其余全搬」在
   Ubuntu 24.04 / Fedora 上成不成还没测；`xcb` 插件也只在**没有 X server** 的容器里验过依赖闭包，真实桌面未验
 - Windows 的 `vendorWindowsOffscreenPlugin()` 待有 Windows 环境时实测（12.5 写了但未跑过）
 - `FakeBridge::qt_fake_default_value()` 对 `table`/`tree`/`list`/`combo` 的返回值形态与真实桥接不一致（F13 尾部）
-- `--selftest`/`--difftest` 失败时退出码仍是 0，CI 里得靠 grep 判定
+- ~~`--selftest`/`--difftest` 失败时退出码仍是 0，CI 里得靠 grep 判定~~ ✅ **已修（Session 27 / Phase 31）**：
+  三处开关失败一律 `exit(1)`，`--shot` 也打印 `snapshot failed: <path>`（F34）
+- `qtphp doctor` 的 tpc 一行在 nano 场景下会误导：`tpcHasRuntime()` 对 `.php` 入口返回 false，`doctor`
+  于是报 native `tpc.exe`，而实际选路走的是 `vendor/bin/tpc.php`（Session 29 构建日志直证）。**只是显示问题**，未改
 - `call` 的方法表还可以长：`insertRow`/`removeRow`/`appendText`（日志流）目前都只能用整表重建绕；
   W5 那三个 `reload`/`goBack`/`goForward` 也该接进同一张表（或删掉）
 
