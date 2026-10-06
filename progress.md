@@ -1,5 +1,56 @@
 # Progress Log — typephp-qt
 
+## Session 31 — 2026-10-06（Windows：合并 `origin/main` 的撞号消解 + 追回两个从未入库的 nano 资产）
+
+### 任务
+
+`git merge origin/main` 在 `findings.md` / `task_plan.md` 上冲突：mac 侧（Session 29→本轮定名
+Session 30）已发布 F40–F43 与行 36，本地 Windows nano 那条写在同一位置、编号是 F40 与行 36。
+
+### 冲突消解（规则：已发布的编号不动，本地让号）
+
+- findings：nano 条目 F40 → **F44**，追加在 F43 之后；task_plan 行 36 → **37**，分解段
+  `Phase 36` → **Phase 37**（37.1–37.7）。
+- 悬空引用回填：`task_plan.md` Errors 表两处 `F40 §1/§2` → `F44 §1/§2`；`progress.md` 五处同理。
+- **会话撞号**：mac 那段原被追加在 `progress.md` 末尾（违反本文档「新 session 置顶」），
+  移到顶部并定名 **Session 30**，其 F40–F43 标题同步标 Session 30。
+- **教训撞号**：mac 侧把「`$rootDir` ≠ 消费方项目根」编成教训 22，与既有 22（自包含要藏依赖）撞
+  → 改 **25**；现 20–25 连续唯一（脚本校：F 号无悬空引用、教训号无重复定义）。
+- 校验方式：对 base/ours/theirs 三 stage 做「两侧新增行是否都还在工作区」的逐行比对，
+  结果只有被有意重编号的那两行不同 ⇒ 无内容丢失。
+
+### 合并后 build 炸出的真问题（F45）
+
+`qtphp build --nano` 只在 `hash_xxhash.c` 一个 TU 上 `C1083: 无法打开 stdalign.h`，顺藤查出
+**`compat/msvc/` 的两个文件从未入库**（空目录、`git ls-files compat/` 为空、HEAD/MERGE_HEAD 都没有、
+`check-ignore` 无命中），而引用它们的 `project.yml` / `qtphp new` 模板 / `$msvcStdalign` INCLUDE
+前置分支三处早已提交。按 F44 文档重建 `php_nano_win_stubs.c`，并补回 `stdalign.h`
+（MSVC `/std:c11` 定义 `__STDC_VERSION__` 却不自带该头）。
+
+### 验收（全 Windows 本机实测，非引用旧结论）
+
+| 项 | 结果 |
+|---|---|
+| `qtphp build examples/hello --nano` | ✅ 264/264 TU + 链接 rc=0，产物 **3,795,456 B** |
+| PE import 表 | ✅ 无 php/phpx（Qt 三件套 + WebView2Loader + MSVC CRT + 系统 DLL），`grep -c php` = 0 |
+| `--selftest` / `--difftest` | ✅ 25/25 passed rc=0 / 20/20 passed rc=0，且 6 个 PHP DLL 仍在 `build/.stale/`（依赖藏着测） |
+| 重建 stub 的符号形态 | ✅ `dumpbin /SYMBOLS`：两函数 External 定义 + `zend_ce_fiber` 为 `.bss` 暂定定义 |
+| 非 nano 负向互证 | ✅ 不带 `--nano` 重编 rc=0，产物确实 import `php8ts.dll`+`phpx.dll` ⇒ 空 TU 生效，无 `C2491`、无撞符号 |
+
+**与 F44 的差异**：产物 3,790,848 B → 3,795,456 B（**+4,608 B，未归因**；重建实现与原文件不逐字节
+等价，教训 21 又注定跨轮次二进制不可 diff）。已在 F44 顶部就地标注。
+
+### 教训
+
+教训 26：**「编译过」不等于「入库过」** —— 本机 build 成功可能只是被缓存和未跟踪文件兜着；
+新增构建资产要与引用它的 yml/CLI 同一次提交，判据是 `git ls-files <新目录>` 非空或干净克隆重跑。
+
+### 新增 findings
+
+- F45 Session 29 的两个 Windows nano 构建资产从未入库
+
+---
+
 ## Session 30 — 2026-10-06（macOS：CLI 项目根/包根混淆 + tabs/stack `current` 首帧 + 表格多行行高）
 
 ### 工作内容

@@ -2208,6 +2208,9 @@ int given`（因为 map 的 key 是 int，`tab()` 的 `$title` 是 string）。
 
 ## F44. Windows 上的 nano：缺的三个符号、以及「这份 stub 在非 nano 构建里必须编成空 TU」（Session 29）
 
+> **Session 31 校正**：本节所述的两个 `compat/msvc/` 资产当时只写了文档、从未 `git add`，
+> 合并后复跑 build 才暴露；重建与实测数字见 F45（产物 3,790,848 B → **3,795,456 B**，差 4,608 B 未归因）。
+
 ### §1 链接期缺的三个符号（全实测）
 
 `qtphp build examples/hello --nano` 在 Windows 上首建，264 个 TU 全过，链接期缺三个符号：
@@ -2266,10 +2269,61 @@ cl /c /TC compat/msvc/php_nano_win_stubs.c /I <SDK>\include … /DZEND_WIN32 /DP
 （连 Qt bin 兜底也断掉）仍 passed ⇒ Qt/CRT/WebView2 全部从 exe 自身目录解析。
 
 **注意 Windows 的 DLL 搜索顺序**是「exe 所在目录 → 系统目录 → PATH」，所以「藏进同级子目录」就行，
-不需要删文件 —— 可逆是附赠的。
+不需要删文件 —— 可逆是附赠的。（Session 31 复跑时 6 个 DLL 仍在 `build/.stale/`，即本轮数字同样是藏起来测的。）
 
 ### §5 顺带发现的陈旧断言
 
 `progress.md` 的「下一步」里还挂着两条本轮已作废的：① `--selftest`/`--difftest` 失败仍 rc=0（Phase 31 已修）；
 ② WebView2 分支「本机零运行时证据」（Session 26 的 W1–W5 已在 Windows 真机验过，本轮出图又直证 `backend=webview2`）。
 **规划文件里的「未验」清单本身会烂** —— 它是按当时时点写的，改完不回填就会一直挂着，这也是本轮顺手清它的原因。
+
+## F45. Session 29 的两个 Windows nano 构建资产从未入库（Session 31，合并后复跑才暴露）
+
+### §1 现象与根因
+
+合并 `origin/main` 后跑 `qtphp build examples/hello --nano`，264 个 TU 里只有
+`vendor/swoole/php-nano/ext/hash/hash_xxhash.c` 炸：
+
+```
+ext/hash/xxhash/xxhash.h(1476): fatal error C1083: 无法打开包括文件: “stdalign.h”
+```
+
+顺着它查出一个比合并本身更严重的事实：**`compat/msvc/` 在磁盘上是个空目录，且
+`git ls-files compat/` 为空、HEAD 与 MERGE_HEAD 里都没有那两个文件** —— 它们从来没被
+`git add` 过（`git check-ignore` 无命中，不是 `.gitignore` 吞的；与 Session 26 的 `*.lib`
+事件同型但成因不同：那次是忽略规则，这次是漏提交）。引用它们的三处却早已提交：
+`examples/hello/project.yml` 的 `sources`、`bin/qtphp` 的 `qtphp new` 模板、以及 `bin/qtphp`
+里 Windows+nano 时把 `compat/msvc` 前置到 `INCLUDE` 的 `$msvcStdalign` 分支。唯一残留证据是
+构建缓存里的 `php_nano_win_stubs.c.obj`。
+
+丢的是两个文件，职责不同：
+
+| 文件 | 为什么必需 | 缺失后的表现 |
+|---|---|---|
+| `php_nano_win_stubs.c` | 补 nano 在 Windows 链接期缺的三个符号（F44 §1） | `sources` 指向不存在的文件 |
+| `stdalign.h` | MSVC `/std:c11` 会定义 `__STDC_VERSION__`，但**不自带 `<stdalign.h>`**；php-nano 内置的 xxhash.h 在 C11 分支里 include 它 | 只炸这一个 TU，其余 253 个全过 ⇒ 极易误判成「合并引入的缺陷」 |
+
+`/std:c11` 不是本项目的开关，是 nano 恒定注入的（`NativeCommandOptionsTrait.php:119` 取
+`isNanoMode()` ⇒ `Msvc.php:121` 拼 `/std:c11`），php-nano 的 composer 元数据也只声明 `c-standard: 11`。
+
+### §2 重建后的实测（全 Windows 本机，非引用旧结论）
+
+- `qtphp build examples/hello --nano` ⇒ **264/264 TU + 链接 rc=0**，产物 **3,795,456 B**。
+  比 F44 §3 记的 3,790,848 B **大 4,608 B，未归因** —— 重建的 stub 与原文件本就不可能逐字节等价
+  （且教训 21：产物内嵌编译时间戳，跨轮次不可 diff）。
+- **静态证据**：`dumpbin /IMPORTS` 全表只有 Qt 三件套 + `WebView2Loader` + `MSVCP140`/`VCRUNTIME140*`
+  + 系统 DLL，`grep -c php` = **0**。
+- **行为证据**：`--selftest` **25/25 passed rc=0**、`--difftest` **20/20 passed rc=0**，且 6 个 PHP
+  运行时 DLL 此刻仍在 `build/.stale/`（即依赖是藏起来的状态下测的）。
+- **负向互证（F44 §2 的空 TU）**：不带 `--nano` 重编 ⇒ rc=0，产物 `dumpbin /IMPORTS` **确实**
+  import `php8ts.dll` + `phpx.dll` ⇒ 那份 stub 在非 nano 下没参与定义、符号来自运行时，
+  既没有 `C2491` 也没有撞符号。
+- `dumpbin /SYMBOLS` 读重建后的 `.obj`：`crc32_x86_simd_update` 与
+  `php_random_xoshiro256starstar_seed256` 是 External 定义，`zend_ce_fiber` 是 COFF 暂定定义
+  （UNDEF + size 8 + `.bss` 段号）—— 这正是 F44 说的「BSS 符号」形态。
+
+### §3 教训 26
+
+**「编译过」不等于「入库过」**。新增构建资产必须与引用它的 yml/CLI 落在同一次提交里；判据不是
+本机 build 成功（本机有缓存与未跟踪文件兜着），而是 `git ls-files <新目录>` 非空、或从干净克隆
+跑一次 build。漏一个 shim 的表现是「264 个 TU 里只炸 1 个」，看错误完全指不到真因。
