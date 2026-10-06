@@ -32,6 +32,7 @@ WidgetTree::table(array $columns, array $rows, array $props = [])
 | `columns` | 表头文本列表 |
 | `rows` | 行数据，每行是单元格列表 |
 | `row_ids` | 行 id 列表（**强烈建议给**） |
+| `row_colors` | 每行背景色（`''` = 默认不著色），如 `['#f8d7da', '', '#d4edda']` |
 | `current` | 当前选中（**行 id**） |
 | `headers_visible` | 是否显示表头 |
 | `multi` | 允许多选 |
@@ -70,6 +71,18 @@ $app->on('tbl', 'select', function (array $event) use ($state) {
     $state->selectedId = (string) $event['value'];
 });
 ```
+
+当 `select_mode` 设为 `multi`（或 `extended`）时，`select` 的 payload 还会带上**整个选区**，
+这样就能对「光标所在行之外」的多行做操作：
+
+| 字段 | 含义 |
+|---|---|
+| `rows` | 选中的**行号**，逗号串（如 `"0,2,3"`） |
+| `row_ids` | 对应的**行 id**，逗号串 |
+| `count` | 选中行数 |
+
+用逗号串而不是数组：桥接的 `Array` 只稳定承载标量 —— PHP 侧 `explode(',', $event['row_ids'])` 还原。
+单选模式下 `rows` 恒为一行，所以是向后兼容的。
 
 ## `tree` —— 树
 

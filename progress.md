@@ -1,5 +1,54 @@
 # Progress Log — typephp-qt
 
+## Session 30 — 2026-10-06（macOS：CLI 项目根/包根混淆 + tabs/stack `current` 首帧 + 表格多行行高）
+
+### 工作内容
+
+修复三个独立缺陷（F40 / F41 / F42），涉及 CLI 项目根解析、tabs/stack current 首帧失效、
+多行单元格裁切。
+
+### 变更摘要（8 文件 +176 −24）
+
+| 文件 | 改动 | 对应缺陷 |
+|---|---|---|
+| `bin/qtphp` | 新增 `projectRoot()` 解析消费方项目根；`findTpc()` / `cmdDoctor()` / `cmdTest()` 改走项目根（退回包根）；doctor 报错补项目根路径提示 | F40 |
+| `cpp-src/qt_bridge.cc` | 新增 `applyDeferredCurrent()`：tabs/stack 的 `current` 在 `syncChildren()` 之后补应用；`applyNodeProps()` 对 tabs/stack 的 current 跳过签名记录 | F41 |
+| `cpp-src/qt_common.h` | 新增 `applyDeferredCurrent()` 声明 + 注释 | F41 |
+| `cpp-src/qt_widgets.cc` | 新增 `autoRowHeight()` 自动行高；`qtRebuildTable()` / `qtAppendTableRows()` 检测 `\n` 调 autoRowHeight；新增 `row_height` 属性支持（固定/自动 + 标记防覆盖） | F42 |
+| `docs/src/guide/layout.md` | 修正 tabs/stack 用法示例（映射形式，非 tab/page 节点）+ 新增 `current` 必须传 int 的 tip | F43 |
+| `docs/src/guide/properties.md` | 补 `row_height` 属性行 | F42 |
+| `docs/src/zh/guide/layout.md` | 同英文 | F43 |
+| `docs/src/zh/guide/properties.md` | 同英文 | F42 |
+
+### 验证（✅ 全部通过）
+
+| 验证项 | 结果 |
+|---|---|
+| `build` 编译 | ✅ 12 TU 全过，rc=0 |
+| `--selftest` | ✅ 25/25 passed |
+| `--difftest` | ✅ 20/20 passed |
+| `--shot` offscreen | ✅ rc=0，37KB PNG，`6c4832a6b738…` 与基线一致 |
+| `--shot` cocoa | ✅ rc=0，`2728fb1a6a06…` 与基线一致 |
+| `phpunit` | ✅ 128 tests / 216 assertions |
+| `qtphp lint` | ✅ 26 stub / 26 cpp，契约一致 |
+| `projectRoot()` | ✅ 包仓库内正确返回当前目录，`vendor/` + `composer.json` 校验通过 |
+
+### 教训
+
+1. **教训 25**：包仓库里的 `$rootDir` 和消费方的项目根是两回事。任何涉及 `vendor/bin` 的路径
+   解析都必须区分两个根，且在**包仓库内**和**消费方项目内**两个场景都验证（F40）。
+2. `buildNode()` 的 `ensureWidget → applyNodeProps → syncChildren` 顺序意味着 props 在子节点
+   建好之前应用 —— 对 QTabWidget/QStackedWidget 的 `current` 必须延后（F41）。
+3. QTableWidget 默认行高只够一行，多行单元格需要显式 `resizeRowsToContents()` 才会撑开（F42）。
+
+### 新增 findings
+
+- F40 CLI 项目根 / 包根混淆
+- F41 tabs/stack 的 `current` 首帧静默失效
+- F42 多行单元格被裁切 + `row_height` 属性缺失
+- F43 `layout.md` tabs/stack 文档写错用法
+
+
 ## Session 29 — 2026-10-05（Windows：把 `--nano` 真正编出来 + 自包含硬证据）
 
 ### 任务
@@ -8,11 +57,11 @@
 
 ### 交付结果（全部 Windows 本机实测）
 
-- **新增 `compat/msvc/php_nano_win_stubs.c`**（F40 §1）：补 php-nano 在 Windows 链接期缺的三个符号 ——
+- **新增 `compat/msvc/php_nano_win_stubs.c`**（F44 §1）：补 php-nano 在 Windows 链接期缺的三个符号 ——
   `crc32_x86_simd_update`（`crc32_x86.c` 不在 composer 源码表，而 Win32 下 `ZEND_INTRIN_SSE4_2_PCLMUL_RESOLVER` 恒真）、
   `zend_ce_fiber`（`zend_fibers.c` 不在源码表，`php_reflection.c` 却引用）、
   `php_random_xoshiro256starstar_seed256`（原文 `PHPAPI inline`，MSVC 不外发 C11 inline 符号）。
-- **整份实现包在 `#if defined(PHP_NANO)` 里**（F40 §2）：这份文件挂在 `sources`，非 nano 构建也会编到它，
+- **整份实现包在 `#if defined(PHP_NANO)` 里**（F44 §2）：这份文件挂在 `sources`，非 nano 构建也会编到它，
   那时头文件来自官方 SDK、`PHPAPI`/`ZEND_API` = `__declspec(dllimport)` ⇒ 定义符号直接 `C2491`，
   且这些符号本就由 libphp/phpx 提供。分叉依据是 php-nano `main/php_config.h` 的 `PHP_NANO`（头文件宏，不是编译行开关）；
   没用 YAML `if:` 是因为 `evaluateCondition()` 只认 `PHP_VERSION*`/`PHP_OS_FAMILY`，表达不了「nano 模式」。
@@ -34,7 +83,7 @@
 
 ### 顺手清掉的两条陈旧断言
 
-本文件自己的「下一步」里挂着两条本轮已作废项（F40 §5）：`--selftest`/`--difftest` 失败仍 rc=0（Phase 31 已修）、
+本文件自己的「下一步」里挂着两条本轮已作废项（F44 §5）：`--selftest`/`--difftest` 失败仍 rc=0（Phase 31 已修）、
 WebView2 分支「本机零运行时证据」（Session 26 已真机验）。已就地改掉 —— **「未验」清单是按当时时点写的，
 改完不回填就会一直挂着。**
 
@@ -1506,7 +1555,7 @@ TypePHP 编译器仓库的 `examples/qt-taskboard`。它**完全不知道**我�
 | **`webview` 控件（Phase 24，mac 侧）** | ✅ mac 入口 `project.macos.yml` **零改动**即落到 QTextBrowser 后端（`sources` 继承 + `cxx-flags` 整体替换）；`html` 与 `url`（本地文件，相对 exe 目录）两条分支都真机出图，相对 `<img>` 解析正确。补验三条全部收口（F27）：`link` 接线 ✅（含鉴别力反证）、`zoom` ✅ 确认静默忽略（PNG sha256 相同）、**远程 `url` ❌ Qt 6 `QTextBrowser` 不支持**（追问后重做到对象级：`QUrl` 解析正常、警告同步出现、6 秒真事件循环恒 0 字符、同进程 QNAM 可 200/577、`otool -L QtWidgets` 不含 QtNetwork；scheme 矩阵另查出 `data:` 也不支持，**只有 `file` 可用**），并据此把 `docs/src/zh/widgets/webview.md:44` 的过度承诺范围确定下来 |
 | **WebView2 后端（`QT_WEBVIEW2` 分支）** | ✅ **已在 Windows 真机验（Session 26 的 W1–W5 + Session 29 出图直证）**：Session 26 拿到 Windows 环境后 W1–W5 逐条实测并修掉确认缺陷；Session 29 的 nano `--shot` 读图标注 `backend=webview2，js=支持`。此前那句「本机零运行时证据」是只有 macOS 单机时的描述（无 Windows 目标：VM/ssh/wine 皆无、Apple Container 只跑 Linux、启动卷 3.5 Gi 使交叉工具链不可行）。附带抓出并修好 **W0**：`.gitignore` 的 `*.lib` 吞掉 vendor 的 `WebView2Loader.dll.lib` ⇒ 新克隆 Windows 链接必报 `LNK1181`；规则已加 `!third_party/**/*.lib` 并验证，**那 3.5 KB 的 `.lib` 需从 Windows 机器补交** |
 | **WKWebView 第三后端（`.mm`，用户选定路线）** | 🟡 **第 ① 步 spike ✅**（24.7 / F29 §5）：合成、缩放跟随、`evaluateJavaScript` 三条实测通过；同时量出**代价** —— 原生子 view 不进 `QWidget::grab()`，换默认后端后 mac `--shot` 帧里 webview 区域变空洞、`a70cd7ae05b6…` 必改。第 ②–④ 步（后端实现 / `bin/qtphp` 认 `.mm` / 优先级与文档）**未开工** |
-| Windows 端到端 | ✅ **Session 29 复验（含 nano）**：nano `build` 264 TU rc=0、产物 **3,790,848 B**、PE import 表无 php/phpx；`--selftest` **25/25**、`--difftest` **20/20**、`--shot` 760×720 出图（读图确认，`backend=webview2`）；把 6 个残留 PHP DLL 挪出搜索路径、并断掉 PATH 里的 Qt bin 后仍全过（F40 §4）。embed 路线 Session 14 时点为 `--selftest` 14/14 → `--shot` 21KB PNG → `test` 112/183 → `lint` 契约一致、`doctor` 6 项全 OK |
+| Windows 端到端 | ✅ **Session 29 复验（含 nano）**：nano `build` 264 TU rc=0、产物 **3,790,848 B**、PE import 表无 php/phpx；`--selftest` **25/25**、`--difftest` **20/20**、`--shot` 760×720 出图（读图确认，`backend=webview2`）；把 6 个残留 PHP DLL 挪出搜索路径、并断掉 PATH 里的 Qt bin 后仍全过（F44 §4）。embed 路线 Session 14 时点为 `--selftest` 14/14 → `--shot` 21KB PNG → `test` 112/183 → `lint` 契约一致、`doctor` 6 项全 OK |
 | tpc 供给路线解析（Session 14） | ✅ 改按运行时体检选路，不再硬编码路径（F24）；带运行时的原生包不再被 composer 驱动抢占 |
 | Phase 10（macOS 原生编译路线） | ✅ done：`qtphp build examples/hello` 在 mac 上产出真实 Mach-O arm64 可执行文件，`--selftest` 10/10、`--shot` 出图 |
 | Phase 11（macOS 运行/打包/脚手架） | ✅ done：11.1–11.6 全绿，见下三行 |
@@ -1570,7 +1619,7 @@ task_plan.md 的 macOS 环境段同步：私有 embed 运行时从「缺」改�
 - **打包验收缺一条自动化判据**：资源缺失只体现在 stderr 的 `qWarning`，而 `--shot` 哈希覆盖不到（托盘不进 `grab()`）
   ⇒ 候选做法：`package` 自检里跑一次产物并断言 stderr 无 `could not be loaded`
 - **Windows 在新代码上复验** ✅ **已完成（Session 29）**：nano 路线 264 TU rc=0、`--selftest` **25/25**、
-  `--difftest` **20/20**、`--shot` 出图读图确认、自包含三项验证全过（F40）——断言集涨到 25、示例加 `webview` 分组
+  `--difftest` **20/20**、`--shot` 出图读图确认、自包含三项验证全过（F44）——断言集涨到 25、示例加 `webview` 分组
   这些变动在 Windows 上不再是悬空项。**Linux 侧仍停在 Session 13 的时点**，容器 `tgl` 留着，
   重跑要先按 F20 起宿主代理并核对网关 IP
 - Linux 产物的**跨发行版**验证：现在只有 Debian 12 → Debian 12，「glibc 家族留系统 + 其余全搬」在

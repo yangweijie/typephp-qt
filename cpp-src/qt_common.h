@@ -387,6 +387,16 @@ class QtWindowBox : public Box {
                        QList<ChildSlot> &siblings, const QString &path);
     QWidget *ensureWidget(const Variant &node, const QString &type, const QString &id);
     void applyNodeProps(QWidget *widget, const QString &type, const QString &id, const Variant &node);
+    /**
+     * tabs/stack 的 `current` 必须**延后**到子页建好之后再应用。
+     *
+     * buildNode 的顺序是 ensureWidget → applyNodeProps → 递归子节点，
+     * 所以 applyNodeProps 里应用 current 时 QTabWidget 还是空的 ——
+     * setCurrentIndex(1) 会被 Qt 钳回 0，首帧的声明式切页静默失效。
+     * 这里在 syncChildren 之后补一次，语义仍是「只在变化时应用」，
+     * 免得每帧覆盖用户的手动切页。
+     */
+    void applyDeferredCurrent(QWidget *widget, const QString &type, const QString &id, const Variant &node);
     /** 表格/树的结构字段是否变了（变了才整表/整树重建）。 */
     bool structuralChanged(const QString &id, const Variant &node, const QString &type);
     /** 摘掉这些键的签名，让下一次 render 必然重新应用（命令式 call 改过控件后用）。 */

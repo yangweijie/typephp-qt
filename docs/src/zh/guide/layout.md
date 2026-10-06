@@ -116,18 +116,25 @@ WidgetTree::scroll([
 `tabs` 是可见的标签栏；`stack` 是同一位置切换但**没有标签栏**（靠代码切）：
 
 ```php
-// 有标签栏
+// 有标签栏 —— tabs() 收的是「标题 => 子节点」映射，**不是**预先建好的 tab() 节点。
+// 实现会把每个元素再包一层 tab()，而 tab() 的 $title 是 string，
+// 传节点进去会直接报 "Argument #1 ($title) must be of type string, int given"。
 WidgetTree::tabs([
-    WidgetTree::tab('常规', [ /* … */ ]),
-    WidgetTree::tab('高级', [ /* … */ ]),
+    '常规' => [ /* … */ ],
+    '高级' => [ /* … */ ],
 ], ['id' => 'settings_tabs']);
 
-// 无标签栏，用 current 切换
+// 无标签栏，用 current 切换 —— stack() 收的是「子节点列表的列表」
 WidgetTree::stack([
-    WidgetTree::page([ /* 页 1 */ ]),
-    WidgetTree::page([ /* 页 2 */ ]),
+    [ /* 页 1 */ ],
+    [ /* 页 2 */ ],
 ], ['id' => 'wizard', 'current' => $state->step]);
 ```
+
+::: tip tabs / stack 的 `current`
+必须传 **int**，不能传字符串 —— 桥接走 `value.toInt()`，`'1'` 会静默变成 `0`，
+表现为「切页没反应」。下标在子页建好之后才应用，所以只在首帧出现的 `current` 也生效。
+:::
 
 切页会发 `tab` 事件（带 `payload.index`）。
 

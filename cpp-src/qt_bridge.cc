@@ -352,6 +352,10 @@ QWidget *QtWindowBox::buildNode(const Variant &node, QWidget *parentWidget, cons
         syncChildren(childParent, childParentType, childSlots);
     }
 
+    // tabs/stack 的 current 只能在子页建好之后应用 —— applyNodeProps 那一步
+    // QTabWidget 还是空的，setCurrentIndex(1) 会被钳回 0。
+    applyDeferredCurrent(widget, type, id, spec);
+
     // 把自己登记到父容器的 siblings
     ChildSlot slot;
     slot.widget = widget;
@@ -400,12 +404,35 @@ void QtWindowBox::applyNodeProps(QWidget *widget, const QString &type, const QSt
         if (qtIsStructuralKey(type, key)) {
             continue;  // 由 structuralChanged()/重建逻辑处理
         }
+        // tabs/stack 的 current 延后到子页建好之后（见 applyDeferredCurrent）。
+        // 这里跳过，是为了不让签名在「还没生效」的时候就被记下来 ——
+        // 否则下一帧签名未变、补应用也被跳过，切页永远停在 0。
+        if (key == QLatin1String("current")
+            && (type == QLatin1String("tabs") || type == QLatin1String("stack"))) {
+            continue;
+        }
         const Variant value = it.value();
         const QString sig = qtSignature(value);
         if (sigs.value(key) == sig) continue;  // 没变，跳过
         sigs.insert(key, sig);
         qtApplyProp(this, widget, type, key, value);
     }
+}
+
+void QtWindowBox::applyDeferredCurrent(QWidget *widget, const QString &type, const QString &id,
+                                       const Variant &node) {
+    if (!widget) return;
+    if (type != QLatin1String("tabs") && type != QLatin1String("stack")) return;
+
+    const Array spec = node.toArray();
+    const Variant value = spec.get("current");
+    if (value.isUndef() || value.isNull()) return;
+
+    QHash<QString, QString> &sigs = propSigs_[id];
+    const QString sig = qtSignature(value);
+    if (sigs.value(QStringLiteral("current")) == sig) return;  // 没变，别覆盖用户的手动切页
+    sigs.insert(QStringLiteral("current"), sig);
+    qtApplyProp(this, widget, type, QStringLiteral("current"), value);
 }
 
 /**

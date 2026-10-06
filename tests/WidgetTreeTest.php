@@ -245,6 +245,17 @@ final class WidgetTreeTest extends TestCase
         $this->assertSame(['u1'], $node['row_ids']);
     }
 
+    public function testTableAcceptsRowColors(): void
+    {
+        // 每行背景色：'' 表示该行不著色。桥接读的正是这个 prop。
+        $node = WidgetTree::table(
+            ['Name'],
+            [['Alice'], ['Bob']],
+            ['id' => 'data', 'row_colors' => ['#f8d7da', '']]
+        );
+        $this->assertSame(['#f8d7da', ''], $node['row_colors']);
+    }
+
     public function testTree(): void
     {
         $node = WidgetTree::tree([

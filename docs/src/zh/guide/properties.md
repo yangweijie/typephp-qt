@@ -65,12 +65,14 @@ WidgetTree::label('你好', ['id' => 'greeting', 'style' => 'color:red', 'align'
 | `columns` | table | 表头文本列表 |
 | `rows` | table | 行数据（每行是单元格列表） |
 | `row_ids` | table | 行 id 列表 |
+| `row_colors` | table | 每行背景色（`''` = 默认不著色），如 `['#f8d7da', '', '#d4edda']` |
 | `nodes` | tree | 树节点 |
 | `headers` | tree | 列标题 |
 | `headers_visible` | table, tree | 是否显示表头 |
 | `multi` | list, table, tree | 允许多选 |
 | `select_mode` | table, tree | 选择模式 |
 | `stretch_last` | table | 最后一列自动伸展 |
+| `row_height` | table | 固定行高（像素）。`0`（默认）表示行高由内容决定 —— 单元格里含 `\n` 的表格会自动调整行高，多行内容不会被裁掉 |
 | `checkable` | list, table, tree | 条目带复选框 |
 | `editable` | combo、table | 可编辑（table 上开启单元格就地编辑并触发 `cell` 事件） |
 

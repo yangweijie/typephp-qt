@@ -89,6 +89,9 @@ function cmdDoctor(): int
         success("tpc: $tpcPath");
     } else {
         error('tpc: 未找到（需要 swoole/typephp 或手动安装）');
+        echo '     项目根: ' . projectRoot() . PHP_EOL;
+        echo '     已查找: ' . projectRoot() . '/vendor/bin/tpc.php' . PHP_EOL;
+        echo '     提示: composer require --dev swoole/typephp，或用 TPC=/path/to/tpc 指定' . PHP_EOL;
         $allOk = false;
     }
 
@@ -145,7 +148,9 @@ function cmdDoctor(): int
     }
 
     // PHPUnit
-    $phpunit = $GLOBALS['rootDir'] . '/vendor/bin/phpunit';
+    // phpunit 是**项目**的 dev 依赖，先看项目根；包仓库里开发时再退回包根。
+    $phpunit = projectRoot() . '/vendor/bin/phpunit';
+    if (!is_file($phpunit)) $phpunit = $GLOBALS['rootDir'] . '/vendor/bin/phpunit';
     if (file_exists($phpunit)) {
         success("PHPUnit: $phpunit");
     } else {
@@ -160,6 +165,51 @@ function cmdDoctor(): int
     }
 
     return $allOk ? 0 : 1;
+}
+
+/**
+ * 消费方**项目**根目录 —— 与「包目录」(`$GLOBALS['rootDir']`) 是两回事。
+ *
+ * 这是一个真实踩过的坑：包的 bin/qtphp 经 composer 链接后会出现在
+ * `<project>/vendor/bin/qtphp`，但脚本里 `$rootDir = dirname(__DIR__)` 拿到的是
+ * **包自身**目录（`<project>/vendor/yangweijie/typephp-qt`）。于是 findTpc() 去找
+ * `<包>/vendor/bin/tpc.php` —— 消费方项目里那个路径根本不存在，doctor 直接报
+ * 「tpc: 未找到」，build / run / package 全部卡在工具链探测上，而且报错完全指不到
+ * 真正的原因（用户会以为是没装 tpc）。
+ *
+ * `vendor/bin/tpc.php` 与 `vendor/bin/phpunit` 属于**项目**，必须从项目根找；
+ * 而 `php-src/`、`cpp-src/`、`third_party/` 属于**包**，仍走 `$rootDir`。
+ * 解析顺序：
+ *   1. composer 的 bin 代理会设 `$GLOBALS['_composer_bin_dir'] = <project>/vendor/bin`
+ *   2. 从 cwd 向上找同时有 `composer.json` 与 `vendor/` 的目录
+ *   3. 都找不到就退回包目录（在包仓库里直接开发时的情形）
+ */
+function projectRoot(): string
+{
+    $binDir = $GLOBALS['_composer_bin_dir'] ?? '';
+    if (is_string($binDir) && $binDir !== '') {
+        $candidate = dirname(dirname($binDir));   // <project>/vendor/bin → <project>
+        if ($candidate !== '' && $candidate !== '.' && is_dir($candidate . '/vendor')) {
+            return $candidate;
+        }
+    }
+
+    $dir = getcwd();
+    for ($depth = 0; $depth < 8; $depth++) {
+        if (!is_string($dir) || $dir === '' || $dir === '.' || $dir === DIRECTORY_SEPARATOR) {
+            break;
+        }
+        if (is_dir($dir . '/vendor') && is_file($dir . '/composer.json')) {
+            return $dir;
+        }
+        $parent = dirname($dir);
+        if ($parent === $dir) {
+            break;
+        }
+        $dir = $parent;
+    }
+
+    return $GLOBALS['rootDir'];
 }
 
 /**
@@ -184,19 +234,24 @@ function findTpc(): ?string
         return $envTpc;
     }
 
-    // composer 装的包只带 bin/tpc.php（bin/tpc 是各平台的预编译二进制，不会随包发布）
-    $candidates = [$GLOBALS['rootDir'] . '/vendor/bin/tpc'];
+    // composer 装的包只带 bin/tpc.php（bin/tpc 是各平台的预编译二进制，不会随包发布）。
+    // vendor/ 属于**项目**，所以先在项目根下找；再退回包自身（在包仓库里开发的情形）。
+    $project = projectRoot();
+    $candidates = [
+        $project . '/vendor/bin/tpc',
+        $project . '/vendor/bin/tpc.php',
+        $project . '/vendor/swoole/typephp/bin/tpc',
+        $project . '/vendor/swoole/typephp/bin/tpc.php',
+    ];
+    if ($project !== $GLOBALS['rootDir']) {
+        $candidates[] = $GLOBALS['rootDir'] . '/vendor/bin/tpc.php';
+        $candidates[] = $GLOBALS['rootDir'] . '/vendor/swoole/typephp/bin/tpc.php';
+    }
 
     $envDir = getenv('TPC_DIR');
     if ($envDir) {
         $candidates[] = rtrim($envDir, '/\\') . '/tpc' . (PHP_OS_FAMILY === 'Windows' ? '.exe' : '');
     }
-
-    $candidates = array_merge($candidates, [
-        $GLOBALS['rootDir'] . '/vendor/bin/tpc.php',
-        $GLOBALS['rootDir'] . '/vendor/swoole/typephp/bin/tpc',
-        $GLOBALS['rootDir'] . '/vendor/swoole/typephp/bin/tpc.php',
-    ]);
 
     // PATH 与发行包惯例位置排在 composer 之后，仅在需要时兜底
     $exe = PHP_OS_FAMILY === 'Windows' ? 'tpc.exe' : 'tpc';
@@ -1279,6 +1334,67 @@ function findVcRedistDir(): ?string
  * `basename('.')` 返回 `.`，产物会被算成 `./build/.` —— 那是个目录，`file_exists()` 还为真，
  * 于是错误被推迟到更看不懂的地方。路径不存在时原样返回，让下游报「未找到」。
  */
+/**
+ * 从「公共段 + 平台段」的入口 yml 里取一个顶层标量字段（平台段优先）。
+ *
+ * 只认**顶格**的 `key:` —— 缩进的一律跳过，免得命中 `bridge:` 之类的嵌套同名键。
+ * 平台段（project.macos.yml）通常只写 `include: [project.yml]` 再覆盖平台相关字段，
+ * `name:` / `output:` 往往只在公共段里，所以两个文件都要看。
+ */
+function projectYamlField(string $dir, string $key): ?string
+{
+    $dir = rtrim($dir, '/\\');
+    $value = null;
+    foreach ([$dir . '/project.yml', resolveProjectYaml($dir)] as $yml) {
+        if (!is_file($yml)) {
+            continue;
+        }
+        foreach (preg_split('/\r?\n/', (string) file_get_contents($yml)) ?: [] as $line) {
+            if (preg_match('/^' . preg_quote($key, '/') . '\s*:\s*(\S+)/', $line, $m)) {
+                $value = trim($m[1], "\"'");
+            }
+        }
+    }
+    return $value;
+}
+
+/** 入口 yml 里的 `name:`；没写就回落到目录名。 */
+function projectName(string $dir): string
+{
+    $name = projectYamlField($dir, 'name');
+    return $name !== null && $name !== '' ? $name : basename(rtrim($dir, '/\\'));
+}
+
+/**
+ * 编译产物路径 —— 由入口 yml 的 `output:` / `name:` 决定，**不是**目录名。
+ *
+ * 早先 cmdRun / cmdPackage 都是 `basename($dir)` 拼 `build/<目录名>`，而 `qtphp build`
+ * 是让 tpc 按 yml 里的 `name:` / `output:` 决定输出位置。两者只要不一致，
+ * `build` 明明成功、紧接着 `run` 就报「未找到可执行文件」—— 例如项目目录叫
+ * `typephp-smartgit` 而 yml 里 `name: typephp_smartgit`（下划线）。
+ * 这个报错完全指不到真正的原因（用户会以为没编译）。
+ */
+function builtBinary(string $dir): ?string
+{
+    $dir = rtrim($dir, '/\\');
+    $suffix = PHP_OS_FAMILY === 'Windows' ? '.exe' : '';
+
+    $candidates = [];
+    $output = projectYamlField($dir, 'output');
+    if ($output !== null && $output !== '') {
+        $candidates[] = $dir . '/' . rtrim($output, '/') . $suffix;
+    }
+    $candidates[] = $dir . '/build/' . projectName($dir) . $suffix;
+    $candidates[] = $dir . '/build/' . basename($dir) . $suffix;   // 目录名兜底（老行为）
+
+    foreach ($candidates as $candidate) {
+        if (is_file($candidate)) {
+            return $candidate;
+        }
+    }
+    return null;
+}
+
 function projectDir(string $path): string
 {
     $dir = rtrim($path, '/\\');
@@ -1289,10 +1405,9 @@ function projectDir(string $path): string
 function cmdRun(string $path, array $args = []): int
 {
     $dir = projectDir($path);
-    $name = basename($dir);
-    $exe = $dir . '/build/' . $name . (PHP_OS_FAMILY === 'Windows' ? '.exe' : '');
-    if (!file_exists($exe)) {
-        error("未找到可执行文件: $exe");
+    $exe = builtBinary($dir);
+    if ($exe === null) {
+        error('未找到可执行文件（已按入口 yml 的 output: / name: 查找）');
         info("请先运行: qtphp build $path");
         return 1;
     }
@@ -1418,10 +1533,10 @@ function checkRuntimeDlls(string $dir): array
 function cmdPackage(string $path): int
 {
     $path = projectDir($path);
-    $name = basename($path);
-    $exe = $path . '/build/' . $name . (PHP_OS_FAMILY === 'Windows' ? '.exe' : '');
-    if (!file_exists($exe)) {
-        error("未找到可执行文件: $exe");
+    $name = projectName($path);
+    $exe = builtBinary($path);
+    if ($exe === null) {
+        error('未找到可执行文件（已按入口 yml 的 output: / name: 查找）');
         info("请先运行: qtphp build $path");
         return 1;
     }
@@ -2172,7 +2287,9 @@ function dirSize(string $dir): int
 
 function cmdTest(): int
 {
-    $phpunit = $GLOBALS['rootDir'] . '/vendor/bin/phpunit';
+    // phpunit 是**项目**的 dev 依赖，先看项目根；包仓库里开发时再退回包根。
+    $phpunit = projectRoot() . '/vendor/bin/phpunit';
+    if (!is_file($phpunit)) $phpunit = $GLOBALS['rootDir'] . '/vendor/bin/phpunit';
     if (!file_exists($phpunit)) {
         error('未找到 PHPUnit，请运行: composer install');
         return 1;
