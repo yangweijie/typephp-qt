@@ -89,6 +89,22 @@ void setTextValue(QWidget *widget, const QString &text) {
     else if (auto *radio = qobject_cast<QRadioButton *>(widget)) radio->setText(text);
 }
 
+/**
+ * 多行单元格的自动行高。
+ *
+ * QTableWidget 的默认行高只够一行：含 "\n" 的单元格（图列、折行的说明）
+ * 会被**纵向裁掉**，渲染成 "…" —— 看起来像列太窄，其实是行太矮。
+ * qtRebuildTable 早先既不设行高也不 resizeRowsToContents()，所以多行单元格根本用不了。
+ *
+ * 只在真的出现多行单元格时才 resize：给大表格平白加一次 O(rows) 测量不划算，
+ * 而绝大多数表格并没有多行内容。用户显式设了 row_height 时不插手。
+ */
+void autoRowHeight(QTableWidget *table, bool hasMultiline) {
+    if (!table || !hasMultiline) return;
+    if (table->property("qt_rowHeightSet").toBool()) return;
+    table->resizeRowsToContents();
+}
+
 }  // namespace
 
 // ────────────────────────────── 容器判定 ──────────────────────────────
@@ -451,13 +467,16 @@ void qtRebuildTable(QtWindowBox *box, QTableWidget *table, const Variant &node) 
     }
 
     table->setRowCount(static_cast<int>(rows.count()));
+    bool hasMultiline = false;
     for (size_t r = 0; r < rows.count(); ++r) {
         const Variant rowValue = rows.get(r);
         const Array cells = rowValue.isArray() ? rowValue.toArray() : Array();
         const QString rowId =
             r < static_cast<size_t>(rowIds.size()) ? rowIds.at(static_cast<int>(r)) : QString::number(r);
         for (size_t c = 0; c < cells.count(); ++c) {
-            auto *item = new QTableWidgetItem(toQString(cells.get(c)));
+            const QString text = toQString(cells.get(c));
+            if (text.contains(QLatin1Char('\n'))) hasMultiline = true;
+            auto *item = new QTableWidgetItem(text);
             // ── 行背景色 ──
             if (r < static_cast<size_t>(rowColors.size()) && !rowColors.at(static_cast<int>(r)).isEmpty()) {
                 item->setBackground(QBrush(QColor(rowColors.at(static_cast<int>(r)))));
@@ -466,6 +485,7 @@ void qtRebuildTable(QtWindowBox *box, QTableWidget *table, const Variant &node) 
             table->setItem(static_cast<int>(r), static_cast<int>(c), item);
         }
     }
+    autoRowHeight(table, hasMultiline);
 
     if (selectedId.isEmpty()) return;
     for (int r = 0; r < table->rowCount(); ++r) {
@@ -525,6 +545,7 @@ void qtAppendTableRows(QTableWidget *table, const Variant &rows, const Variant &
     const QStringList ids = rowIds.isArray() ? toStringList(rowIds) : QStringList();
 
     QSignalBlocker blocker(table);
+    bool hasMultiline = false;
     for (size_t i = 0; i < list.count(); ++i) {
         const Variant rowValue = list.get(i);
         const Array cells = rowValue.isArray() ? rowValue.toArray() : Array();
@@ -536,11 +557,14 @@ void qtAppendTableRows(QTableWidget *table, const Variant &rows, const Variant &
         const QString rowId =
             i < static_cast<size_t>(ids.size()) ? ids.at(static_cast<int>(i)) : QString::number(r);
         for (size_t c = 0; c < cells.count(); ++c) {
-            auto *item = new QTableWidgetItem(toQString(cells.get(c)));
+            const QString text = toQString(cells.get(c));
+            if (text.contains(QLatin1Char('\n'))) hasMultiline = true;
+            auto *item = new QTableWidgetItem(text);
             if (c == 0) item->setData(Qt::UserRole, rowId);
             table->setItem(r, static_cast<int>(c), item);
         }
     }
+    autoRowHeight(table, hasMultiline);
 }
 
 void qtClearContent(QWidget *widget, const QString &type) {
@@ -646,6 +670,23 @@ void qtApplyProp(QtWindowBox *box, QWidget *widget, const QString &type, const Q
         else if (auto *check = qobject_cast<QCheckBox *>(widget)) check->setChecked(value.toBool());
         else if (auto *radio = qobject_cast<QRadioButton *>(widget)) radio->setChecked(value.toBool());
         else if (auto *button = qobject_cast<QPushButton *>(widget)) button->setChecked(value.toBool());
+        return;
+    }
+    // 行高：0（默认）= 交给内容决定，只在出现多行单元格时自动 resize；
+    // 大于 0 = 固定行高（在表上打标记，免得 autoRowHeight 又把它改回去）。
+    if (key == QLatin1String("row_height")) {
+        if (auto *table = qobject_cast<QTableWidget *>(widget)) {
+            const int height = static_cast<int>(value.toInt());
+            if (height > 0) {
+                table->setProperty("qt_rowHeightSet", true);
+                table->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+                table->verticalHeader()->setDefaultSectionSize(height);
+            } else {
+                table->setProperty("qt_rowHeightSet", false);
+                table->verticalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+                table->resizeRowsToContents();
+            }
+        }
         return;
     }
     if (key == QLatin1String("current")) {

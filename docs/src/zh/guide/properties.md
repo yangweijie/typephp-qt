@@ -72,6 +72,7 @@ WidgetTree::label('你好', ['id' => 'greeting', 'style' => 'color:red', 'align'
 | `multi` | list, table, tree | 允许多选 |
 | `select_mode` | table, tree | 选择模式 |
 | `stretch_last` | table | 最后一列自动伸展 |
+| `row_height` | table | 固定行高（像素）。`0`（默认）表示行高由内容决定 —— 单元格里含 `\n` 的表格会自动调整行高，多行内容不会被裁掉 |
 | `checkable` | list, table, tree | 条目带复选框 |
 | `editable` | combo、table | 可编辑（table 上开启单元格就地编辑并触发 `cell` 事件） |
 

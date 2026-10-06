@@ -116,18 +116,26 @@ WidgetTree::scroll([
 `tabs` shows a visible tab bar; `stack` switches in place **without** a tab bar (you switch it in code):
 
 ```php
-// with a tab bar
+// with a tab bar — tabs() takes a **title => children map**, not pre-built tab() nodes.
+// It wraps each entry with tab() itself, so passing tab(...) nodes throws
+// "Argument #1 ($title) must be of type string, int given".
 WidgetTree::tabs([
-    WidgetTree::tab('General', [ /* … */ ]),
-    WidgetTree::tab('Advanced', [ /* … */ ]),
+    'General'  => [ /* … */ ],
+    'Advanced' => [ /* … */ ],
 ], ['id' => 'settings_tabs']);
 
-// no tab bar, switched via current
+// no tab bar, switched via current — stack() takes a list of child lists
 WidgetTree::stack([
-    WidgetTree::page([ /* page 1 */ ]),
-    WidgetTree::page([ /* page 2 */ ]),
+    [ /* page 1 */ ],
+    [ /* page 2 */ ],
 ], ['id' => 'wizard', 'current' => $state->step]);
 ```
+
+::: tip `current` on tabs / stack
+Pass an **int**, not a string — the bridge does `value.toInt()`, so `'1'` silently becomes `0`
+and the switch looks like it did nothing. The index is applied after the pages are built, so a
+`current` that appears only on the first frame still takes effect.
+:::
 
 Switching emits a `tab` event (with `payload.index`).
 

@@ -2125,3 +2125,83 @@ brew 的 ICU，bundle 内拷贝全程没被加载（死重）。**未装 brew ic
 **顺带回答案「不支持 webview 会不会小」**：不会。mac 上 webview 走系统 WebKit.framework/AppKit
 （不进 bundle），关掉 WKWebView 后端只省 `qt_webview_wk.mm.o`（60,056 B）；ICU 是 QtCore 的固有
 依赖，与 webview 无关。
+
+## F40. CLI 项目根 / 包根混淆 —— 消费方 composer install 后 build 全卡（Session 29）
+
+**现象**：包的 `bin/qtphp` 经 composer 链接后出现在 `<project>/vendor/bin/qtphp`，但脚本里
+`$rootDir = dirname(__DIR__)` 拿到的是**包自身**目录（`<project>/vendor/yangweijie/typephp-qt`）。
+`findTpc()` 去 `<包>/vendor/bin/tpc.php` 找 tpc —— 消费方项目里那个路径根本不存在，doctor 报
+「tpc: 未找到」，build / run / package 全部卡在工具链探测上，报错完全指不到真正原因。
+
+**根因**：`vendor/bin/tpc.php` 与 `vendor/bin/phpunit` 属于**项目**（composer install 装到项目
+vendor/ 下），但代码里用 `$rootDir`（包目录）去找它们。包仓库里直接开发时 `$rootDir` 恰好是
+项目根（同一棵树），所以一直没问题；一旦包被消费方 composer require，两个根就分开了。
+
+**修复**（`bin/qtphp`）：
+
+新增 `projectRoot()`，解析顺序：
+1. composer 的 bin 代理会设 `$GLOBALS['_composer_bin_dir'] = <project>/vendor/bin`
+   → `dirname(dirname($binDir))` 拿到项目根，校验 `is_dir(<project>/vendor)`
+2. 从 cwd 向上找同时有 `composer.json` 与 `vendor/` 的目录（深度 8 层）
+3. 都找不到就退回 `$GLOBALS['rootDir']`（在包仓库里直接开发时的情形）
+
+`findTpc()`、`cmdDoctor()`、`cmdTest()` 全部改走 `projectRoot()`（先看项目，退回包根）；
+`php-src/`、`cpp-src/`、`third_party/` 等包资产仍走 `$rootDir`。
+
+**教训 22**：包仓库里的 `$rootDir` 和消费方的项目根是两回事。任何涉及 vendor/bin 的路径
+解析都必须区分两个根，且在**包仓库内**和**消费方项目内**两个场景都验证。
+
+## F41. tabs/stack 的 `current` 首帧静默失效（Session 29）
+
+**现象**：声明式 UI 里给 `tabs` 或 `stack` 传 `['current' => 1]`，首帧不生效 —— 控件停在第 0 页。
+
+**根因**：`buildNode()` 的执行顺序是 `ensureWidget → applyNodeProps → syncChildren`。
+`applyNodeProps()` 里应用 `current` 时，QTabWidget 的子页还没建（`syncChildren()` 还没跑），
+`setCurrentIndex(1)` 被 Qt 钳回 0。签名被记下来（`propSigs_` 里 `current` = 1），下一帧
+签名未变 ⇒ 补应用也被跳过 ⇒ 切页**永远**停在 0。
+
+**修复**（`cpp-src/qt_bridge.cc` + `qt_common.h`）：
+
+1. `applyNodeProps()` 对 `tabs`/`stack` 类型的 `current` 键跳过签名记录
+2. 新增 `applyDeferredCurrent()`，在 `syncChildren()` 之后调用：
+   - 只对 `tabs`/`stack` 生效
+   - 取节点 spec 里的 `current` 值
+   - 签名未变则跳过（不覆盖用户手动切页）
+   - 签名变了则 `qtApplyProp()` 应用并记录签名
+
+**语义**：`current` 只在声明值变化时应用，不每帧覆盖用户的手动切页。首帧和后续帧
+行为一致。
+
+## F42. 多行单元格被裁切 + `row_height` 属性缺失（Session 29）
+
+**现象**：QTableWidget 的单元格里含 `\n`（换行符）时，内容被纵向裁掉，渲染成 `…`。
+看起来像列太窄，实际是行太矮。
+
+**根因**：QTableWidget 默认行高只够一行。`qtRebuildTable()` 和 `qtAppendTableRows()` 既
+不设行高也不调 `resizeRowsToContents()`，所以多行单元格根本无法使用。
+
+**修复**（`cpp-src/qt_widgets.cc`）：
+
+1. 新增 `autoRowHeight(QTableWidget *table, bool hasMultiline)`：
+   - 只有真出现多行单元格时才 `resizeRowsToContents()`（避免大表格平白 O(rows) 测量）
+   - 用户显式设了 `row_height` 时不打标记（`qt_rowHeightSet` 为 true 则跳过）
+2. `qtRebuildTable()` / `qtAppendTableRows()` 遍历时检测 `\n`，置 `hasMultiline` 标志，
+   循环结束后调 `autoRowHeight()`
+3. 新增 `row_height` 属性支持：
+   - `> 0` = 固定行高（`setSectionResizeMode(Fixed)` + `setDefaultSectionSize(height)` +
+     打标记 `qt_rowHeightSet = true`，防 `autoRowHeight` 覆盖回去）
+   - `= 0`（默认）= 行高由内容决定（`setSectionResizeMode(Interactive)` + `resizeRowsToContents()`）
+
+**文档**：`properties.md`（中英）补 `row_height` 行。
+
+## F43. `layout.md` tabs/stack 文档写错用法（Session 29）
+
+`layout.md`（中英）原先写 `WidgetTree::tabs([WidgetTree::tab('General', [...]), ...])`，
+但 `tabs()` 的实现收的是**标题 => 子节点映射**（`['General' => [...]]`），内部会把每个元素
+再包一层 `tab()`。传 `tab(...)` 节点进去会报 `Argument #1 ($title) must be of type string,
+int given`（因为 map 的 key 是 int，`tab()` 的 `$title` 是 string）。
+
+`stack()` 同理，收的是子节点列表的列表，不是 `page()` 节点。
+
+修复：示例改为映射形式，补注释说明原因；新增 tip 说明 `current` 必须传 int（`value.toInt()`，
+`'1'` 静默变 `0`）。

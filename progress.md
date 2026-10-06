@@ -2242,3 +2242,53 @@ task_plan.md               计划与决策
 （本清单曾列有仓库根 project.yml —— Session 3 核实该文件从未入库、磁盘也不存在；
   桥接 .cc 只能随应用源码内联编译，见 F7，因此没有独立的根编译配置）
 ```
+
+---
+
+## Session 29 — 2026-10-06
+
+### 工作内容
+
+修复三个独立缺陷（F40 / F41 / F42），涉及 CLI 项目根解析、tabs/stack current 首帧失效、
+多行单元格裁切。
+
+### 变更摘要（8 文件 +176 −24）
+
+| 文件 | 改动 | 对应缺陷 |
+|---|---|---|
+| `bin/qtphp` | 新增 `projectRoot()` 解析消费方项目根；`findTpc()` / `cmdDoctor()` / `cmdTest()` 改走项目根（退回包根）；doctor 报错补项目根路径提示 | F40 |
+| `cpp-src/qt_bridge.cc` | 新增 `applyDeferredCurrent()`：tabs/stack 的 `current` 在 `syncChildren()` 之后补应用；`applyNodeProps()` 对 tabs/stack 的 current 跳过签名记录 | F41 |
+| `cpp-src/qt_common.h` | 新增 `applyDeferredCurrent()` 声明 + 注释 | F41 |
+| `cpp-src/qt_widgets.cc` | 新增 `autoRowHeight()` 自动行高；`qtRebuildTable()` / `qtAppendTableRows()` 检测 `\n` 调 autoRowHeight；新增 `row_height` 属性支持（固定/自动 + 标记防覆盖） | F42 |
+| `docs/src/guide/layout.md` | 修正 tabs/stack 用法示例（映射形式，非 tab/page 节点）+ 新增 `current` 必须传 int 的 tip | F43 |
+| `docs/src/guide/properties.md` | 补 `row_height` 属性行 | F42 |
+| `docs/src/zh/guide/layout.md` | 同英文 | F43 |
+| `docs/src/zh/guide/properties.md` | 同英文 | F42 |
+
+### 验证（✅ 全部通过）
+
+| 验证项 | 结果 |
+|---|---|
+| `build` 编译 | ✅ 12 TU 全过，rc=0 |
+| `--selftest` | ✅ 25/25 passed |
+| `--difftest` | ✅ 20/20 passed |
+| `--shot` offscreen | ✅ rc=0，37KB PNG，`6c4832a6b738…` 与基线一致 |
+| `--shot` cocoa | ✅ rc=0，`2728fb1a6a06…` 与基线一致 |
+| `phpunit` | ✅ 128 tests / 216 assertions |
+| `qtphp lint` | ✅ 26 stub / 26 cpp，契约一致 |
+| `projectRoot()` | ✅ 包仓库内正确返回当前目录，`vendor/` + `composer.json` 校验通过 |
+
+### 教训
+
+1. **教训 22**：包仓库里的 `$rootDir` 和消费方的项目根是两回事。任何涉及 `vendor/bin` 的路径
+   解析都必须区分两个根，且在**包仓库内**和**消费方项目内**两个场景都验证（F40）。
+2. `buildNode()` 的 `ensureWidget → applyNodeProps → syncChildren` 顺序意味着 props 在子节点
+   建好之前应用 —— 对 QTabWidget/QStackedWidget 的 `current` 必须延后（F41）。
+3. QTableWidget 默认行高只够一行，多行单元格需要显式 `resizeRowsToContents()` 才会撑开（F42）。
+
+### 新增 findings
+
+- F40 CLI 项目根 / 包根混淆
+- F41 tabs/stack 的 `current` 首帧静默失效
+- F42 多行单元格被裁切 + `row_height` 属性缺失
+- F43 `layout.md` tabs/stack 文档写错用法

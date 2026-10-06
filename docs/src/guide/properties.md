@@ -72,6 +72,7 @@ WidgetTree::label('Hello', ['id' => 'greeting', 'style' => 'color:red', 'align' 
 | `multi` | list, table, tree | Allow multi-select |
 | `select_mode` | table, tree | Selection mode |
 | `stretch_last` | table | Let the last column stretch |
+| `row_height` | table | Fixed row height in px. `0` (default) = height follows the content; a table whose cells contain `\n` is resized automatically so multi-line cells are not clipped |
 | `checkable` | list, table, tree | Items carry checkboxes |
 | `editable` | combo, table | Editable (on a table this enables in-place cell editing and the `cell` event) |
 
