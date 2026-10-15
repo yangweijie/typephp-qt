@@ -19,12 +19,14 @@
 
 ## 环境（本机实测）
 
-### Windows（Phase 1–9 交付环境）
+### Windows（Phase 1–9 交付环境；Session 29–32 仍在此机）
 
 - Qt: `D:\tools\Qt\6.9.3\msvc2022_64`（环境变量 `QT_DIR`）
 - TypePHP: `D:\git\php\tpc_v0.9.4_windows_x64`（`tpc.exe` v0.9.4，`phpx/`）
 - MSVC: `D:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\...\vcvars64.bat`
 - 平台: Windows 10.0.26100 / cmd.exe
+- 宿主 Zend PHP（跑 `qtphp test` / `lint` / CLI 本体）: **PHP 8.5.11 ZTS VC++ 2022 x64**（2026-10-15 现测）
+- `--shot` 基线哈希按平台各存一份：qwindows `b263a747…` / offscreen `76bce2c4…`（2026-10-15，F47 §1）
 
 ### macOS（Phase 10–12 交付环境，2026-10-02 实测）
 
@@ -91,7 +93,8 @@
 | 35 | 更新 `typephp-qt-app` 技能到仓库现状 | ✅ done：技能上次同步停在 756df8a（10-03 10:50），其后 4 个提交的内容全部补齐。**SKILL.md**：CLI 块加 `qtphp build . --nano` + 「package 自检扫全部 Mach-O」；控件补 **Embedded web** 条目（三后端 + `webViewBackend()`/`webViewSupportsJs()`/`webViewReload\|GoBack\|GoForward`）；事件从 10 个补到 **21 个**（press/release/commit/itemClick/cell/expand/collapse/close/loaded/navigating/title）并写明 `on` 与 `onAny` **两个都触发**；托盘改成声明式口径（`setTray([...'menu'=>…])`、无 id 的 `tray` 事件、手势 `left/right/double/middle`、给了 `menu` 后右击由 Qt 接管）。**build-and-deploy.md**：新增 nano 段（≈4.4 MB、`.app` 83.6→64.1 MiB、同一份 yml、**只 Apple Silicon 实测**、ICU 才是大头）；新 bullet 把 F39 写进去（**改写每个 Mach-O** 的引用 + framework install name 不算加载引用）；**纠正被 F39 证伪的 `env -i` 说法**并给出三档可信判据；`--selftest` 补「失败必须非零退出」；`optimize: 2`（tpc 默认 `-O0`）口径。**system-tray.md**：顶部加包路线交叉引用。**evals.json**：+2 条（webview 三后端、nano 体积）⇒ 共 8 条，`json_decode` 通过。**顺带更正 README**：webview 行仍写两后端、缺 WKWebView（站点 `widgets/webview.md` 早已是三口径，只有 README 漏了）。 |
 | 36 | CLI 项目根/包根混淆修复 + tabs/stack current 首帧失效 + 多行单元格裁切（F40/F41/F42） | ✅ done：**三个独立缺陷**。① **F40 `bin/qtphp` 项目根混淆**：`$rootDir` 是包目录（`vendor/yangweijie/typephp-qt/`），但 `vendor/bin/tpc.php` 与 `vendor/bin/phpunit` 属于消费方项目 —— 包经 composer 安装后，`findTpc()` 去包内 `vendor/bin/` 找 tpc ⇒ 消费方报「tpc 未找到」，build/run/package 全卡住。新增 `projectRoot()` 按 `$GLOBALS['_composer_bin_dir']` → cwd 向上 → 包目录三级解析，`findTpc()`/`cmdDoctor()`/`cmdTest()` 全部改走项目根（包仓库直接开发时退回包目录）。② **F41 tabs/stack current 首帧失效**：`buildNode()` 的顺序是 `ensureWidget → applyNodeProps → syncChildren`，applyNodeProps 里应用 current 时 QTabWidget 还是空的 —— `setCurrentIndex(1)` 被 Qt 钳回 0，声明式切页静默失效。新增 `applyDeferredCurrent()`，在 `syncChildren()` 之后补一次；applyNodeProps 对 tabs/stack 的 current 跳过签名记录（否则下一帧签名未变、补应用也被跳过）。③ **F42 多行单元格裁切**：QTableWidget 默认行高只够一行，含 `\n` 的单元格被纵向裁掉渲染成 `…`。新增 `autoRowHeight()` —— 只有真出现多行单元格时才 `resizeRowsToContents()`；新增 `row_height` 属性（`0` = 自动，`>0` = 固定，`setSectionResizeMode` 切换 + `qt_rowHeightSet` 标记防覆盖）。**文档**：`layout.md`（中英）修正 tabs/stack 用法（tabs 收映射不是 tab 节点，stack 收子列表列表）+ 新增 `current` 必须传 int 的 tip；`properties.md`（中英）补 `row_height`。**8 文件 +176 −24**，编译通过，`--selftest` 25/25、`--difftest` 20/20、`--shot` 两条基线（cocoa `2728fb1a…` / offscreen `6c4832a6…`）均逐字节一致、phpunit **128/216**、lint 26/26 契约一致。 |
 | 37 | Windows 上把 `--nano` 真正编出来 + 自包含硬证据 | ✅ done（F44，Session 29）：此前 nano 只有 Apple Silicon 实测。Windows 首建链接期缺三个符号 ⇒ 新增 `compat/msvc/php_nano_win_stubs.c`（`crc32_x86_simd_update` 回落标量 / `zend_ce_fiber` BSS 符号 / `php_random_xoshiro256starstar_seed256` 同语义），**整份包在 `#if defined(PHP_NANO)` 里**；`examples/hello/project.yml` 与 `bin/qtphp` 的 `qtphp new` 模板 `sources` 各加一行。**验收（全 Windows 本机实测）**：`qtphp build examples/hello --nano` 264 TU + 链接 rc=0；产物 **3,790,848 B**，PE import 表只有 `Qt6Core/Gui/Widgets` + `WebView2Loader` + MSVC CRT + 系统 DLL —— **无 php/phpx**；`--selftest` **25/25**、`--difftest` **20/20**、`--shot` 760×720 出图（读图确认，标注 `backend=webview2，js=支持`）。**自包含硬证据**：6 个 PHP 运行时残留 DLL（`phpx`/`php8ts`/`gmp-10`/`mpfr-6`/`libmpdec{,-4.0.1}`）移出 DLL 搜索路径后两测仍全过；PATH 只留 `C:\Windows\system32;C:\Windows`（断掉 Qt bin 兜底）仍 passed。**负向互证**：用官方 SDK 头单编同一份 `.c` ⇒ `CL_EXIT=0` 且 `.obj` 里没有那三个符号定义（空 TU 生效，非 nano 路径不会撞 libphp/phpx）。**未验**：Linux 侧 nano。 |
-| 38 | 合并 `origin/main` 的撞号消解 + 追回从未入库的 nano 资产（F45） | ✅ done：**两件事**。① **冲突消解**：`findings.md`/`task_plan.md` 两侧在相同位置各写了自己的 F40 与行 36 ⇒ 规则「已发布编号不动，本地让号」：nano F40→**F44**、行 36→**37**、分解段 `Phase 36`→**Phase 37**（37.1–37.7）；回填悬空引用（Errors 表两处 `F40 §1/§2`→`F44 §1/§2`）；mac 侧 session 定名 **Session 30** 并从 `progress.md` 末尾移到顶部（本文档约定新 session 置顶），其 F40–F43 标题同步；教训撞号（mac 侧「`$rootDir` ≠ 项目根」也编成 22）→ **25**，现 20–25 连续唯一。校验＝对 base/ours/theirs 三 stage 逐行比对「两侧新增是否都还在工作区」，差异仅那两行有意重编号 ⇒ 无内容丢失。② **追资产**：合并后 `--nano` build 只在 `hash_xxhash.c` 一个 TU 报 `C1083: 无法打开 stdalign.h`，查出 `compat/msvc/` 的**两个**文件（`php_nano_win_stubs.c` + `stdalign.h`）**从未 `git add`**（空目录、`git ls-files` 为空、`check-ignore` 无命中），而 `project.yml`/`qtphp new` 模板/`$msvcStdalign` INCLUDE 前置三处引用早已提交。按 F44 语义重建并补齐 ⇒ **264/264 TU + 链接 rc=0，产物 3,795,456 B**（比 F44 的 3,790,848 大 4,608 B，**未归因**，已在 F44 顶部标注）；PE import 表 `grep -c php`=0；`--selftest` 25/25、`--difftest` 20/20（6 个 PHP DLL 仍在 `build/.stale/` ⇒ 依赖藏着测）；`dumpbin /SYMBOLS` 两函数 External 定义 + `zend_ce_fiber` 为 `.bss` 暂定定义；**非 nano 负向互证**：不带 `--nano` 重编 rc=0 且产物真 import `php8ts.dll`+`phpx.dll` ⇒ 空 TU 生效、无 `C2491`。教训 26：「编译过」≠「入库过」。 |：此前 nano 只有 Apple Silicon 实测。Windows 首建链接期缺三个符号 ⇒ 新增 `compat/msvc/php_nano_win_stubs.c`（`crc32_x86_simd_update` 回落标量 / `zend_ce_fiber` BSS 符号 / `php_random_xoshiro256starstar_seed256` 同语义），**整份包在 `#if defined(PHP_NANO)` 里**；`examples/hello/project.yml` 与 `bin/qtphp` 的 `qtphp new` 模板 `sources` 各加一行。**验收（全 Windows 本机实测）**：`qtphp build examples/hello --nano` 264 TU + 链接 rc=0；产物 **3,790,848 B**，PE import 表只有 `Qt6Core/Gui/Widgets` + `WebView2Loader` + MSVC CRT + 系统 DLL —— **无 php/phpx**；`--selftest` **25/25**、`--difftest` **20/20**、`--shot` 760×720 出图（读图确认，标注 `backend=webview2，js=支持`）。**自包含硬证据**：6 个 PHP 运行时残留 DLL（`phpx`/`php8ts`/`gmp-10`/`mpfr-6`/`libmpdec{,-4.0.1}`）移出 DLL 搜索路径后两测仍全过；PATH 只留 `C:\Windows\system32;C:\Windows`（断掉 Qt bin 兜底）仍 passed。**负向互证**：用官方 SDK 头单编同一份 `.c` ⇒ `CL_EXIT=0` 且 `.obj` 里没有那三个符号定义（空 TU 生效，非 nano 路径不会撞 libphp/phpx）。**未验**：Linux 侧 nano。 |
+| 38 | 合并 `origin/main` 的撞号消解 + 追回从未入库的 nano 资产（F45） | ✅ done：**两件事**。① **冲突消解**：`findings.md`/`task_plan.md` 两侧在相同位置各写了自己的 F40 与行 36 ⇒ 规则「已发布编号不动，本地让号」：nano F40→**F44**、行 36→**37**、分解段 `Phase 36`→**Phase 37**（37.1–37.7）；回填悬空引用（Errors 表两处 `F40 §1/§2`→`F44 §1/§2`）；mac 侧 session 定名 **Session 30** 并从 `progress.md` 末尾移到顶部（本文档约定新 session 置顶），其 F40–F43 标题同步；教训撞号（mac 侧「`$rootDir` ≠ 项目根」也编成 22）→ **25**，现 20–25 连续唯一。校验＝对 base/ours/theirs 三 stage 逐行比对「两侧新增是否都还在工作区」，差异仅那两行有意重编号 ⇒ 无内容丢失。② **追资产**：合并后 `--nano` build 只在 `hash_xxhash.c` 一个 TU 报 `C1083: 无法打开 stdalign.h`，查出 `compat/msvc/` 的**两个**文件（`php_nano_win_stubs.c` + `stdalign.h`）**从未 `git add`**（空目录、`git ls-files` 为空、`check-ignore` 无命中），而 `project.yml`/`qtphp new` 模板/`$msvcStdalign` INCLUDE 前置三处引用早已提交。按 F44 语义重建并补齐 ⇒ **264/264 TU + 链接 rc=0，产物 3,795,456 B**（比 F44 的 3,790,848 大 4,608 B，**未归因**，已在 F44 顶部标注）；PE import 表 `grep -c php`=0；`--selftest` 25/25、`--difftest` 20/20（6 个 PHP DLL 仍在 `build/.stale/` ⇒ 依赖藏着测）；`dumpbin /SYMBOLS` 两函数 External 定义 + `zend_ce_fiber` 为 `.bss` 暂定定义；**非 nano 负向互证**：不带 `--nano` 重编 rc=0 且产物真 import `php8ts.dll`+`phpx.dll` ⇒ 空 TU 生效、无 `C2491`。教训 26：「编译过」≠「入库过」。 |
+| 39 | 下游反馈的四项「静默不生效」修复 + Windows `--shot` 收敛实测（F46/F47，Session 32） | 🟡 代码已改并本机复验，**未提交、三处新分支缺正控制**：**四个静默缺陷**（F46 §1–§4，全部下游实报、各被误判成产品缺陷查过一轮）。① **combo `current` 早于 `items`**：`WidgetTree::combo()`（`src/WidgetTree.php:181-186`）先收用户 props 再 append `items`，所以传 `current` 的应用序列天然 `current,items,value`；命中 `current` 时 `count()==0` ⇒ `findText` 返回 -1 ⇒ `setCurrentIndex(-1)` 静默清空，随后 `items` 又把首项设成当前 ⇒「我传的值没生效，像选了默认值」。新增 `selectComboValue()`（先按 `itemData`=声明 id、再按文本、都找不到**保持原样**）+ `qt_pendingCurrent`/`qt_pendingIsInt` 挂起，`items` 落地后补应用。与 F41 同族（属性应用早于结构落地，Qt 钳位而不报错）。② **`spacer()` 文档与实现分叉**：文档写 `spacer(1)`=弹性，实现落成 `QSpacerItem(size,0,Fixed,Minimum)+addItem()`（不带 stretch 因子）⇒ 两向都不占位，"推开邻居"从未发生；应用被逼用 `label('',{grow:1})` 规避，而那条又踩 ④ ⇒ 两个静默缺陷叠成「页面越长越容易空白/闪烁」。改后 `spacer(n<=1)` 走 `box->addStretch(n)`，固定间隔按盒子方向生成。③ **scroll 页 slack 没去处**：内容面板 `setWidgetResizable(true)` ⇒ 高度至少等于视口，孩子 grow 全 0 时 `QBoxLayout` 把多余高度平均分 ⇒ 放大窗口卡片间长出大片空白（稳态量测 `viewport=908` vs `contentMin=591`，**根本没溢出**，下游查的方向就错了）⇒ 桥接只对 scroll 内容面板补一条尾巴 stretch（普通 vbox 不补：那里"孩子被拉高"有时是应用要的填充）。④ **结构路径 id 只保证帧内稳定**：前面兄弟数量一变，后面无 id 节点路径就变 ⇒ 每帧重建、丢焦点/选中/滚动 ⇒ 规则「动态容器里的孩子必须显式 `id`」进文档（不做内容哈希兜底，兜底也救不了状态）。**外加一条 A/B 否证**（F46 §5）：`snapshot()` 里加"排空 `LayoutRequest` + `activate()`"看着正好治"拍到收敛前一帧"，实测把**8 次 8 个相同哈希变成 6/2** ⇒ 回退，结论写进代码注释（防好心回改）与 `headless.md` 第 4 条；布局问题换仪器（`minimumSizeHint` vs 视口几何），不换截图配方。文档另纠正托盘两条陈旧声明（`quit_on_last_window_closed` 早就是选项、五种激活原因全转发）并补 Windows 11 托盘存在性的三条可归因证据（F46 §6）。**本轮现测**：`qtphp test` **128/216**、lint 契约一致、`--selftest` **25/25**、`--difftest` **20/20**、`--shot` qwindows **6/6** 同哈希 `b263a747…` / offscreen **3/3** 同哈希 `76bce2c4…` ⇒ 交付项「Windows 侧同配方收敛未验」**闭环**（只剩 Linux）。**但 F47 §3 如实记账**：combo 的 `qt_pendingCurrent`、`spacer(20)` 方向分支、scroll 尾巴 stretch **三条分支示例从未走到**（示例用 `value` 不用 `current`、只用 `spacer(1)`、没有 `scroll` 节点）⇒ 本轮 25/20 全绿对它们**零鉴别力**（Phase 39.8 补正控制）。工作区 5 文件 +147 −8 未提交；`docs/src/zh/` 镜像未同步。 |
 
 ### Phase 10 分解（macOS）
 
@@ -609,6 +612,22 @@
 - [x] 37.6 负向互证：官方 SDK 头单编同一份 `.c` ⇒ `CL_EXIT=0`、`.obj` 无那三个符号（证明 37.2 的空 TU 真生效）。
 - [ ] 37.7 Linux 侧 nano（Debian 容器还在，重跑要先按 F20 起宿主代理）
 
+### Phase 39 分解（Session 32：下游反馈的「静默不生效」四件套，Windows）
+
+- [x] 39.1 combo 的 `current` 在空表上挂起、`items` 落地后补应用；匹配顺序 `itemData` → 文本 → **保持原样**（F46 §1）。
+- [x] 39.2 `spacer(n<=1)` 改成真 `box->addStretch(n)`；固定间隔按容器方向生成（F46 §2）。
+- [x] 39.3 `syncChildren()` 末尾只给 **scroll 内容面板**补尾巴 stretch，普通 vbox 一律不动（F46 §3）。
+- [x] 39.4 「动态容器里的孩子必须显式 `id`」写进 `layout.md` + `buildNode()` 注释（帧内稳 ≠ 跨帧稳，F46 §4）。
+- [x] 39.5 `snapshot()` 不等布局收敛：A/B 实测 8/8 → 6/2 后回退，结论同时进代码注释与 `headless.md`（F46 §5，教训 28）。
+- [x] 39.6 托盘文档纠偏（`quit_on_last_window_closed` 已是选项 / 五种激活原因全转发）+ Windows 11 三条可归因证据（F46 §6）。
+- [x] 39.7 Windows `--shot` 同配方收敛实测：qwindows 6/6 = `b263a747…`、offscreen 3/3 = `76bce2c4…` ⇒ 交付项「Windows 未验」闭环（F47 §1）。
+- [ ] 39.8 **补三处缺失的正控制**（F47 §3）：在 `--difftest` 里加三张最小复现表 —— ① combo 传 `current` 且下一帧只改 `items`，断言 `widget_value` 读回那个 id；② `vbox` 里 `spacer(20)`，断言相邻 label 的 y 差 ≥ 20；③ `scroll` 放大后断言尾部 stretch（读几何不读像素）。判据走 rc（F34）。
+- [ ] 39.9 中文镜像同步：`docs/src/zh/guide/layout.md`、`zh/guide/menus-tray-timers.md`、`zh/advanced/headless.md`（本轮只改了 en 三份；Session 30 的先例是一起改）。
+- [ ] 39.10 提交工作区（5 文件 +147 −8）。顺序要紧：先 39.8/39.9 再提交，否则提交的是「未验收修复」。
+- [ ] 39.11 若要归因 `spacer(1)` 的像素变化：`git stash` cpp-src → 重编 → 存哈希 → `pop` → 重编 → 存哈希。教训 21：基线哈希不**改前改后各存一次**就事后补不回来。
+- [ ] 39.12 清掉游离的 `examples/hello/rebuild.log`（10-11 的旧构建日志，未跟踪且 `check-ignore` 无命中 —— 别让它长期冒充本轮验收证据）。
+- [ ] 39.13 Linux 侧 `--shot` 同配方收敛（需按 F20 起宿主代理 + Debian 容器）。
+
 ## Errors Encountered
 
 | Error | Attempt | Resolution |
@@ -687,6 +706,10 @@
 | 新克隆在 Windows 上 `build` 必报 `LNK1181: 无法打开 WebView2Loader.dll.lib` | 1 | `.gitignore:9` 的 `*.lib`（本意是排 MSVC 构建产物）**没有锚定到根**，把 `third_party/webview2/x64/WebView2Loader.dll.lib` 一起吞了 ⇒ `git ls-files third_party/webview2/` 里只有头文件和 loader DLL，偏偏缺 `project.yml:39` 与 `bin/qtphp:470` 写死要链的那一个。加 `!third_party/**/*.lib` 放行（dummy 文件三重确证：`check-ignore` rc=1、`git add -n` 可收、`/build/` 规则未削弱）。但**本机磁盘上根本没有这个文件**（`find third_party -type f` 只有 5 项：nuspec、README、两个 header、`WebView2Loader.dll` 194,912 B）⇒ **那 3.5 KB 的 import lib 只能从 vendor 它的 Windows 机器补交**（F27 第 5 条） |
 | 连跑 6 次 `--shot` 得到 **两种** PNG sha256（5×`fc9319b597…` / 1×`0876b10bf0…`），差点把「哈希不同」当成回归 | 3 | 用 PIL `ImageChops.difference().getbbox()` 定位到两处**外部状态**：行 62–83 是 QLineEdit **光标闪烁**相位，行 362–380 是「打开日志窗口」按钮的 **hover/焦点描边**；PNG 里没有 `tIME` chunk ⇒ 差异是真实像素。**结论：sha256 相等只能单向用**（相等 ⇒ 无变化，成立；不同 ⇒ 有回归，不成立，~1/6 概率纯属噪声）。要让 CI 拿 sha256 当基线，得先 `QApplication::setCursorFlashTime(0)` 并固定焦点（F28 第 1 节，未做） |
 | 「还原探针后重编复验」的产物里仍查得到 `--linkprobe`/`WVURL`/`webview_url_probe`，且 `build/extension-hello.cc` 的 mtime 停在探针期 | 2 | 一次性标记实验可复现：**增量构建在源码回退到「曾构建过的状态」时不重写生成文件**，字面量池只增不减（残留只在 `php::Str{ZEND_STRL(...)}` 池内、无代码引用），而编出来的代码是新的（还原后的产物与全清重建产物的标题行区域 `bbox=None`）。⇒ 本轮改成**删掉整个 `build/` 全清重建**重测：`--selftest` 25/25、`--difftest` 20/20、`--shot` rc=0，产物内探针字符串 0 处。教训：**别用 `strings 产物` 自证干净**，要全清重建 + 行为比对（F28 第 2 节） |
+| 给 `snapshot()` 加「排空 `LayoutRequest` + `activate()`」的等布局收敛循环，连拍哈希从 **8/8 相同**变成 **6/2** | 1 | 语义上它更像正确修复，但「抓帧时是否还排着 LayoutRequest」本身依赖时序 ⇒ **回退**。可复现性优先于"更正确"（教训 28）；布局问题改用几何量测（F46 §5） |
+| combo 传 id 型 `current`（如 `8.2.19`）在空表上 `findText` 落空 ⇒ `setCurrentIndex(-1)`，随后 `items` 把首项设成当前，界面"像选了默认值" | 1 | 先按 `itemData` 找、再按文本、都找不到**保持原样**；表为空时挂 `qt_pendingCurrent` 待 `items` 落地补应用（F46 §1） |
+| 想拿本轮 `--shot` 哈希去证明 `spacer(1)` 改成了真 stretch 的像素差异 | 1 | 改前 Windows 从未存过基线哈希，跨轮次又不可 diff（教训 21）⇒ 只能做「stash → 重编 → 存哈希 → pop → 重编 → 存哈希」的成对实验（Phase 39.11） |
+| `--selftest`/`--difftest` 25/25、20/20 全绿，却覆盖不到本轮三处新分支 | 1 | 不是 bug 是**验收漏洞**：示例用 `value` 不用 `current`、只用 `spacer(1)`、没有 `scroll` 节点 ⇒ 全绿对它们零鉴别力。教训 27：静默类修复必须先造会失败的正控制（Phase 39.8） |
 
 ## Decisions Log
 
@@ -743,18 +766,35 @@
   Apple Container 可以模拟之后，Linux 侧换成真 Debian 12 arm64 编译真验收。代价是先解决容器没有
   NAT egress（宿主只读转发代理，F20），收益是把「成建制缺口」一次性收窄成「只剩打包路线」，
   并且白捡一条兼容性证据：**Qt 6.4.2（Debian 12）与 6.11.2（brew）上 14+20 条断言完全一致**（F21）。
+- **任何「选中/当前/索引」类属性都必须能在目标结构尚未存在时存活下来**（Session 32，F46 §1 + F41）：两处同一条根 ——
+  属性应用早于结构落地时，Qt 的行为是**钳位而不是报错**。tabs/stack 靠延后到 `syncChildren()` 之后（F41 的
+  `applyDeferredCurrent`），combo 靠 `qt_pendingCurrent` 挂到 `items` 落地。以后加这类属性先问一句「表还是空的怎么办」。
+- **combo 找不到候选值时保持原样，不 `setCurrentIndex(-1)`**（F46 §1）：把「值不在候选里」留给应用判断。
+  静默改掉正是这个缺陷的原罪 —— 用户看到的是"界面显示第一项"，而不是"你传的值不存在"。
+- **`spacer(n<=1)` 必须是真 stretch；固定间隔跟随容器方向**（F46 §2）：文档语义优先于实现便利。这条承诺已写在
+  `layout.md` 里三年，实现落到 `QSpacerItem(size,0,Fixed,Minimum)+addItem()`（不带 stretch 因子）上等于没做；
+  应用被逼用 `label('', {grow:1})` 规避，而那条又踩无 id 每帧重建 —— **两个静默缺陷会叠成一个更难归因的现象**。
+- **slack 归属由桥接替 `scroll` 决定，但只替 `scroll` 决定**（F46 §3）：`setWidgetResizable(true)` 的语义就是
+  「内容高度至少等于视口」，孩子 `grow` 全 0 时 `QBoxLayout` 会把多余高度平均分。桥接在内容面板尾部补一条 stretch
+  等价于每个应用自己手写一条，而这条不该每个应用都被提醒一遍；普通 vbox 不补 —— 那里"孩子被拉高"有时正是应用要的填充。
+- **无 id 节点不做内容哈希兜底**（F46 §4）：结构路径只保证帧内稳定，跨帧（前面兄弟数量变化）必然漂移；兜底也救不了
+  控件内部状态（焦点/选中/滚动位置）。把「动态容器里的孩子必须显式 `id`」写成**契约**，而不是自动魔法。
+- **可复现性优先于"更正确"**（F46 §5，教训 28）：`snapshot()` 里"等布局收敛"在语义上更像正确答案，A/B 却把它否掉
+  （8 次 8 个相同哈希 → 6/2）。当一项资产的唯一价值是**逐字节可比**，任何引入时序依赖的改进都是回归；
+  布局问题换仪器（`minimumSizeHint` vs 视口几何），不换截图配方。
 
 ## 目标产物（交付标准）
 
 - [x] `composer.json` 可 `composer validate`，含 `bin`、PSR-4、scripts
 - [x] `bin/qtphp doctor|new|build|run|package|test|lint` 全部可用
 - [x] 示例应用能 `build`（tpc 编译成功）→ `--shot` 出 PNG → `package` 自检通过
-- [x] `qtphp test` 在无 Qt 环境下全绿（**127 tests / 215 assertions**）
+- [x] `qtphp test` 在无 Qt 环境下全绿（**128 tests / 216 assertions**，Session 32 现测）
 - [x] 示例 `--selftest` 在真实 AOT 二进制下全部事件通过
 - [x] 示例 `--difftest` 在真实 AOT 二进制下 20/20 通过（表格/树 diff + `patch` 的 `call` 行为验收）
 - [x] `--shot` 出图可当 CI 基线：三类瞬态（墙钟文案 / 焦点 / 瞬态动画）全部在 `snapshot()` 里按掉，
       配方只需 `runFrames(3)`，cocoa 与 offscreen 各 ×8 收敛为 1 种哈希（24.5、24.9、24.10 / F28）。
-      **Windows / Linux 侧的同配方收敛未验**（需真机或 tgl 容器复跑）
+      **Windows 侧已验**（Session 32 现测：qwindows ×6 = `b263a747…` 全同、offscreen ×3 = `76bce2c4…` 全同；
+      跨平台哈希不可比，基线**按平台各存一份**）；**Linux 侧的同配方收敛仍未验**（需真机或 tgl 容器复跑）
 - [x] 示例演示多窗口 / 托盘 / 定时器，`--selftest` **25/25** 覆盖其 handler（Phase 20/21 补手势与信号后从 14 涨到 25）
 - [x] `webview` 控件在 macOS 原生二进制上真机渲染 —— `html` 与 `url`（本地文件，相对 exe 目录）两条分支都出图确认，且 `project.macos.yml` 零改动即自动落到 QTextBrowser 后端（24.1/24.2）
 - [x] macOS 有**支持 JS 的第三后端 WKWebView**（系统 WebKit，零安装）：`html`/`url`（远程）/`zoom` 与 `navigating`/`loaded`/`title`/`link` 四事件全部真机读回，`qtphp new` 生成的 mac 入口默认启用（24.8）
@@ -767,14 +807,19 @@
       Linux / Windows 侧同一语义未跑）
 - [x] Linux（Debian 12 arm64 + Qt 6.4.2）真机 `build`→`run`→offscreen `--selftest`/`--difftest`/`--shot` 全绿（12.7）
 - [x] Linux 真机 `package` → `dist/<name>/` 自包含（`ldd` 闭包无一行落在产物外 + DT_RPATH 断言）⇒ 产物 `env -i` offscreen 下 14/14 + 20/20 + 出图全 rc=0，且渲染与开发产物逐字节一致（12.8）
+- [ ] **每一处「静默不生效」类修复都有一个会失败的正控制**（Session 32 暴露的验收空洞）：combo 的 `qt_pendingCurrent`、
+      `spacer(20)` 的方向分支、scroll 尾巴 stretch 三条**在示例里从未被执行** ⇒ 25/20 全绿对它们零鉴别力。
+      配方见 Phase 39.8，判据走 rc（F34）。
+- [ ] **中英文档镜像同步**：`docs/src/zh/` 三份（`guide/layout.md`、`guide/menus-tray-timers.md`、`advanced/headless.md`）
+      落后于本轮 en 改动（Session 30 的先例是中英一起改）。
 - [x] README 说清 5 分钟上手路径
 
 ## 规模（实测）
 
 | 部分 | 行数 |
 |---|---|
-| `cpp-src/`（qt_common.h + qt_bridge.cc + qt_widgets.cc + qt_webview.cc + qt_webview_wk.mm） | 2981 |
-| `src/`（QtApp + WidgetTree + FakeBridge） | 1112 |
-| `bin/qtphp` | 2122 |
+| `cpp-src/`（qt_common.h + qt_bridge.cc + qt_widgets.cc + qt_webview.cc + qt_webview_wk.mm） | 3259 |
+| `src/`（QtApp + WidgetTree + FakeBridge） | 1152 |
+| `bin/qtphp` | 2432 |
 | `php-src/qt.stub.php` | 157 |
-| 合计 | 6372 |
+| 合计 | 7000 |

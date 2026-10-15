@@ -1,5 +1,89 @@
 # Progress Log — typephp-qt
 
+## Session 32 — 2026-10-15（Windows：下游反馈的「静默不生效」四件套 + 一次被 A/B 否掉的截图修复）
+
+### 任务来源
+
+不是本仓库自测发现的，是**下游应用报上来的四个现象**，各自都被误判成产品缺陷查过一轮：
+
+| 下游现象 | 真因（本轮定位） |
+|---|---|
+| 下拉传了当前版本号，界面却显示第一项，"像选了默认值" | combo 的 `current` 命中空表 → `findText` 返回 `-1` → `setCurrentIndex(-1)` 静默清空，随后 `items` 又把首项设成当前（F46 §1） |
+| 窗口一放大，卡片之间长出大片空白；缩小正常 | `scroll` 内容面板 `setWidgetResizable(true)` 的 slack 被 `QBoxLayout` 平均分给孩子；稳态量测 `viewport=908` vs `contentMin=591`，**根本没溢出**（F46 §3） |
+| `spacer(1)` 说好的"把邻居推开"从未发生 | 实现落成 `QSpacerItem(size,0,Fixed,Minimum)` + `addItem()`，不带 stretch 因子（F46 §2） |
+| 页面越长越容易看到空白/闪烁 | 结构路径 id 只保证帧内稳定，前面兄弟数量一变后面就每帧重建，丢焦点/选中/滚动（F46 §4） |
+
+**共同形态**：四条全是**静默** —— 属性被接受、控件建出来、渲染成功、退出码 0，只是效果不是文档说的那个。
+根因一句话：**属性的应用时机早于结构的落地，而"没落地"在 Qt 里不是错误而是钳位**。
+
+### 本轮改动（工作区未提交，5 文件 +147 −8）
+
+| 文件 | 改动 | 对应 |
+|---|---|---|
+| `cpp-src/qt_widgets.cc` | 新增 `selectComboValue()`（先按 `itemData`=声明 id、再按文本、都找不到**保持原样**）；`current` 分支在 `count()==0` 时挂 `qt_pendingCurrent`/`qt_pendingIsInt`；`items` 落地后补应用一次 | F46 §1 |
+| `cpp-src/qt_bridge.cc` | `spacer(n<=1)` 在 `QBoxLayout` 里走 `box->addStretch(n)`；固定间隔按盒子方向生成；`syncChildren()` 末尾给 **scroll 内容面板**自动补尾巴 stretch；`buildNode()` 与 `snapshot()` 各加一段"为什么不能这样改"的注释 | F46 §2/§3/§4/§5 |
+| `docs/src/advanced/headless.md` | 第 4 条：`snapshot()` 里不要"等布局收敛"，附 A/B 数字 | F46 §5 |
+| `docs/src/guide/layout.md` | scroll slack 两条推论 + `spacer` 方向规则 +「动态容器孩子必须显式 id」一节 | F46 §2/§3/§4 |
+| `docs/src/guide/menus-tray-timers.md` | 纠正两条陈旧声明（`quit_on_last_window_closed` 已是选项、五种托盘激活原因全转发）+ Windows 11 托盘存在性的三条可归因证据与两条自动化硬限制 | F46 §6 |
+
+### 时间线上的一个坑（记录以免下轮误读）
+
+`examples/hello/rebuild.log`（10-11 23:08，未跟踪、`check-ignore` 无命中）早于代码改动（10-15 11:05–11:23）。
+它是**上一轮**的构建日志，不能当本轮改动的编译证据；本轮的编译证据是 `build/hello.exe` 与
+`build/cache/objects/external/…/qt_{bridge,widgets}.cc.obj` 的 mtime（11:24）晚于源文件（11:23:52）。
+顺带：这个游离 log 要么删掉要么进 `.gitignore`，别让它长期冒充验收记录。
+
+### 验收（本轮现测，全部 Windows 本机）
+
+```
+php bin/qtphp test   </dev/null → OK (128 tests, 216 assertions)  rc=0
+php bin/qtphp lint   </dev/null → [OK] 契约一致                    rc=0
+hello.exe --selftest            → 25 个 ok + passed               rc=0
+hello.exe --difftest            → 20 个 ok + passed               rc=0
+hello.exe --shot ×6             → 6/6 同一哈希 b263a7470f6cc359…（qwindows，22,900 B）
+QT_QPA_PLATFORM=offscreen ×3    → 3/3 同一哈希 76bce2c4c9f00971…（7,760 B）
+python docs/check-anchors.py docs/src → 全部锚点有效（16 个目标文件）rc=0
+```
+
+**交付项推进**：`--shot` 同配方收敛此前只有 macOS 成立，台账挂着「Windows / Linux 侧未验」⇒ 现在
+**Windows 已验**（含 offscreen 双配置），只剩 Linux。跨平台哈希不可比（插件/字体不同），基线按平台各存。
+
+### 但本轮的"全绿"含水分，已如实记账（F47 §3）
+
+五处改动里**只有两处**被示例走到：combo 的 `qt_pendingCurrent`、`spacer(20)` 方向分支、scroll 尾巴 stretch
+三条**从未执行过**（示例用 `value` 不用 `current`、只用 `spacer(1)`、且没有 `scroll` 节点）。
+⇒ 25/20 全绿对本次这三处修复**零鉴别力**。下一轮第一件事是在 `--difftest` 里补三张最小复现表
+（断言读值/读几何，不读像素），让它们进 rc 判据。
+
+### 教训
+
+- **教训 27：「测试全绿」对未覆盖的分支零鉴别力。** 静默类修复（不报错、只是没效果）不能拿回归套件
+  通过当验收，必须先造**会失败的正控制**：把新分支在示例/`--difftest` 里走到，并确认改回旧实现时它会红。
+- **教训 28：可复现性优先于"更正确"。** `snapshot()` 加"等布局收敛"在语义上更像正确答案，A/B 却把它
+  否掉了（改前 8 次 8 个相同哈希，改后 6/2）。当一项资产的唯一价值是**逐字节可比**，任何引入时序依赖的
+  "改进"都是回归；换仪器（几何量测）而不是换配方。
+- 延续：教训 21（产物内嵌时间戳 ⇒ 跨轮次二进制不可 diff）本轮再次生效 —— 想归因像素变化必须
+  **改前改后各存一次基线哈希**，事后补不回来。
+
+### 新增 findings
+
+- F46 下游反馈的四项「声明写了但桥接静默不生效」缺陷 + 一次差点改错的截图修复
+- F47 Windows 侧 `--shot` 同配方收敛首次实测 + F46 五项修复的验收台账
+
+### 未闭环（下一轮候选，按性价比排序）
+
+1. 补三张 `--difftest` 正控制表（F47 §3 给了具体写法）⇒ 让本轮修复进 CI 判据。
+2. **中文文档镜像未同步**：`docs/src/zh/guide/layout.md`、`zh/guide/menus-tray-timers.md`、
+   `zh/advanced/headless.md` 三个文件本轮没动（Session 30 的先例是中英同步改）。
+3. 工作区 5 个文件未提交；提交前应先做完 1 和 2，否则提交的是"未验收修复"。
+4. Linux 侧 `--shot` 收敛（要按 F20 起宿主代理 + Debian 容器）。
+5. 清理 `examples/hello/rebuild.log`（删除或加 ignore）。
+6. 台账卫生：`task_plan.md` Phases 表里 **32 行排在 31 之前**（历史遗留，非本轮引入）；本轮顺手修掉了
+   38 行尾那段 870 字的合并残留重复文本（行 37 的整份拷贝挂在闭合 `|` 之后，会让表格多出一个幽灵单元格）。
+   呼应 F45 §5：**规划文件里的错不会自己消失**，读到就修。
+
+---
+
 ## Session 31 — 2026-10-06（Windows：合并 `origin/main` 的撞号消解 + 追回两个从未入库的 nano 资产）
 
 ### 任务

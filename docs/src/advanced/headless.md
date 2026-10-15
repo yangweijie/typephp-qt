@@ -43,6 +43,16 @@ on `examples/hello`:
 3. **Focus is cleared before grabbing.** A focused `QLineEdit` paints a Fusion highlight (`#7e9dc2`)
    and a caret instead of the plain `#b6b6b6` border, and which one you get is a race.
    `snapshot()` does the `clearFocus()`/restore itself.
+4. **Do not "wait for layout to settle" inside `snapshot()`.** It looks like the right fix for a real
+   trap — Qt queues a layout invalidation as a `LayoutRequest` event, so a shot can show a scrollbar
+   that the settled layout doesn't have (downstream read it as a product defect twice; the steady
+   state measured `viewport=908` vs `contentMin=591`, i.e. no overflow). Draining it with
+   `sendPostedEvents(nullptr, QEvent::LayoutRequest)` + `layout()->activate()` was tried and
+   **A/B-measured to be a regression**: 8 shots produced 8 identical hashes before, and 6/2 after —
+   whether a `LayoutRequest` is still pending at grab time is itself timing-dependent, so "settling"
+   becomes a coin toss, and reproducibility is the one property this whole page exists to protect.
+   Layout questions get a different instrument: compare `minimumSizeHint` against the viewport width
+   (or dump the geometry), and treat the PNG as a *visual* check only.
 
 Then verify convergence before trusting a number — the acceptance criterion is *different starting
 points must converge to one frame*:

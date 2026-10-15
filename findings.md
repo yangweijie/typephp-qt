@@ -2327,3 +2327,154 @@ ext/hash/xxhash/xxhash.h(1476): fatal error C1083: 无法打开包括文件: “
 **「编译过」不等于「入库过」**。新增构建资产必须与引用它的 yml/CLI 落在同一次提交里；判据不是
 本机 build 成功（本机有缓存与未跟踪文件兜着），而是 `git ls-files <新目录>` 非空、或从干净克隆
 跑一次 build。漏一个 shim 的表现是「264 个 TU 里只炸 1 个」，看错误完全指不到真因。
+
+## F46. 下游反馈的四项「声明写了但桥接静默不生效」缺陷 —— 外加一次差点改错的截图修复（Session 32，Windows 实测）
+
+### §0 共同形态：一类新的缺陷族，全是「不报错、只是没效果」
+
+前 31 轮的缺陷要么崩（悬垂指针）、要么响（AOT 参数校验）。这一批四条全是**静默**：属性被接受、
+控件被建出来、渲染成功、退出码 0，只是效果不是文档说的那个。这类最难归因 —— 下游三次把它当成
+自己产品的缺陷各查了一轮（一次下拉"选了默认值"、一次窗口放大后卡片间长出空白、一次"页面越长越容易
+空白/闪烁"）。共同根因是一句话：**属性的应用时机早于结构的落地，而"没落地"在 Qt 里不是错误而是钳位**。
+
+### §1 combo 的 `current` 排在 `items` 前面 ⇒ 永远命中空表（cpp-src/qt_widgets.cc）
+
+顺序不是巧合，是构造器定的：`WidgetTree::combo()`（`src/WidgetTree.php:181-186`）先收下用户的
+`$props`，**再** append `items`/`value` —— 所以凡是在 props 里传 `current` 的应用，属性序列天然是
+`current, items, value`，而 `qtApplyProp` 按序应用，命中 `current` 时 `combo->count() == 0`。
+
+旧代码两条分支在空表上都错，且错法不同：
+- 传字符串 ⇒ `findText()` 返回 `-1` ⇒ `setCurrentIndex(-1)` **静默清空**；
+- 随后 `items` 分支 `clear()` + `addItem()`，Qt 自动把首项设为当前 ⇒ 界面显示第一项，真值不是它。
+  这就是下游看到的"我传的版本号没生效，看起来像选了默认值"，最后只能把真值额外写成只读文本才敢用。
+
+修法两半：
+1. `selectComboValue()` —— **先按 `itemData`（= 声明里的 id）找，再按显示文本找，都找不到就保持原样**。
+   按 id 优先是必须的：应用回传的"当前值"通常是 id（例如 `8.2.19`），显示文本却带说明文字，
+   只按文本匹配必然落空。找不到就**不** `setCurrentIndex(-1)`，是为了把"值不在候选里"这件事留在
+   应用侧判断，而不是被控件悄悄改掉 —— 静默改掉正是本缺陷的原罪。
+2. items 为空时把要选的值挂到 `qt_pendingCurrent` / `qt_pendingIsInt`，`items` 落地后补应用一次并清空该属性。
+
+**与 F41 同族**：F41 是 tabs/stack 的 `current` 早于 `syncChildren()`；这里是 combo 的 `current`
+早于同一 props 里的 `items`。区别只在于"结构"落在子节点还是落在属性内部 —— 所以修法也不同
+（F41 用桥接层延后，这里用 pending 属性）。判据应当统一成一条：**任何"选中/当前"类属性都必须能在
+目标结构尚未存在时存活下来**。
+
+### §2 `spacer()` 的文档语义与实现分叉了三年（cpp-src/qt_bridge.cc `syncChildren`）
+
+`layout.md` 一直写 `spacer(1)` = 弹性、吃掉剩余空间，`spacer(20)` = 固定 20px。实现却把两者都落到
+`new QSpacerItem(size, 0, Fixed, Minimum)` + `layout->addItem(...)`（**不带 stretch 因子**）：
+横向维度 `Fixed` 但值只有 1px，纵向 `Minimum` ⇒ 两个方向上"什么都不占"，说好的"把邻居推开"从未发生。
+
+应用侧因此被逼出两条规避：改用 `label('', ['grow' => 1])`，而那条又正好踩 §4 的无 id 每帧重建 ——
+两个静默缺陷叠成一个"页面越长越容易空白"。
+
+修后分支：`spacer(n <= 1)` 在 `QBoxLayout` 里走 `box->addStretch(n)`（真弹性）；固定间隔**跟着盒子方向**
+生成（竖向盒 `(0, n, Minimum, Fixed)`，横向/未知方向保持 `(n, 0, Fixed, Minimum)`）—— 原实现在竖向
+盒子里给的是"宽度固定、高度只到 Minimum"，等于没占位。
+
+### §3 scroll 页的竖向 slack 没去处 ⇒ 桥接补一条尾巴 stretch（cpp-src/qt_bridge.cc）
+
+`scroll` 的内容面板跑 `setWidgetResizable(true)`，语义是"内容高度**至少**等于视口"。当这一层的孩子
+`grow` 全为 0 时，`QBoxLayout` 把多出来的高度**平均分给每一个** —— 窗口一放大卡片之间就长出大片空白，
+缩小则一切正常。稳态量测是 `viewport=908` vs `contentMin=591`：**根本没有溢出**，纯粹是 slack 分配，
+所以下游按"排版/滚动缺陷"查的那一轮方向就错了。
+
+修法：桥接在 `syncChildren()` 末尾对 scroll 的内容面板自动 `box->addStretch(1)`，把 slack 全吃掉。
+这等价于每个应用自己手写 `label('', {grow:1})`，但这条不该每个应用都被提醒一遍。**只对 scroll 的内容
+面板做**：普通 vbox 里"孩子被拉高"有时正是应用要的填充，替它决定就是越权。
+
+### §4 结构路径 id 只保证**帧内**稳定，不保证**跨帧**稳定（cpp-src/qt_bridge.cc `buildNode`）
+
+原注释记的教训是"用递增计数器会每帧生成新 id ⇒ 每帧重建控件 ⇒ 删旧控件留悬垂指针崩溃"，改结构路径
+解决了那一半。剩下的一半以前没人写：路径由"前面兄弟的数量 + 序号"组成，**前面的数量一变**（多一个
+站点就多一行），后面那个无 id 节点的路径就跟着变 ⇒ 它每帧被重建、旧控件从布局里脱落。症状不是崩溃而是
+"页面越长越容易看到空白/闪烁"，所以极难归因到 id 命名。
+
+丢的不只是控件本身，而是控件内部状态：焦点、选中项、滚动位置。**这里不静默兜底**（不给"路径变化时
+按内容哈希生成 id"这种看似聪明的方案），因为兜底也救不了状态 —— 状态得靠应用给出真正的业务 id。
+规则已写进文档：动态容器里的孩子必须显式 `id`。
+
+### §5 `snapshot()` 里**不要**"等布局收敛"：一次 A/B 否证（差点把唯一重要的性质改坏）
+
+诱饵很正：Qt 把布局失效排成 `LayoutRequest` 事件，所以截图可能拍到收敛前的一帧（例如一条其实不该在的
+滚动条）。于是加了"排空 LayoutRequest + `activate()`"的循环 —— 听起来正好治这个。
+
+**A/B 实测把它否掉了**：改前 8 次截图出 8 个相同哈希；改后变成 6/2 两个哈希。根因是"抓帧那一刻是否还
+排着 `LayoutRequest`"本身就取决于时序，于是"让它收敛"成了抛硬币，而**可复现是这条截图基线唯一重要的
+性质**（`headless.md` 整篇都在护它）。代码注释里把这段留着，防的就是"好心人"再把它加回去。
+
+结论是换个仪器：布局问题用几何量测（`minimumSizeHint` vs 视口宽度，或直接 dump 几何），PNG 只当**视觉**
+检查用。已写进 `docs/src/advanced/headless.md` 第 4 条。
+
+### §6 Windows 11 上证明托盘图标真的存在（docs/src/guide/menus-tray-timers.md）
+
+抓屏这条路本身是陷阱：**UIA 可能交回空的桌面树**；顶层窗口枚举只列 app 窗口，而可见托盘是 explorer 的
+XAML island，`Shell_TrayWnd` 的**子窗口数为 0** ⇒ 两条路都到不了单个图标。能用的三条：
+
+| 证据 | 为什么可归因 |
+|---|---|
+| `HKCU\Control Panel\NotifyIconSettings\<id>`（每注册图标一键，含 `ExecutablePath` + `IconSnapshot` —— 外壳抓到的位图的**真 PNG**） | 解码 `IconSnapshot` 直接看；要证明来自本次运行，就从一个**从未跑过**的路径注册，看计数 0→1，否则读到的可能是历史残留 |
+| 顶层枚举里出现 `Qt<ver>TrayIconMessageWindowClass` 且属你的 pid（用 `GetWindow(GW_HWNDPREV/NEXT)` 从 `Shell_TrayWnd` 走，`FindWindow` 会跳过 owned window） | Qt 只在存在 `QSystemTrayIcon` 时才创建该窗口 ⇒ 独立于注册表的互证 |
+| `Graphics.CopyFromScreen`（GDI） | 能截任意屏幕区域，含任务栏 —— 唯一能拿到像素的路 |
+
+自动化的两条硬限制：`Win+B` + `Space` 能打开隐藏图标面板并把焦点放到第一个图标，但 `Enter` / `Apps`
+**打不开** Qt 的托盘图标 —— 激活需要真鼠标事件；且面板位置每次打开都变，坐标只在量它的那一帧内有效。
+
+顺带纠正文档里两处陈旧声明：① `quit_on_last_window_closed` **早就是 QtApp 选项**，不是"必须手写桥接"；
+② `setTray` 幂等（复用同一个 `QSystemTrayIcon`，每帧重画托盘没问题），且**五种激活原因**（`left` /
+`right` / `double` / `middle`，外加挂了上下文菜单时的 `menu`）全部转发 ⇒ "右击没反应"一般是应用没处理
+`Context`，不是桥接缺能力。真正还缺的只有循环条件（纯托盘应用得自带存活标志，不能用 `isOpen()`）。
+
+## F47. Windows 侧 `--shot` 同配方收敛首次实测 + F46 五项修复的验收台账（Session 32，全本机现测）
+
+### §1 Windows 的收敛基线（这条交付项从「未验」变「已验」）
+
+同一个 `examples/hello/build/hello.exe`（422,912 B，非 nano 构建，6 个 PHP 运行时 DLL 在位），
+连拍并逐个 `sha256sum`：
+
+| 配置 | 次数 | 结果 |
+|---|---|---|
+| 默认（`qwindows` 插件） | 6 | **6/6 同一哈希** `b263a7470f6cc35984e37a43606bab90c2f5c071f00c7e791814721c80b0c1ff`，22,900 B |
+| `QT_QPA_PLATFORM=offscreen` | 3 | **3/3 同一哈希** `76bce2c4c9f00971e89b2bc385323d166a3ba495e2ecf85c9917aa0c0c825698`，7,760 B |
+
+两平台插件哈希不同、且与 mac 的 `cocoa 2728fb1a…` / `offscreen 6c4832a6…` 也不同 —— **基线必须按平台
+各存一份**，跨平台比哈希没有意义（字体与样式实现不同）。同平台内逐字节一致才是这条基线的判据。
+至此「三类瞬态（墙钟文案 / 焦点 / 瞬态动画）在 `snapshot()` 里按掉、配方只需 `runFrames(3)`」在
+macOS 与 **Windows** 双平台成立；**只剩 Linux 未验**。
+
+### §2 本轮配套回归（现测，非引用旧结论）
+
+```
+php bin/qtphp test   </dev/null  → OK (128 tests, 216 assertions)  rc=0
+php bin/qtphp lint   </dev/null  → [OK] 契约一致                   rc=0
+hello.exe --selftest             → 25 个 ok + passed              rc=0
+hello.exe --difftest             → 20 个 ok + passed              rc=0
+```
+
+测试数从台账记的 127/215 涨到 **128/216**（Session 30/31 期间加的），`规模` 表一并更新到
+cpp-src 3,259 / src 1,152 / `bin/qtphp` 2,432 / stub 157 ⇒ **7,000 行**。
+
+### §3 验收台账：F46 五处改动里，只有两处有正控制
+
+「全过」不等于「改动被覆盖」。逐条摊开：
+
+| 改动 | 示例是否走到 | 判据状态 |
+|---|---|---|
+| §1 combo `current` 挂起补应用 | **否** —— `WidgetTree::combo()` 把位置参数写成 `value`，示例没有传 `current`，故 `qt_pendingCurrent` 分支从未执行 | **缺正控制**：现有 25/20 全绿对本次修复零鉴别力 |
+| §2 `spacer(1)` → 真 stretch | **是** —— `main.php` 五处 `spacer(1)`，截图里就带着 | 部分：改前 Windows 从未存过基线哈希，所以"像素确实变了"无法追溯归因 |
+| §2 固定间隔跟方向 | **否** —— 示例只用 `spacer(1)`，没有 `spacer(20)` | **缺正控制** |
+| §3 scroll 页尾 stretch | **否** —— 示例里根本没有 `scroll` 节点 | **缺正控制** |
+| §4/§5/§6 | 文档与注释；§5 本身已有 A/B 数（8/8 → 6/2） | 成立 |
+
+**下一轮的第一个动作**（成本极低、且能证明上述修复不是"看起来对"）：在 `main.php` 的 `--difftest`
+帧里加三张表 —— ① `WidgetTree::combo([...], '', ['id' => 'c', 'current' => '<某项 id>'])` 并**在下一帧
+改 `items` 不改 `current`**，断言 `widget_value` 读回的是那个 id；② `vbox` 里 `spacer(20)`，断言相邻
+两个 label 的 y 差 ≥ 20；③ `scroll(vbox([...]))` 放大后断言内容面板尾部 stretch 存在（读几何而不是像素）。
+这三条正好是三个静默缺陷各自的**最小复现**，写在 `--difftest` 里就进了 CI 判据（rc 已经是主判据，F34）。
+
+### §4 归因实验的正确做法（若要证明 §2 的像素变化）
+
+`git stash` 掉 `cpp-src/` 两个文件 → 重编 → 记哈希 → `git stash pop` → 重编 → 记哈希。
+**不能**直接拿本轮的 `b263a747…` 去比 F44 记的那次出图（教训 21：产物内嵌构建时间戳，且 F44 只记了
+尺寸没记哈希，两侧都不可比）。这也说明**基线哈希必须在改动前后各存一次**，事后补不回来。

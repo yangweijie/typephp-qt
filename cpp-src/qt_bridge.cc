@@ -18,6 +18,7 @@
 #include <QGuiApplication>
 #include <QKeySequence>
 #include <QScreen>
+#include <QScrollArea>
 #include <QSizePolicy>
 #include <QSpacerItem>
 #include <QUrl>
@@ -258,6 +259,13 @@ void QtWindowBox::cleanup() {
  */
 bool QtWindowBox::snapshot(const QString &path) {
     if (!window_) return false;
+    // 这里**故意只泵一遍**，不要加"等布局收敛"的循环。
+    // 试过：把排队的 LayoutRequest 用 sendPostedEvents(…, LayoutRequest) + activate() 抽干，
+    // 听起来正好治"拍到收敛前的一帧"。A/B 实测否掉了它 ——
+    // 现状 8 次截图 8 个相同哈希；加了那个循环变成 6/2 两个哈希。
+    // 原因：那一帧里到底有没有排着 LayoutRequest 取决于时序，于是"收敛"变成了抛硬币，
+    // 而**可复现**是这条截图基线唯一重要的性质（headless.md 整篇都在护它）。
+    // 布局问题的正确仪器是几何量测（minimumSizeHint vs viewport），不是多等一会儿的截图。
     qt_application->processEvents();
     QWidget *focused = window_->focusWidget();
     if (focused) focused->clearFocus();
@@ -299,6 +307,13 @@ QWidget *QtWindowBox::buildNode(const Variant &node, QWidget *parentWidget, cons
     // 没有显式 id 的节点用「结构路径」当 id。
     // 必须稳定 —— 用递增计数器会导致每帧生成新 id，进而每帧重建控件、
     // 删旧控件时留下悬垂指针而崩溃。
+    //
+    // 但「结构路径」只解决了帧内稳定，没解决**跨帧稳定**：前面的兄弟数量一变
+    // （多一个站点就多一行），后面那个无 id 节点的路径就变，于是它每帧被重建、
+    // 旧控件从布局里脱落 —— 症状是"页面越长越容易看到空白/闪烁"，而不是崩溃，
+    // 所以很难归因。结论：**动态容器里的孩子必须给显式 id**（应用侧的尾巴 stretch
+    // 就是这么处理的）；这里不静默兜底，是因为兜底也救不了控件内部状态（焦点、
+    // 选中项、滚动位置）—— 那些才是被丢掉的东西。
     QString id = toQString(spec.get("id"));
     if (id.isEmpty()) id = QStringLiteral("_p") + path;
     seen_.insert(id);
@@ -487,7 +502,22 @@ void QtWindowBox::syncChildren(QWidget *container, const QString &type, const QL
         if (!slot.widget) {
             if (slot.spacerSize > 0) {
                 if (auto *layout = qtContainerLayout(container)) {
-                    layout->addItem(new QSpacerItem(slot.spacerSize, 0, QSizePolicy::Fixed, QSizePolicy::Minimum));
+                    auto *box = qobject_cast<QBoxLayout *>(layout);
+                    const bool vertical = box
+                        && (box->direction() == QBoxLayout::TopToBottom
+                            || box->direction() == QBoxLayout::BottomToTop);
+                    if (box && slot.spacerSize <= 1) {
+                        // 文档写的是 `spacer(1)` = 弹性、吃掉剩余空间，那实现就必须是 stretch 项。
+                        // 以前它落到 `QSpacerItem(size,0,Fixed,Minimum)` + `addItem`（不带 stretch），
+                        // 于是两个方向上都"什么都不占"，说好的"把邻居推开"根本没发生 ——
+                        // 应用侧只能改用 `label('', {grow:1})`，而那条还必须有显式 id。
+                        box->addStretch(slot.spacerSize);
+                    } else if (vertical) {
+                        // 固定间隔要跟着盒子方向：竖向盒子里宽度固定、高度只到 Minimum 等于没占位。
+                        layout->addItem(new QSpacerItem(0, slot.spacerSize, QSizePolicy::Minimum, QSizePolicy::Fixed));
+                    } else {
+                        layout->addItem(new QSpacerItem(slot.spacerSize, 0, QSizePolicy::Fixed, QSizePolicy::Minimum));
+                    }
                 }
             }
             continue;
@@ -514,6 +544,19 @@ void QtWindowBox::syncChildren(QWidget *container, const QString &type, const QL
                 layout->addWidget(child);
             }
         }
+    }
+
+    // 滚动页的竖向 slack 必须有个去处：scroll 的内容面板是 `setWidgetResizable(true)`，
+    // 内容高度**至少等于视口**，而这一层的孩子 grow 全为 0 时 QBoxLayout 会把多出来的高度
+    // 平均分给每一个 —— 窗口一放大，卡片之间就长出大片空白（下游把它当成排版缺陷查过一轮）。
+    // 尾巴上加一条 stretch 把 slack 全吃掉，等价于每个应用自己手写 `label('', {grow:1})`，
+    // 但这条不该每个应用都被提醒一遍。只对 scroll 的内容面板做：普通 vbox 里"孩子被拉高"
+    // 有时正是应用要的填充。
+    if (!desired.isEmpty()) {
+        QWidget *viewport = container->parentWidget();
+        auto *scroll = viewport ? qobject_cast<QScrollArea *>(viewport->parentWidget()) : nullptr;
+        auto *box = scroll ? qobject_cast<QBoxLayout *>(qtContainerLayout(container)) : nullptr;
+        if (box) box->addStretch(1);
     }
 
     slots_[container] = desired;

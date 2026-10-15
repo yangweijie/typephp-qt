@@ -105,6 +105,29 @@ void autoRowHeight(QTableWidget *table, bool hasMultiline) {
     table->resizeRowsToContents();
 }
 
+/**
+ * combo 的选中项：先按 itemData（= 声明里的 id）找，再按显示文本找，都没有就**保持原样**。
+ *
+ * 为什么不能只靠 findText：`items` 落地时用的是 `addItem(text, id)`，而应用侧回传的"当前值"
+ * 通常是 id（例如版本号 `8.2.19`），显示文本却带着说明 —— 只按文本匹配必然落空，
+ * 而 `setCurrentIndex(-1)` 会静默清空选择，界面上显示成第一项，看起来像"选了默认值"。
+ * 这个错位曾被下游当成产品缺陷查一整轮，最后只能把真值额外写成只读文本才敢用。
+ * 找不到时保持原样，是为了让"值不在候选里"这件事留在应用侧判断，而不是被控件悄悄改掉。
+ */
+void selectComboValue(QComboBox *combo, const QString &wanted, bool isInt) {
+    if (!combo || combo->count() == 0) return;
+    if (isInt) {
+        const int index = wanted.toInt();
+        if (index >= 0 && index < combo->count()) combo->setCurrentIndex(index);
+        return;
+    }
+    for (int i = 0; i < combo->count(); ++i) {
+        if (combo->itemData(i).toString() == wanted) { combo->setCurrentIndex(i); return; }
+    }
+    const int byText = combo->findText(wanted);
+    if (byText >= 0) combo->setCurrentIndex(byText);
+}
+
 }  // namespace
 
 // ────────────────────────────── 容器判定 ──────────────────────────────
@@ -693,8 +716,14 @@ void qtApplyProp(QtWindowBox *box, QWidget *widget, const QString &type, const Q
         if (auto *tabs = qobject_cast<QTabWidget *>(widget)) { tabs->setCurrentIndex(static_cast<int>(value.toInt())); return; }
         if (auto *stack = qobject_cast<QStackedWidget *>(widget)) { stack->setCurrentIndex(static_cast<int>(value.toInt())); return; }
         if (auto *combo = qobject_cast<QComboBox *>(widget)) {
-            if (value.isInt()) combo->setCurrentIndex(static_cast<int>(value.toInt()));
-            else combo->setCurrentIndex(combo->findText(toQString(value)));
+            // 表还是空的：`items` 可能排在 `current` 后面（props 的应用顺序不保证）。
+            // 这时直接设值一定失败，所以把要选的值挂住，等 items 落地后补一次。
+            if (combo->count() == 0) {
+                combo->setProperty("qt_pendingCurrent", toQString(value));
+                combo->setProperty("qt_pendingIsInt", value.isInt() ? 1 : 0);
+                return;
+            }
+            selectComboValue(combo, toQString(value), value.isInt());
             return;
         }
         if (auto *list = qobject_cast<QListWidget *>(widget)) {
@@ -933,6 +962,13 @@ void qtApplyProp(QtWindowBox *box, QWidget *widget, const QString &type, const Q
         if (auto *combo = qobject_cast<QComboBox *>(widget)) {
             combo->clear();
             for (int i = 0; i < texts.size(); ++i) combo->addItem(texts.at(i), ids.at(i));
+            // 补应用被挂住的选中值（见 current 分支）：clear() 之后不补这一次，
+            // 下拉就会显示成第一项而真值不是它。
+            if (combo->property("qt_pendingCurrent").isValid()) {
+                selectComboValue(combo, combo->property("qt_pendingCurrent").toString(),
+                    combo->property("qt_pendingIsInt").toBool());
+                combo->setProperty("qt_pendingCurrent", QVariant());
+            }
             return;
         }
         if (auto *list = qobject_cast<QListWidget *>(widget)) {

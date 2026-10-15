@@ -122,8 +122,11 @@ A tray app differs structurally from a normal window app in two ways:
 
 **(1) Closing the window must not quit the process.**
 
-```cpp
-// needs to be set in the bridge: QApplication::setQuitOnLastWindowClosed(false)
+This is already in the bridge — it is an app option, not a hand-written patch:
+
+```php
+// QtApp options
+['quit_on_last_window_closed' => false]
 ```
 
 Otherwise the process dies the moment the window hides, and the tray icon vanishes with it.
@@ -132,11 +135,34 @@ Otherwise the process dies the moment the window hides, and the tray icon vanish
 
 A tray app has no visible window most of the time, so `while ($app->isOpen())` exits the first time the window hides. It needs a liveness flag instead.
 
-::: warning Current state of the package
-The package treats the tray as an **add-on to a window app** (`setTray` plus `onAny('tray', …)`), and the main loop is still `while (isOpen())`.
+::: warning What is and is not provided
+The bridge gives you the two mechanical halves: `setTray` (idempotent — it reuses one `QSystemTrayIcon`, so
+re-rendering the tray each frame is fine) and `quit_on_last_window_closed`. It forwards **all five** activation
+reasons as `onAny('tray', …)` — `left` / `right` / `double` / `middle`, plus `menu` events when a context menu is
+attached — so "right-click does nothing" is normally the app not handling `Context`, not the bridge.
 
-To write a **pure tray app** (no main window, lives in the background), you need to hand-write the bridge and change those two things — see [Hand-written Bridge](/advanced/bridge.md) and the `references/system-tray.md` in the skill.
+What you still own is the loop condition: a pure tray app needs its own liveness flag instead of `isOpen()`.
+See [Hand-written Bridge](/advanced/bridge.md) and `references/system-tray.md` in the skill.
 :::
+
+## Proving a tray icon is really there (Windows 11)
+
+Screen-scraping a tray icon is a trap: UIA may hand back an empty desktop tree, and window-enumeration tools list
+only top-level *app* windows — the visible tray is explorer's XAML island, and `Shell_TrayWnd` has **zero child
+windows**, so neither path reaches individual icons. Three things that do work:
+
+* **The shell's own record**: `HKCU\Control Panel\NotifyIconSettings\<id>` gets one key per registered icon, with
+  `ExecutablePath` and `IconSnapshot` — a real PNG of the bitmap the shell captured. Decode it and look at it.
+  To prove the record came from *this* run, register from a path that has never run before and watch the count go
+  0 → 1; otherwise you are reading a leftover.
+* **Per-process window class**: a top-level enumeration (`GetWindow(GW_HWNDPREV/NEXT)` from `Shell_TrayWnd`, since
+  `FindWindow` skips owned windows) shows `Qt<ver>TrayIconMessageWindowClass` owned by your pid. Qt creates that
+  window only when a `QSystemTrayIcon` exists — it is attributable evidence, independent of the registry.
+* **Pixels**: `Graphics.CopyFromScreen` (GDI) captures any screen region, including the taskbar.
+
+Two limits worth knowing before you automate: `Win+B` + `Space` opens the hidden-icons panel and lands focus on the
+first icon, but `Enter` / `Apps` **do not** reach a Qt tray icon — activation needs a real mouse event. And the
+panel's position changes between openings, so a coordinate is only valid inside the frame it was measured from.
 
 ## Headless verification with multiple windows
 

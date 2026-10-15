@@ -111,6 +111,30 @@ WidgetTree::scroll([
 
 `scroll` takes **one** child (usually a `vbox`).
 
+The scroll area runs with `setWidgetResizable(true)`, which means the content is **at least as tall as
+the viewport**. When none of the children ask to grow, `QBoxLayout` splits that spare height equally
+among them — so enlarging the window sprouts gaps between cards, and shrinking it looks fine. The bridge
+now appends a trailing stretch to a scroll page automatically, so content stays top-aligned and the
+slack has somewhere to go. Two consequences worth knowing:
+
+* You do **not** need `WidgetTree::spacer(1)` or a dummy `label('', ['grow' => 1])` at the end of a
+  scroll page any more; adding one is harmless but redundant.
+* If a page *wants* its children to fill the height, give those children `grow` — the trailing stretch
+  only absorbs what nothing else claimed.
+
+`spacer(n)` follows the same rule as everywhere else in this document: `spacer(1)` is a **stretch**
+(eats the spare space in the box's direction), `spacer(20)` is a fixed 20 px gap. Fixed gaps are
+created along the container's direction, so a `spacer(20)` inside a `vbox` really does push rows apart.
+
+## Children of dynamic containers need explicit `id`s
+
+Auto-ids come from the node's **structural path**. That is stable within a frame (a counter would
+recreate every widget and leave dangling pointers), but it is *not* stable across frames: when the
+number of preceding siblings changes — one more site, one more row — the path of everything after it
+shifts, and those widgets get rebuilt. Rebuilding loses focus, selection and scroll position, and it can
+look like flicker or a blank gap rather than a rebuild. So anything inside a container whose row count
+varies must carry its own `id`.
+
 ## Tabs and stacks
 
 `tabs` shows a visible tab bar; `stack` switches in place **without** a tab bar (you switch it in code):
