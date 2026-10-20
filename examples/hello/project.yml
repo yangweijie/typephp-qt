@@ -50,7 +50,6 @@ include-paths:
   - D:/tools/Qt/6.9.3/msvc2022_64/include/QtCore
   - D:/tools/Qt/6.9.3/msvc2022_64/include/QtGui
   - D:/tools/Qt/6.9.3/msvc2022_64/include/QtWidgets
-  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtNetwork
 
 link-paths:
   - ../../third_party/webview2/x64
@@ -61,7 +60,6 @@ link-libs:
   - Qt6Core.lib
   - Qt6Gui.lib
   - Qt6Widgets.lib
-  - Qt6Network.lib
 
 cxx-flags:
   - /Zc:__cplusplus
@@ -72,3 +70,5 @@ cxx-flags:
   # 路径相对本文件：../../third_party/webview2 是仓库里 vendor 的 SDK。
   - /DQT_WEBVIEW2
   - /I"../../third_party/webview2/include"
+  # 本示例不调 qt_http_request()，不链 Qt Network：桥接里的 qt_http_request 退化为报错桩。
+  - /DQTPHP_NO_NETWORK

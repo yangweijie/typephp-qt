@@ -21,24 +21,22 @@ cxx-flags:
   - -I/usr/include/qt6/QtCore
   - -I/usr/include/qt6/QtGui
   - -I/usr/include/qt6/QtWidgets
-  - -I/usr/include/qt6/QtNetwork
   - -I/usr/include/x86_64-linux-gnu/qt6
   - -I/usr/include/x86_64-linux-gnu/qt6/QtCore
   - -I/usr/include/x86_64-linux-gnu/qt6/QtGui
   - -I/usr/include/x86_64-linux-gnu/qt6/QtWidgets
-  - -I/usr/include/x86_64-linux-gnu/qt6/QtNetwork
   - -I/usr/include/aarch64-linux-gnu/qt6
   - -I/usr/include/aarch64-linux-gnu/qt6/QtCore
   - -I/usr/include/aarch64-linux-gnu/qt6/QtGui
   - -I/usr/include/aarch64-linux-gnu/qt6/QtWidgets
-  - -I/usr/include/aarch64-linux-gnu/qt6/QtNetwork
   # qglobal.h 会拉 mkspecs 下的 qplatformdefs.h
   - -I/usr/lib/x86_64-linux-gnu/qt6/mkspecs/linux-g++
   - -I/usr/lib/aarch64-linux-gnu/qt6/mkspecs/linux-g++
   - -DQT_CORE_LIB
   - -DQT_GUI_LIB
   - -DQT_WIDGETS_LIB
-  - -DQT_NETWORK_LIB
+  # 本示例不调 qt_http_request()，不链 Qt Network。
+  - -DQTPHP_NO_NETWORK
 
 # 链接也写在这里而不是 link-paths/link-libs：Qt6 的 .so 只有带版本号的
 # libQt6Core.so.6，没有开发用的 libQt6Core.so 时 -l 会失败，ld-flags 能精确控制。
@@ -48,7 +46,6 @@ ld-flags:
   - -lQt6Widgets
   - -lQt6Gui
   - -lQt6Core
-  - -lQt6Network
 
 # 宿主 PHP 往往只装了 cli（没有 embed 头文件），tpc 会自己编一份私有 embed 运行时，
 # 缓存在 ~/.typephp/php-builder。首次构建会慢很多，之后复用。

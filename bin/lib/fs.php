@@ -7,6 +7,11 @@ declare(strict_types=1);
 /** 递归删目录树（只用于重建自己生成的 bundle）。 */
 function deleteTree(string $dir): void
 {
+    // 调用方常在「清理可能不存在的产物目录」的场景用它（windeployqt 不会创建
+    // tls/networkinformation），缺目录是正常情况，不该冒 scandir 警告。
+    if (!is_dir($dir)) {
+        return;
+    }
     foreach (scandir($dir) ?: [] as $item) {
         if ($item === '.' || $item === '..') {
             continue;
@@ -27,16 +32,26 @@ function verifyPackage(string $distDir, string $name): int
     echo PHP_EOL;
     info('自检打包产物...');
 
+    // 与 run 的检查同源：按 exe 导入决定要不要 PHP / Network 的 DLL。
+    // 打包自检以前对 nano（静态 PHP）和无网络构建也会要 phpx/Qt6Network，
+    // 于是刚打好的包自检直接失败。
+    $exe = $distDir . '/' . $name . '.exe';
+    $imports = is_file($exe) ? (string) file_get_contents($exe) : '';
     $required = [
         $name . '.exe',
-        'phpx.dll',
-        'php8ts.dll',
         'Qt6Core.dll',
         'Qt6Gui.dll',
         'Qt6Widgets.dll',
-        'Qt6Network.dll',
         'platforms/qwindows.dll',
     ];
+    if (str_contains($imports, 'php8ts.dll')) {
+        $required[] = 'phpx.dll';
+        $required[] = 'php8ts.dll';
+        $required[] = 'libmpdec++-4.0.1.dll';
+    }
+    if (str_contains($imports, 'Qt6Network.dll')) {
+        $required[] = 'Qt6Network.dll';
+    }
 
     $missing = [];
     foreach ($required as $file) {

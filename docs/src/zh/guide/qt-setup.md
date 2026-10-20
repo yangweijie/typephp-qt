@@ -12,7 +12,7 @@
 | `QtCore` | `QString`、容器、事件循环、定时器、`QFileInfo`、`QDir` |
 | `QtGui` | `QIcon`、`QPixmap`、`QFont`、`QClipboard`、`QScreen`、`QAction` |
 | `QtWidgets` | 全部控件：`QMainWindow`、`QPushButton`、`QTableWidget` … |
-| `QtNetwork` | `qt_http_request()` —— `QNetworkAccessManager`（含 HTTPS） |
+| `QtNetwork`（可选） | `qt_http_request()` —— `QNetworkAccessManager`（含 HTTPS）。不调用它的应用可以用 `QTPHP_NO_NETWORK` 跳过这个模块 |
 
 没有 QML/Quick，没有 Sql —— 这是对着 `cpp-src/` 里每一个 `#include` 核过的。
 所以**装一个最小的 Qt Widgets 就够了**，下面给的就是最小集。

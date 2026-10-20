@@ -16,7 +16,7 @@ function cmdRun(string $path, array $args = []): int
 
     // 缺依赖时给出可操作的提示，而不是让系统弹一个看不懂的错误框
     $missing = PHP_OS_FAMILY === 'Windows'
-        ? checkRuntimeDlls(dirname($exe))
+        ? checkRuntimeDlls(dirname($exe), $exe)
         : checkSharedLibraryDeps($exe);
     if ($missing) {
         warning('以下运行时依赖缺失，可能无法启动：' . implode(', ', $missing));
@@ -108,22 +108,34 @@ function checkLinuxLibraryDeps(string $exe): array
     return array_values(array_unique($missing));
 }
 
-/** 检查 exe 同目录下缺失的运行时 DLL。 */
-function checkRuntimeDlls(string $dir): array
+/**
+ * 检查 exe 同目录下缺失的运行时 DLL。
+ *
+ * 要求按 exe 的真实导入裁剪：nano 把 PHP 静态编进去，没有 php8ts.dll；
+ * 无网络构建（QTPHP_NO_NETWORK）也不导入 Qt6Network.dll。硬编码整套
+ * 只会让这两种产物一启动就报一串假警告。
+ */
+function checkRuntimeDlls(string $dir, ?string $exe = null): array
 {
+    $imports = $exe !== null && is_file($exe) ? (string) file_get_contents($exe) : '';
+
     $required = [
-        'phpx.dll',
-        'php8ts.dll',
-        'libmpdec++-4.0.1.dll',
         'Qt6Core.dll',
         'Qt6Gui.dll',
         'Qt6Widgets.dll',
-        'Qt6Network.dll',
         'platforms/qwindows.dll',
         // webview 控件需要；缺了 exe 直接 0xC0000135（找不到 DLL），
         // 而系统报错不会说缺的是哪一个 —— 这里点名。
         'WebView2Loader.dll',
     ];
+    if (str_contains($imports, 'php8ts.dll')) {
+        $required[] = 'phpx.dll';
+        $required[] = 'php8ts.dll';
+        $required[] = 'libmpdec++-4.0.1.dll';
+    }
+    if (str_contains($imports, 'Qt6Network.dll')) {
+        $required[] = 'Qt6Network.dll';
+    }
     $missing = [];
     foreach ($required as $dll) {
         if (!file_exists($dir . '/' . $dll)) {

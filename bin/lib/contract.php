@@ -55,6 +55,9 @@ function cmdLint(): int
         }
     }
 
+    // 同一符号可能在互斥的预处理分支里各有一份实现（如 QTPHP_NO_NETWORK 的报错桩）。
+    $definedFunctions = array_values(array_unique($definedFunctions));
+
     echo PHP_EOL;
     info('C++ 实现 (' . count($definedFunctions) . ' 个):');
     foreach ($definedFunctions as $fn) {

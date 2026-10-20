@@ -33,13 +33,18 @@
 
 ### Changed
 
+- **Qt Network 变为可选**：`project.yml` 的 `cxx-flags` 定义 `QTPHP_NO_NETWORK`
+  （MSVC：`/DQTPHP_NO_NETWORK`）并去掉 `Qt6Network` 的头/库后，不联网的应用不再链接
+  `Qt6Network.lib`，`qtphp build` / `package` 也不会再部署 `Qt6Network.dll`。桥接保留
+  `qt_http_request()` 的同签名桩，调用时返回 `error` 而不是链接失败。`examples/hello`
+  已切到无 Network；`taskboard` 与 `qtphp new` 模板仍默认链 Network。
 - `syncChildren()` 改为最小编辑：只增删/移动真正变化的子项，不再整容器清空重建，
   消除窗口缩放和列表刷新时的闪烁与焦点丢失。
 - `qtSignature()` 由递归拼接完整字符串改为哈希，大表格/大树的差异比较开销显著下降。
 - `forgetSubtree()` / `removeStale()` 由每帧全表扫描改为按已登记子树裁剪。
 - 打包（Windows）追加 `--no-opengl-sw`，去掉 20 MB 的 `opengl32sw.dll`（软件渲染回退，
-  桌面程序用不上）。`tls` / `networkinformation` 插件**不能**跳：`qt_http_request()` 走
-  `QNetworkAccessManager`，跳过 `tls` 就只剩明文 HTTP，HTTPS 会失败。
+  桌面程序用不上）。链了 Network 时 `tls` / `networkinformation` 插件**不能**跳：
+  `qt_http_request()` 走 `QNetworkAccessManager`，跳过 `tls` 就只剩明文 HTTP，HTTPS 会失败。
 - 示例项目三份 `project*.yml` 去重：`sources` 只在 `project.yml` 写一次，平台差异用
   tpc 支持的条件条目（`path:` + `if: PHP_OS_FAMILY == "..."`）表达；Linux/macOS 入口不再
   覆盖 `include-paths`，Qt 头目录改由 `cxx-flags` 的 `-I` 传入，从而继承仓库内路径。

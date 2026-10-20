@@ -109,9 +109,9 @@ if (!$app->headless()) {
 
 **症状。** 开发时一切正常；一打包，`qt_http_request()` 发的每个 HTTPS 请求都报错。
 
-**原因。** 打包时跳过了 `tls` / `networkinformation` 插件。
+**原因。** 应用仍链着 Network，打包时却跳过了 `tls` / `networkinformation` 插件。
 
-**修法。** **不要**跳过它们。只要应用联网，这两个就不是可选项 —— 省了一点体积，废掉全部 HTTPS。`--no-opengl-sw` 才是安全的减重；它只去掉 20 MB 的软件光栅化器。
+**修法。** 链了 Network 就**不要**跳过它们 —— 只要应用联网，这两个就不是可选项，省了一点体积，废掉全部 HTTPS。`--no-opengl-sw` 才是安全的减重；它只去掉 20 MB 的软件光栅化器。完全不调 `qt_http_request()` 的应用应该用 `QTPHP_NO_NETWORK` 彻底去掉 Network。
 
 ## 本地能编译，CI 机器上不行
 

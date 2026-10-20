@@ -63,19 +63,37 @@ function cmdPackage(string $path): int
         error("未找到 windeployqt: $windeployqt");
         return 1;
     }
+    // 无网络构建不能被 windeployqt 的插件启发式拖进 Qt6Network：generic 里的
+    // qtuiotouchplugin 依赖 QtNetwork，带上它就会连带部署 Qt6Network.dll 和
+    // tls / networkinformation 插件 —— 正是 QTPHP_NO_NETWORK 想避开的。
+    $builtExe = $buildDir . '/' . $name . '.exe';
+    $needsNetwork = is_file($builtExe)
+        && str_contains((string) file_get_contents($builtExe), 'Qt6Network.dll');
+
     info('运行 windeployqt（部署 Qt DLL 与平台插件）...');
     // --no-opengl-sw：默认会塞进 20MB 的 opengl32sw.dll（软件渲染回退），桌面程序用不上。
-    // tls / networkinformation 插件不能跳：qt_http_request 走 QNetworkAccessManager，
-    // 跳过 tls 就只剩明文 HTTP，https 会失败。
+    // 链了 Network 时 tls / networkinformation 插件不能跳：qt_http_request 走
+    // QNetworkAccessManager，跳过 tls 就只剩明文 HTTP，https 会失败。
+    $deployArgs = ' --no-translations --no-compiler-runtime --no-opengl-sw';
+    if (!$needsNetwork) {
+        $deployArgs .= ' --skip-plugin-types generic,networkinformation,tls';
+    }
     passthru(
-        '"' . $windeployqt . '"'
-        . ' --no-translations --no-compiler-runtime'
-        . ' --no-opengl-sw'
+        '"' . $windeployqt . '"' . $deployArgs
         . ' "' . $distDir . '/' . $name . '.exe" 2>&1',
         $qtExit
     );
     if ($qtExit !== 0) {
         warning("windeployqt 返回 $qtExit，继续检查产物");
+    }
+
+    if (!$needsNetwork) {
+        // windeployqt 只增不删：旧 dist 里上一次带 Network 的残留要手动清掉，
+        // 否则「无 Network」的包会继续携带 Qt6Network.dll。
+        @unlink($distDir . '/Qt6Network.dll');
+        deleteTree($distDir . '/tls');
+        deleteTree($distDir . '/networkinformation');
+        @unlink($distDir . '/generic/qtuiotouchplugin.dll');
     }
 
     vendorWindowsOffscreenPlugin($qtDir, $distDir);

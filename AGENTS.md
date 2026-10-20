@@ -143,8 +143,10 @@ build\hello.exe --shot out.png
 - 跟现有文件走：PHP 用 4 空格、`declare(strict_types=1)`、方法名 camelCase；
   C++ 用 4 空格、Qt 风格（`qtXxx` 自由函数、`xxx_` 成员后缀）
 - 注释写**为什么**，不写**是什么**。本仓库现有的长注释几乎都在解释踩过的坑，保持这个传统
-- 不要引入新依赖。Qt 只用 `Core` / `Gui` / `Widgets` / `Network` 四个模块（`Network` 供
-  `qt_http_request()` 使用，因此打包时**不能**再跳过 `tls` / `networkinformation` 插件）
+- 不要引入新依赖。Qt 只用 `Core` / `Gui` / `Widgets` / `Network` 四个模块；`Network` 是
+  **可选**的：只有调用 `qt_http_request()` 的应用才需要。不联网的应用在 `project.yml`
+  加 `QTPHP_NO_NETWORK` 并去掉 `Qt6Network` 的头/库，桥接会提供报错的同签名桩；
+  链了 `Network` 时打包**不能**跳过 `tls` / `networkinformation` 插件
 
 ## 提交
 

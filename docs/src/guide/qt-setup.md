@@ -13,7 +13,7 @@ The bridge uses **four Qt modules and nothing else**:
 | `QtCore` | `QString`, containers, event loop, timers, `QFileInfo`, `QDir` |
 | `QtGui` | `QIcon`, `QPixmap`, `QFont`, `QClipboard`, `QScreen`, `QAction` |
 | `QtWidgets` | every control: `QMainWindow`, `QPushButton`, `QTableWidget`, … |
-| `QtNetwork` | `qt_http_request()` — `QNetworkAccessManager` (HTTPS included) |
+| `QtNetwork` (optional) | `qt_http_request()` — `QNetworkAccessManager` (HTTPS included). Apps that never call it can skip this module with `QTPHP_NO_NETWORK` |
 
 No QML/Quick, no Sql — verified against every `#include` in `cpp-src/`.
 So a **minimal Qt Widgets install is enough**, which is what the commands below give you.

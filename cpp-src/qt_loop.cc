@@ -290,6 +290,8 @@ Array php_qt_window_poll_events(Variant box, Int max) {
 
 // ────────────────────────────── 网络原语 ──────────────────────────────
 
+#ifndef QTPHP_NO_NETWORK
+
 Array php_qt_http_request(Array spec) {
     Array out;
     out.set("status", Variant(static_cast<Int>(0)));
@@ -371,3 +373,20 @@ Array php_qt_http_request(Array spec) {
     reply->deleteLater();
     return out;
 }
+
+#else
+
+// 没链 Qt Network 的构建仍要满足 PHP 侧的调用契约：保留同一个签名，
+// 调用时返回结构化错误，而不是让链接器报缺符号。
+Array php_qt_http_request(Array spec) {
+    (void)spec;
+    Array out;
+    out.set("status", Variant(static_cast<Int>(0)));
+    out.set("headers", Array());
+    out.set("body", toPhpString(QString()));
+    out.set("error", toPhpString(QStringLiteral(
+        "qt_http_request: 本次构建未编入 Qt Network（project.yml 去掉 QTPHP_NO_NETWORK 并链上 Qt6Network）")));
+    return out;
+}
+
+#endif

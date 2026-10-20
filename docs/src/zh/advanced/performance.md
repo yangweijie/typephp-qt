@@ -125,7 +125,8 @@ QT_DEBUG_STRICT=1 ./build/hello
 | 产物体积 | `qtphp build --nano` | 参考示例 4.3 MB vs 25.6 MB；`php-nano` + PHPX 源码编进去，不链任何 PHP 运行时 |
 | 打包体积 | `qtphp package`（默认） | `--no-opengl-sw` 从 `dist/` 去掉 20 MB 的软渲染回退 |
 
-裁剪打包产物时**不要**跳过 `tls` / `networkinformation` 这两个 Qt 插件：`qt_http_request()` 走的是
+只有完全不链 Qt Network（`QTPHP_NO_NETWORK`）的构建才可以跳过 `tls` / `networkinformation`
+这两个 Qt 插件。链了 Network 时**不要**跳：`qt_http_request()` 走的是
 `QNetworkAccessManager`，缺了 `tls` 所有 HTTPS 请求都会失败。
 
 ## 一份清单

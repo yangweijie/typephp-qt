@@ -22,8 +22,10 @@
 | macOS (Apple Silicon) | ✅ | ✅ `dist/<Name>.app`（macdeployqt + ad-hoc 签名） | `brew install qtbase libiconv` |
 | Linux (Debian/Ubuntu) | ✅ | ✅ `dist/<name>/`（ldd 依赖闭包 + patchelf 改 DT_RPATH + `qt.conf`） | 见下 |
 
-**只用到 Qt 的 `Core` / `Gui` / `Widgets` / `Network` 四个模块**（没有 QML/Quick、Sql；
-`Network` 给 `qt_http_request()` 用），
+**必选模块只有 Qt 的 `Core` / `Gui` / `Widgets`**（没有 QML/Quick、Sql）；
+`Network` 只在调用 `qt_http_request()` 时需要 —— 不联网的应用在 `project.yml` 的
+`cxx-flags` 加 `QTPHP_NO_NETWORK`（MSVC 写 `/DQTPHP_NO_NETWORK`）并去掉 `Qt6Network`
+的头与库，链接和打包都不会再带上它，
 所以最小安装就够。各系统的安装方式、其他发行版的包名、非默认 Qt 版本怎么指定、链接报错怎么查，
 见 **[Qt 的安装与编译](https://yangweijie.github.io/typephp-qt/zh/guide/qt-setup.html)**。
 `qtphp` 自动探测的是 Qt **6.9.3** 的常见路径；其他版本用 `QT_ROOT`（CI 通用）或 `QT_DIR` 指定，两者都优先于自动探测。
@@ -369,7 +371,7 @@ $w->patch([
 qtphp test
 ```
 
-160 个测试（263 条断言）全部走纯 PHP 桥接替身，**不需要 Qt 或编译器**。覆盖桥接契约一致性、
+177 个测试（288 条断言）全部走纯 PHP 桥接替身，**不需要 Qt 或编译器**。覆盖桥接契约一致性、
 事件分发、控件树 diff、`AppData`/`JsonStore`、以及 CLI 的参数解析；C++ 侧没有单测，靠
 `examples/hello` 的 `--selftest` / `--difftest` 做端到端验收。
 

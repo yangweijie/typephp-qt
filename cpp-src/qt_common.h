@@ -43,9 +43,13 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+// Network 是可选的：只有调用 qt_http_request() 的应用才需要链 Qt6Network。
+// 定义 QTPHP_NO_NETWORK 后连头文件都不引入，链接期也就不会缺符号。
+#ifndef QTPHP_NO_NETWORK
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#endif
 #include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
@@ -104,6 +108,7 @@ inline String toPhpString(const QString &value) {
     const QByteArray utf8 = value.toUtf8();
     return String(utf8.constData(), static_cast<size_t>(utf8.size()));
 }
+
 
 /**
  * 把应用给的资源路径解析成绝对路径。

@@ -20,11 +20,11 @@ cxx-flags:
   - -I/opt/homebrew/opt/qtbase/lib/QtCore.framework/Headers
   - -I/opt/homebrew/opt/qtbase/lib/QtGui.framework/Headers
   - -I/opt/homebrew/opt/qtbase/lib/QtWidgets.framework/Headers
-  - -I/opt/homebrew/opt/qtbase/lib/QtNetwork.framework/Headers
   - -DQT_CORE_LIB
   - -DQT_GUI_LIB
   - -DQT_WIDGETS_LIB
-  - -DQT_NETWORK_LIB
+  # 本示例不调 qt_http_request()，不链 Qt Network。
+  - -DQTPHP_NO_NETWORK
   # 走原生 WKWebView 后端（objc++ 实现），不需要 WebView2
   - -DQT_WEBVIEW_WK
   - -fobjc-arc
@@ -34,7 +34,6 @@ ld-flags:
   - -Wl,-framework,QtWidgets
   - -Wl,-framework,QtGui
   - -Wl,-framework,QtCore
-  - -Wl,-framework,QtNetwork
   - -Wl,-framework,Foundation
   - -Wl,-framework,AppKit
   - -Wl,-framework,WebKit

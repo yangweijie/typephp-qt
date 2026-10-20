@@ -109,7 +109,7 @@ Three separate budgets, three separate levers:
 | Binary size | `qtphp build --nano` | 4.3 MB vs 25.6 MB on the reference example; `php-nano` + PHPX sources are compiled in, no PHP runtime is linked |
 | Packaging size | `qtphp package` (default) | `--no-opengl-sw` drops the 20 MB software-rendering fallback from `dist/` |
 
-Do **not** skip the `tls` / `networkinformation` Qt plugins when trimming a package: `qt_http_request()` goes through `QNetworkAccessManager`, and without `tls` every HTTPS request fails.
+Only skip the `tls` / `networkinformation` Qt plugins if your build does not link Qt Network at all (`QTPHP_NO_NETWORK`). When you do link it, `qt_http_request()` goes through `QNetworkAccessManager`, and without `tls` every HTTPS request fails.
 
 ## A checklist
 

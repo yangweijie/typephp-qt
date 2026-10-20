@@ -383,9 +383,21 @@ function deployRuntimeDlls(string $projectPath): void
 
     // Qt 运行库（源码内联方案下 exe 直接依赖这些）
     if ($qtDir) {
-        // Qt6Network 必须在这里：桥接里 qt_http_request 用它，链接期有 .lib、
-        // 运行期少一个 .dll 就是 0xC0000135，而 Windows 不会告诉你是哪一个。
-        foreach (['Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'Qt6Network.dll'] as $dll) {
+        // 只有 exe 真的导入 Qt6Network.dll 才拷它：无网络构建不链 Network，
+        // 硬拷一份会让产物白背 1MB 多，还会让人误以为链上了。
+        $imports = '';
+        foreach (glob($buildDir . '/*.exe') ?: [] as $exeFile) {
+            $imports .= (string) file_get_contents($exeFile);
+        }
+        if (!str_contains($imports, 'Qt6Network.dll') && file_exists($buildDir . '/Qt6Network.dll')) {
+            // 上一次带 Network 的构建会留下这个 DLL；不删就会被打进最终产物。
+            @unlink($buildDir . '/Qt6Network.dll');
+        }
+        $qtDlls = ['Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll'];
+        if (str_contains($imports, 'Qt6Network.dll')) {
+            $qtDlls[] = 'Qt6Network.dll';
+        }
+        foreach ($qtDlls as $dll) {
             $src = $qtDir . '/bin/' . $dll;
             if (file_exists($src)) {
                 copy($src, $buildDir . '/' . $dll);

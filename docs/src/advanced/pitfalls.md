@@ -109,9 +109,9 @@ if (!$app->headless()) {
 
 **Symptom.** Everything works in development; after packaging, every HTTPS request from `qt_http_request()` returns an error.
 
-**Cause.** The package was built with the `tls` / `networkinformation` plugins skipped.
+**Cause.** The package was built with the `tls` / `networkinformation` plugins skipped while the app still links Qt Network.
 
-**Fix.** Do **not** skip them. They are not optional if the app talks to the network — skipping saves a little size and breaks all HTTPS. `--no-opengl-sw` is the safe size saving; that one only drops the 20 MB software rasterizer.
+**Fix.** Do **not** skip them in builds that link Network. They are not optional if the app talks to the network — skipping saves a little size and breaks all HTTPS. `--no-opengl-sw` is the safe size saving; that one only drops the 20 MB software rasterizer. If the app never calls `qt_http_request()`, drop Network entirely with `QTPHP_NO_NETWORK` instead.
 
 ## The project builds locally but not on the CI machine
 
