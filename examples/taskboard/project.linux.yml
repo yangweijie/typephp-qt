@@ -1,0 +1,57 @@
+# Linux 入口。只覆盖平台相关的链接/编译参数，别的全部继承 project.yml：
+#   - 不写 sources：由 project.yml 的条件条目决定（.mm 只在 Darwin 进编译）
+#   - 不写 include-paths：tpc 合并时 list 是整体替换，不是追加。一旦在这里写了
+#     include-paths，project.yml 里的 ../../cpp-src 和 ../../php-src 就全丢了。
+#     所以 Qt 头文件目录改用 cxx-flags 里的 -I 传，include-paths 保持继承。
+#
+# Debian/Ubuntu 的 Qt 是多架构布局：头文件在 /usr/include/<triplet>/qt6，
+# 库在 /usr/lib/<triplet>。triplet 用 `dpkg-architecture -qDEB_HOST_MULTIARCH`
+# 查，x86_64 上是 x86_64-linux-gnu，ARM 上是 aarch64-linux-gnu。
+# YAML 里没法执行命令，所以两个常见 triplet 都列上 —— 编译器对不存在的 -I / -L
+# 目录是静默忽略的，不会报错。Arch/openSUSE/Fedora 用不带 triplet 的 /usr/include/qt6。
+include: project.yml
+
+# Windows 段的 .lib 在 Linux 上没有意义，清空。
+link-libs: []
+link-paths: []
+
+cxx-flags:
+  - -fPIC
+  - -I/usr/include/qt6
+  - -I/usr/include/qt6/QtCore
+  - -I/usr/include/qt6/QtGui
+  - -I/usr/include/qt6/QtWidgets
+  - -I/usr/include/qt6/QtNetwork
+  - -I/usr/include/x86_64-linux-gnu/qt6
+  - -I/usr/include/x86_64-linux-gnu/qt6/QtCore
+  - -I/usr/include/x86_64-linux-gnu/qt6/QtGui
+  - -I/usr/include/x86_64-linux-gnu/qt6/QtWidgets
+  - -I/usr/include/x86_64-linux-gnu/qt6/QtNetwork
+  - -I/usr/include/aarch64-linux-gnu/qt6
+  - -I/usr/include/aarch64-linux-gnu/qt6/QtCore
+  - -I/usr/include/aarch64-linux-gnu/qt6/QtGui
+  - -I/usr/include/aarch64-linux-gnu/qt6/QtWidgets
+  - -I/usr/include/aarch64-linux-gnu/qt6/QtNetwork
+  # qglobal.h 会拉 mkspecs 下的 qplatformdefs.h
+  - -I/usr/lib/x86_64-linux-gnu/qt6/mkspecs/linux-g++
+  - -I/usr/lib/aarch64-linux-gnu/qt6/mkspecs/linux-g++
+  - -DQT_CORE_LIB
+  - -DQT_GUI_LIB
+  - -DQT_WIDGETS_LIB
+  - -DQT_NETWORK_LIB
+
+# 链接也写在这里而不是 link-paths/link-libs：Qt6 的 .so 只有带版本号的
+# libQt6Core.so.6，没有开发用的 libQt6Core.so 时 -l 会失败，ld-flags 能精确控制。
+ld-flags:
+  - -L/usr/lib/x86_64-linux-gnu
+  - -L/usr/lib/aarch64-linux-gnu
+  - -lQt6Widgets
+  - -lQt6Gui
+  - -lQt6Core
+  - -lQt6Network
+
+# 宿主 PHP 往往只装了 cli（没有 embed 头文件），tpc 会自己编一份私有 embed 运行时，
+# 缓存在 ~/.typephp/php-builder。首次构建会慢很多，之后复用。
+php-builder:
+  extensions: []
+  zts: false

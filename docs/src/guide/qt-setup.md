@@ -6,15 +6,16 @@ has the short version — come here when Qt is missing, the version differs, or 
 
 ## What you actually need
 
-The bridge uses **three Qt modules and nothing else**:
+The bridge uses **four Qt modules and nothing else**:
 
 | Module | Provides |
 |---|---|
 | `QtCore` | `QString`, containers, event loop, timers, `QFileInfo`, `QDir` |
 | `QtGui` | `QIcon`, `QPixmap`, `QFont`, `QClipboard`, `QScreen`, `QAction` |
 | `QtWidgets` | every control: `QMainWindow`, `QPushButton`, `QTableWidget`, … |
+| `QtNetwork` | `qt_http_request()` — `QNetworkAccessManager` (HTTPS included) |
 
-No QML/Quick, no Network, no Sql — verified against every `#include` in `cpp-src/`.
+No QML/Quick, no Sql — verified against every `#include` in `cpp-src/`.
 So a **minimal Qt Widgets install is enough**, which is what the commands below give you.
 
 ::: tip The webview widget does not need extra Qt modules
@@ -150,12 +151,16 @@ pkg-config --modversion Qt6Widgets    # needs qt6-base-dev
 ## Pointing the build at a non-default Qt
 
 `qtphp`'s detection covers the common locations for 6.9.3. **Anything else — a different version,
-a custom prefix, a second Qt — needs `QT_DIR`, which takes precedence over every probed path:**
+a custom prefix, a second Qt — needs `QT_ROOT` or `QT_DIR`, which take precedence over every probed
+path:**
 
 ```bash
-QT_DIR=/path/to/Qt/6.8.2/gcc_64    qtphp build .
-QT_DIR=C:/Qt/6.10.0/msvc2022_64    qtphp build .
+QT_ROOT=/path/to/Qt/6.8.2/gcc_64    qtphp build .
+QT_DIR=C:/Qt/6.10.0/msvc2022_64     qtphp build .
 ```
+
+`QT_ROOT` is checked first because that is the name CI actions such as `jurplel/install-qt-action`
+export; `QT_DIR` is this project's older name and still works, so existing scripts keep working.
 
 `qtphp new` bakes the detected path into `project.yml` / `project.macos.yml` / `project.linux.yml`
 as plain strings, so you can also edit those directly — that is often simpler for a project you
@@ -177,15 +182,15 @@ Then confirm:
 qtphp doctor     # prints the Qt path it will use
 ```
 
-`QT_DIR` wins over automatic detection, so it works even on a machine that already has a Qt in one
-of the probed locations. If it points at a directory that does not exist, `qtphp` warns and falls
-back to probing.
+`QT_ROOT` / `QT_DIR` win over automatic detection, so they work even on a machine that already has a
+Qt in one of the probed locations. If the variable points at a directory that does not exist,
+`qtphp` warns and falls back to probing.
 
 ## Troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
-| `Qt: 未找到` in `doctor` | Qt is not in a probed location → set `QT_DIR` |
+| `Qt: 未找到` in `doctor` | Qt is not in a probed location → set `QT_ROOT` (or `QT_DIR`) |
 | `fatal error: 'QApplication': No such file or directory` | The `include/QtWidgets` (or framework `-I`) path is missing from `include-paths` |
 | `cannot open file 'Qt6Widgets.lib'` (MSVC) | `link-paths` lacks `<QT>/lib`, **or** you installed the MinGW kit instead of `msvc2022_64` |
 | `undefined reference to 'QApplication::…'` (GCC/Clang) | `link-libs` lacks `-lQt6Widgets` (or `-Wl,-framework,QtWidgets` on macOS) |

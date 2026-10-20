@@ -152,302 +152,392 @@ QLayout *qtContainerLayout(QWidget *container) {
 
 // ────────────────────────────── 控件工厂 ──────────────────────────────
 
+namespace {
+
+// 控件工厂表：加一种控件只要往表里加一行，不必再在一个三百行的 if 链里找插入点。
+// 用函数指针而不是 std::function —— 工厂都是无捕获的，类型上就写死「工厂不带状态」，
+// 免得以后有人往工厂里塞可变量。用不到的参数直接不命名，省掉一堆 Q_UNUSED。
+using WidgetFactory = QWidget *(*)(QtWindowBox *box, const QString &id, QObject *ctx);
+
+QWidget *makeVBox(QtWindowBox *, const QString &, QObject *) {
+    auto *widget = new QWidget();
+    new QVBoxLayout(widget);
+    return widget;
+}
+
+QWidget *makeHBox(QtWindowBox *, const QString &, QObject *) {
+    auto *widget = new QWidget();
+    new QHBoxLayout(widget);
+    return widget;
+}
+
+QWidget *makeGrid(QtWindowBox *, const QString &, QObject *) {
+    auto *widget = new QWidget();
+    new QGridLayout(widget);
+    return widget;
+}
+
+QWidget *makeForm(QtWindowBox *, const QString &, QObject *) {
+    auto *widget = new QWidget();
+    new QFormLayout(widget);
+    return widget;
+}
+
+QWidget *makeGroup(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *group = new QGroupBox();
+    new QVBoxLayout(group);
+    // checkable group 勾掉时 Qt 会把内容置灰，状态变化要能上报
+    QObject::connect(group, &QGroupBox::toggled, ctx, [box, id](bool on) {
+        box->enqueue(QStringLiteral("toggle"), id, on ? QStringLiteral("1") : QStringLiteral("0"));
+    });
+    return group;
+}
+
+QWidget *makeFrame(QtWindowBox *, const QString &, QObject *) {
+    auto *frame = new QFrame();
+    frame->setFrameShape(QFrame::StyledPanel);
+    new QVBoxLayout(frame);
+    return frame;
+}
+
+QWidget *makeScroll(QtWindowBox *, const QString &, QObject *) {
+    auto *area = new QScrollArea();
+    area->setWidgetResizable(true);
+    auto *content = new QWidget();
+    new QVBoxLayout(content);
+    area->setWidget(content);
+    return area;
+}
+
+QWidget *makeTabs(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *tabs = new QTabWidget();
+    QObject::connect(tabs, &QTabWidget::currentChanged, ctx, [box, id](int index) {
+        Array payload;
+        payload.set("index", Variant(static_cast<Int>(index)));
+        box->enqueue(QStringLiteral("tab"), id, QString::number(index), payload);
+    });
+    // 标签页上的关闭按钮（closable => true）被点：只上报，是否真关由 PHP 决定
+    // （状态驱动 —— 直接关掉会和下一帧的视图打架）。
+    QObject::connect(tabs, &QTabWidget::tabCloseRequested, ctx, [box, id](int index) {
+        Array payload;
+        payload.set("index", Variant(static_cast<Int>(index)));
+        box->enqueue(QStringLiteral("close"), id, QString::number(index), payload);
+    });
+    return tabs;
+}
+
+QWidget *makePage(QtWindowBox *, const QString &, QObject *) {
+    auto *page = new QWidget();
+    new QVBoxLayout(page);
+    return page;
+}
+
+QWidget *makeStack(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *stack = new QStackedWidget();
+    QObject::connect(stack, &QStackedWidget::currentChanged, ctx, [box, id](int index) {
+        Array payload;
+        payload.set("index", Variant(static_cast<Int>(index)));
+        box->enqueue(QStringLiteral("tab"), id, QString::number(index), payload);
+    });
+    return stack;
+}
+
+QWidget *makeSplit(QtWindowBox *, const QString &, QObject *) {
+    return new QSplitter(Qt::Horizontal);
+}
+
+QWidget *makeSeparator(QtWindowBox *, const QString &, QObject *) {
+    auto *line = new QFrame();
+    line->setFrameShape(QFrame::HLine);
+    line->setFrameShadow(QFrame::Sunken);
+    return line;
+}
+
+QWidget *makeLabel(QtWindowBox *, const QString &, QObject *) {
+    auto *label = new QLabel();
+    label->setTextInteractionFlags(Qt::NoTextInteraction);
+    return label;
+}
+
+QWidget *makeImage(QtWindowBox *, const QString &, QObject *) {
+    auto *label = new QLabel();
+    label->setAlignment(Qt::AlignCenter);
+    return label;
+}
+
+QWidget *makeLink(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *label = new QLabel();
+    label->setCursor(Qt::PointingHandCursor);
+    label->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+    label->setOpenExternalLinks(false);
+    QObject::connect(label, &QLabel::linkActivated, ctx, [box, id](const QString &href) {
+        box->enqueue(QStringLiteral("click"), id, href);
+    });
+    return label;
+}
+
+QWidget *makeButton(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *button = new QPushButton();
+    button->setCursor(Qt::PointingHandCursor);
+    QObject::connect(button, &QPushButton::clicked, ctx,
+                     [box, id]() { box->enqueue(QStringLiteral("click"), id); });
+    // checkable 按钮（以及 group）还要发 toggle —— 否则 'checkable' => true
+    // 只是个能按下去的装饰，用户拿不到状态变化。
+    QObject::connect(button, &QPushButton::toggled, ctx, [box, id](bool on) {
+        box->enqueue(QStringLiteral("toggle"), id, on ? QStringLiteral("1") : QStringLiteral("0"));
+    });
+    QObject::connect(button, &QPushButton::pressed, ctx,
+                     [box, id]() { box->enqueue(QStringLiteral("press"), id); });
+    QObject::connect(button, &QPushButton::released, ctx,
+                     [box, id]() { box->enqueue(QStringLiteral("release"), id); });
+    return button;
+}
+
+QWidget *makeLineEdit(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *edit = new QLineEdit();
+    QObject::connect(edit, &QLineEdit::textChanged, ctx,
+                     [box, id](const QString &text) { box->enqueue(QStringLiteral("change"), id, text); });
+    QObject::connect(edit, &QLineEdit::returnPressed, ctx,
+                     [box, id, edit]() { box->enqueue(QStringLiteral("submit"), id, edit->text()); });
+    // 失焦（或回车）表示「这一格编辑完了」—— 表单场景常用它触发校验/保存，
+    // 与每敲一个字都发的 change 区分开。
+    QObject::connect(edit, &QLineEdit::editingFinished, ctx,
+                     [box, id, edit]() { box->enqueue(QStringLiteral("commit"), id, edit->text()); });
+    return edit;
+}
+
+QWidget *makeTextEdit(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *edit = new QTextEdit();
+    QObject::connect(edit, &QTextEdit::textChanged, ctx,
+                     [box, id, edit]() { box->enqueue(QStringLiteral("change"), id, edit->toPlainText()); });
+    return edit;
+}
+
+QWidget *makeSpin(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *spin = new QSpinBox();
+    spin->setRange(std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
+    QObject::connect(spin, &QSpinBox::valueChanged, ctx, [box, id](int value) {
+        box->enqueue(QStringLiteral("change"), id, QString::number(value));
+    });
+    return spin;
+}
+
+QWidget *makeDoubleSpin(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *spin = new QDoubleSpinBox();
+    spin->setRange(-1.0e18, 1.0e18);
+    QObject::connect(spin, &QDoubleSpinBox::valueChanged, ctx, [box, id](double value) {
+        box->enqueue(QStringLiteral("change"), id, QString::number(value));
+    });
+    return spin;
+}
+
+QWidget *makeSlider(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *slider = new QSlider(Qt::Horizontal);
+    slider->setRange(0, 100);
+    QObject::connect(slider, &QSlider::valueChanged, ctx, [box, id](int value) {
+        box->enqueue(QStringLiteral("change"), id, QString::number(value));
+    });
+    return slider;
+}
+
+QWidget *makeProgress(QtWindowBox *, const QString &, QObject *) {
+    auto *bar = new QProgressBar();
+    bar->setRange(0, 100);
+    bar->setTextVisible(true);
+    return bar;
+}
+
+QWidget *makeCheckBox(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *check = new QCheckBox();
+    QObject::connect(check, &QCheckBox::toggled, ctx, [box, id](bool on) {
+        box->enqueue(QStringLiteral("toggle"), id, on ? QStringLiteral("1") : QStringLiteral("0"));
+    });
+    return check;
+}
+
+QWidget *makeRadio(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *radio = new QRadioButton();
+    QObject::connect(radio, &QRadioButton::toggled, ctx, [box, id](bool on) {
+        box->enqueue(QStringLiteral("toggle"), id, on ? QStringLiteral("1") : QStringLiteral("0"));
+    });
+    return radio;
+}
+
+QWidget *makeCombo(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *combo = new QComboBox();
+    QObject::connect(combo, &QComboBox::currentIndexChanged, ctx, [box, id, combo](int index) {
+        Array payload;
+        payload.set("index", Variant(static_cast<Int>(index)));
+        box->enqueue(QStringLiteral("change"), id, combo->currentText(), payload);
+    });
+    // 可编辑下拉（editable => true）里手打的文本也要上报，
+    // 否则用户输的内容拿不到。
+    QObject::connect(combo, &QComboBox::editTextChanged, ctx,
+                     [box, id](const QString &text) { box->enqueue(QStringLiteral("change"), id, text); });
+    return combo;
+}
+
+QWidget *makeList(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *list = new QListWidget();
+    QObject::connect(list, &QListWidget::itemSelectionChanged, ctx, [box, id, list]() {
+        auto *item = list->currentItem();
+        Array payload;
+        payload.set("index", Variant(static_cast<Int>(list->currentRow())));
+        box->enqueue(QStringLiteral("select"), id, item ? item->data(Qt::UserRole).toString() : QString(),
+                     payload);
+    });
+    QObject::connect(list, &QListWidget::itemDoubleClicked, ctx, [box, id](QListWidgetItem *item) {
+        box->enqueue(QStringLiteral("activate"), id, item->data(Qt::UserRole).toString());
+    });
+    // 单击：select 只在「选中项变化」时发；点同一项再点一次不会发 select，
+    // 但 itemClicked 会发 —— 需要「每次点击都响应」的场景用它。
+    QObject::connect(list, &QListWidget::itemClicked, ctx, [box, id](QListWidgetItem *item) {
+        box->enqueue(QStringLiteral("itemClick"), id, item->data(Qt::UserRole).toString());
+    });
+    return list;
+}
+
+QWidget *makeTable(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *table = new QTableWidget(0, 1);
+    table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table->setSelectionMode(QAbstractItemView::SingleSelection);
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->verticalHeader()->hide();
+    table->horizontalHeader()->setStretchLastSection(true);
+    QObject::connect(table, &QTableWidget::itemSelectionChanged, ctx, [box, id, table]() {
+        const int row = table->currentRow();
+        if (row < 0) return;
+        auto *first = table->item(row, 0);
+        if (!first) return;
+        Array payload;
+        payload.set("row", Variant(static_cast<Int>(row)));
+        // ── 选区上报 ──
+        // 开了 select_mode=multi/extended 之后，只报 currentRow() 的话上层
+        // 拿不到「选中了哪几行」，批量填充之类的操作就无从下手。
+        // 这里按行序扫一遍被选中的行（selectionBehavior 是 SelectRows，
+        // 所以判第 0 列是否被选中即可），把行号与行 id 一起带上去。
+        // 用逗号串而不是嵌套数组：桥接的 Array 只稳定承载标量，
+        // 上层 explode(',', …) 还原。
+        QStringList rows;
+        QStringList rowIds;
+        for (int r = 0; r < table->rowCount(); ++r) {
+            QTableWidgetItem *cell = table->item(r, 0);
+            if (!cell || !cell->isSelected()) continue;
+            rows << QString::number(r);
+            rowIds << cell->data(Qt::UserRole).toString();
+        }
+        payload.set("rows", toPhpString(rows.join(QLatin1Char(','))));
+        payload.set("row_ids", toPhpString(rowIds.join(QLatin1Char(','))));
+        payload.set("count", Variant(static_cast<Int>(rows.size())));
+        box->enqueue(QStringLiteral("select"), id, first->data(Qt::UserRole).toString(), payload);
+    });
+    QObject::connect(table, &QTableWidget::itemDoubleClicked, ctx, [box, id](QTableWidgetItem *item) {
+        box->enqueue(QStringLiteral("activate"), id, item->data(Qt::UserRole).toString());
+    });
+    // 单元格被就地编辑：editable 表格要靠它把改动收回状态。
+    // payload 带 row / col，value 是新文本。
+    QObject::connect(table, &QTableWidget::cellChanged, ctx, [box, id, table](int row, int col) {
+        auto *cell = table->item(row, col);
+        Array payload;
+        payload.set("row", Variant(static_cast<Int>(row)));
+        payload.set("col", Variant(static_cast<Int>(col)));
+        box->enqueue(QStringLiteral("cell"), id, cell ? cell->text() : QString(), payload);
+    });
+    return table;
+}
+
+QWidget *makeTree(QtWindowBox *box, const QString &id, QObject *ctx) {
+    auto *tree = new QTreeWidget();
+    tree->setColumnCount(1);
+    QObject::connect(tree, &QTreeWidget::itemSelectionChanged, ctx, [box, id, tree]() {
+        auto *item = tree->currentItem();
+        if (!item) return;
+        box->enqueue(QStringLiteral("select"), id, item->data(0, Qt::UserRole).toString());
+    });
+    QObject::connect(tree, &QTreeWidget::itemDoubleClicked, ctx, [box, id](QTreeWidgetItem *item, int) {
+        box->enqueue(QStringLiteral("activate"), id, item->data(0, Qt::UserRole).toString());
+    });
+    // 展开/折叠：懒加载子节点、记住展开状态都要靠它。
+    // value 是节点 id，payload.expanded 给最终状态（省得自己判方向）。
+    QObject::connect(tree, &QTreeWidget::itemExpanded, ctx, [box, id](QTreeWidgetItem *item) {
+        Array payload;
+        payload.set("expanded", Variant(true));
+        box->enqueue(QStringLiteral("expand"), id, item->data(0, Qt::UserRole).toString(), payload);
+    });
+    QObject::connect(tree, &QTreeWidget::itemCollapsed, ctx, [box, id](QTreeWidgetItem *item) {
+        Array payload;
+        payload.set("expanded", Variant(false));
+        box->enqueue(QStringLiteral("collapse"), id, item->data(0, Qt::UserRole).toString(), payload);
+    });
+    return tree;
+}
+
+QWidget *makeWebView(QtWindowBox *box, const QString &id, QObject *) {
+    return qtCreateWebView(box, id);
+}
+
+struct WidgetTypeEntry {
+    const char *name;
+    WidgetFactory factory;
+};
+
+// 控件类型是编译期常量，表就做成静态数组：顺序扫描几十个 QLatin1String 比较
+// 只发生在「新建控件」时，比每次建控件都构造一遍哈希表更划算。
+const WidgetTypeEntry kWidgetTypes[] = {
+    // 容器
+    {"vbox", makeVBox},
+    {"hbox", makeHBox},
+    {"grid", makeGrid},
+    {"form", makeForm},
+    {"group", makeGroup},
+    {"frame", makeFrame},
+    {"scroll", makeScroll},
+    {"tabs", makeTabs},
+    {"tab", makePage},
+    {"page", makePage},
+    {"stack", makeStack},
+    {"split", makeSplit},
+    {"separator", makeSeparator},
+    // 控件
+    {"label", makeLabel},
+    {"image", makeImage},
+    {"link", makeLink},
+    {"button", makeButton},
+    {"lineedit", makeLineEdit},
+    {"textedit", makeTextEdit},
+    {"spin", makeSpin},
+    {"doublespin", makeDoubleSpin},
+    {"slider", makeSlider},
+    {"progress", makeProgress},
+    {"checkbox", makeCheckBox},
+    {"radio", makeRadio},
+    {"combo", makeCombo},
+    {"list", makeList},
+    {"table", makeTable},
+    {"tree", makeTree},
+    {"webview", makeWebView},
+};
+
+WidgetFactory widgetFactoryFor(const QString &type) {
+    for (const WidgetTypeEntry &entry : kWidgetTypes) {
+        if (type == QLatin1String(entry.name)) return entry.factory;
+    }
+    return nullptr;
+}
+
+}  // namespace
+
 QWidget *qtCreateWidget(QtWindowBox *box, const QString &type, const Variant &node) {
     const QString id = qtPropString(node, "id");
-    QObject *ctx = box->window();
-
-    // ── 容器 ──
-    if (type == QLatin1String("vbox")) {
-        auto *widget = new QWidget();
-        new QVBoxLayout(widget);
-        return widget;
+    if (WidgetFactory factory = widgetFactoryFor(type)) {
+        return factory(box, id, box->window());
     }
-    if (type == QLatin1String("hbox")) {
-        auto *widget = new QWidget();
-        new QHBoxLayout(widget);
-        return widget;
+    // spacer 由 buildNode 自己处理，不算未知类型；剩下的才是拼错了 type。
+    if (type != QLatin1String("spacer") && qtStrictMode()) {
+        qWarning("[qt] createWidget: unknown type '%s' (id '%s'), ignored",
+                 qPrintable(type), qPrintable(id));
     }
-    if (type == QLatin1String("grid")) {
-        auto *widget = new QWidget();
-        new QGridLayout(widget);
-        return widget;
-    }
-    if (type == QLatin1String("form")) {
-        auto *widget = new QWidget();
-        new QFormLayout(widget);
-        return widget;
-    }
-    if (type == QLatin1String("group")) {
-        auto *group = new QGroupBox();
-        new QVBoxLayout(group);
-        // checkable group 勾掉时 Qt 会把内容置灰，状态变化要能上报
-        QObject::connect(group, &QGroupBox::toggled, ctx, [box, id](bool on) {
-            box->enqueue(QStringLiteral("toggle"), id, on ? QStringLiteral("1") : QStringLiteral("0"));
-        });
-        return group;
-    }
-    if (type == QLatin1String("frame")) {
-        auto *frame = new QFrame();
-        frame->setFrameShape(QFrame::StyledPanel);
-        new QVBoxLayout(frame);
-        return frame;
-    }
-    if (type == QLatin1String("scroll")) {
-        auto *area = new QScrollArea();
-        area->setWidgetResizable(true);
-        auto *content = new QWidget();
-        new QVBoxLayout(content);
-        area->setWidget(content);
-        return area;
-    }
-    if (type == QLatin1String("tabs")) {
-        auto *tabs = new QTabWidget();
-        QObject::connect(tabs, &QTabWidget::currentChanged, ctx, [box, id](int index) {
-            Array payload;
-            payload.set("index", Variant(static_cast<Int>(index)));
-            box->enqueue(QStringLiteral("tab"), id, QString::number(index), payload);
-        });
-        // 标签页上的关闭按钮（closable => true）被点：只上报，是否真关由 PHP 决定
-        // （状态驱动 —— 直接关掉会和下一帧的视图打架）。
-        QObject::connect(tabs, &QTabWidget::tabCloseRequested, ctx, [box, id](int index) {
-            Array payload;
-            payload.set("index", Variant(static_cast<Int>(index)));
-            box->enqueue(QStringLiteral("close"), id, QString::number(index), payload);
-        });
-        return tabs;
-    }
-    if (type == QLatin1String("tab") || type == QLatin1String("page")) {
-        auto *page = new QWidget();
-        new QVBoxLayout(page);
-        return page;
-    }
-    if (type == QLatin1String("stack")) {
-        auto *stack = new QStackedWidget();
-        QObject::connect(stack, &QStackedWidget::currentChanged, ctx, [box, id](int index) {
-            Array payload;
-            payload.set("index", Variant(static_cast<Int>(index)));
-            box->enqueue(QStringLiteral("tab"), id, QString::number(index), payload);
-        });
-        return stack;
-    }
-    if (type == QLatin1String("split")) {
-        return new QSplitter(Qt::Horizontal);
-    }
-    if (type == QLatin1String("separator")) {
-        auto *line = new QFrame();
-        line->setFrameShape(QFrame::HLine);
-        line->setFrameShadow(QFrame::Sunken);
-        return line;
-    }
-
-    // ── 控件 ──
-    if (type == QLatin1String("label")) {
-        auto *label = new QLabel();
-        label->setTextInteractionFlags(Qt::NoTextInteraction);
-        return label;
-    }
-    if (type == QLatin1String("image")) {
-        auto *label = new QLabel();
-        label->setAlignment(Qt::AlignCenter);
-        return label;
-    }
-    if (type == QLatin1String("link")) {
-        auto *label = new QLabel();
-        label->setCursor(Qt::PointingHandCursor);
-        label->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
-        label->setOpenExternalLinks(false);
-        QObject::connect(label, &QLabel::linkActivated, ctx, [box, id](const QString &href) {
-            box->enqueue(QStringLiteral("click"), id, href);
-        });
-        return label;
-    }
-    if (type == QLatin1String("button")) {
-        auto *button = new QPushButton();
-        button->setCursor(Qt::PointingHandCursor);
-        QObject::connect(button, &QPushButton::clicked, ctx,
-                         [box, id]() { box->enqueue(QStringLiteral("click"), id); });
-        // checkable 按钮（以及 group）还要发 toggle —— 否则 'checkable' => true
-        // 只是个能按下去的装饰，用户拿不到状态变化。
-        QObject::connect(button, &QPushButton::toggled, ctx, [box, id](bool on) {
-            box->enqueue(QStringLiteral("toggle"), id, on ? QStringLiteral("1") : QStringLiteral("0"));
-        });
-        QObject::connect(button, &QPushButton::pressed, ctx,
-                         [box, id]() { box->enqueue(QStringLiteral("press"), id); });
-        QObject::connect(button, &QPushButton::released, ctx,
-                         [box, id]() { box->enqueue(QStringLiteral("release"), id); });
-        return button;
-    }
-    if (type == QLatin1String("lineedit")) {
-        auto *edit = new QLineEdit();
-        QObject::connect(edit, &QLineEdit::textChanged, ctx,
-                         [box, id](const QString &text) { box->enqueue(QStringLiteral("change"), id, text); });
-        QObject::connect(edit, &QLineEdit::returnPressed, ctx,
-                         [box, id, edit]() { box->enqueue(QStringLiteral("submit"), id, edit->text()); });
-        // 失焦（或回车）表示「这一格编辑完了」—— 表单场景常用它触发校验/保存，
-        // 与每敲一个字都发的 change 区分开。
-        QObject::connect(edit, &QLineEdit::editingFinished, ctx,
-                         [box, id, edit]() { box->enqueue(QStringLiteral("commit"), id, edit->text()); });
-        return edit;
-    }
-    if (type == QLatin1String("textedit")) {
-        auto *edit = new QTextEdit();
-        QObject::connect(edit, &QTextEdit::textChanged, ctx,
-                         [box, id, edit]() { box->enqueue(QStringLiteral("change"), id, edit->toPlainText()); });
-        return edit;
-    }
-    if (type == QLatin1String("spin")) {
-        auto *spin = new QSpinBox();
-        spin->setRange(std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
-        QObject::connect(spin, &QSpinBox::valueChanged, ctx, [box, id](int value) {
-            box->enqueue(QStringLiteral("change"), id, QString::number(value));
-        });
-        return spin;
-    }
-    if (type == QLatin1String("doublespin")) {
-        auto *spin = new QDoubleSpinBox();
-        spin->setRange(-1.0e18, 1.0e18);
-        QObject::connect(spin, &QDoubleSpinBox::valueChanged, ctx, [box, id](double value) {
-            box->enqueue(QStringLiteral("change"), id, QString::number(value));
-        });
-        return spin;
-    }
-    if (type == QLatin1String("slider")) {
-        auto *slider = new QSlider(Qt::Horizontal);
-        slider->setRange(0, 100);
-        QObject::connect(slider, &QSlider::valueChanged, ctx, [box, id](int value) {
-            box->enqueue(QStringLiteral("change"), id, QString::number(value));
-        });
-        return slider;
-    }
-    if (type == QLatin1String("progress")) {
-        auto *bar = new QProgressBar();
-        bar->setRange(0, 100);
-        bar->setTextVisible(true);
-        return bar;
-    }
-    if (type == QLatin1String("checkbox")) {
-        auto *check = new QCheckBox();
-        QObject::connect(check, &QCheckBox::toggled, ctx, [box, id](bool on) {
-            box->enqueue(QStringLiteral("toggle"), id, on ? QStringLiteral("1") : QStringLiteral("0"));
-        });
-        return check;
-    }
-    if (type == QLatin1String("radio")) {
-        auto *radio = new QRadioButton();
-        QObject::connect(radio, &QRadioButton::toggled, ctx, [box, id](bool on) {
-            box->enqueue(QStringLiteral("toggle"), id, on ? QStringLiteral("1") : QStringLiteral("0"));
-        });
-        return radio;
-    }
-    if (type == QLatin1String("combo")) {
-        auto *combo = new QComboBox();
-        QObject::connect(combo, &QComboBox::currentIndexChanged, ctx, [box, id, combo](int index) {
-            Array payload;
-            payload.set("index", Variant(static_cast<Int>(index)));
-            box->enqueue(QStringLiteral("change"), id, combo->currentText(), payload);
-        });
-        // 可编辑下拉（editable => true）里手打的文本也要上报，
-        // 否则用户输的内容拿不到。
-        QObject::connect(combo, &QComboBox::editTextChanged, ctx,
-                         [box, id](const QString &text) { box->enqueue(QStringLiteral("change"), id, text); });
-        return combo;
-    }
-    if (type == QLatin1String("list")) {
-        auto *list = new QListWidget();
-        QObject::connect(list, &QListWidget::itemSelectionChanged, ctx, [box, id, list]() {
-            auto *item = list->currentItem();
-            Array payload;
-            payload.set("index", Variant(static_cast<Int>(list->currentRow())));
-            box->enqueue(QStringLiteral("select"), id, item ? item->data(Qt::UserRole).toString() : QString(),
-                         payload);
-        });
-        QObject::connect(list, &QListWidget::itemDoubleClicked, ctx, [box, id](QListWidgetItem *item) {
-            box->enqueue(QStringLiteral("activate"), id, item->data(Qt::UserRole).toString());
-        });
-        // 单击：select 只在「选中项变化」时发；点同一项再点一次不会发 select，
-        // 但 itemClicked 会发 —— 需要「每次点击都响应」的场景用它。
-        QObject::connect(list, &QListWidget::itemClicked, ctx, [box, id](QListWidgetItem *item) {
-            box->enqueue(QStringLiteral("itemClick"), id, item->data(Qt::UserRole).toString());
-        });
-        return list;
-    }
-    if (type == QLatin1String("table")) {
-        auto *table = new QTableWidget(0, 1);
-        table->setSelectionBehavior(QAbstractItemView::SelectRows);
-        table->setSelectionMode(QAbstractItemView::SingleSelection);
-        table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-        table->verticalHeader()->hide();
-        table->horizontalHeader()->setStretchLastSection(true);
-        QObject::connect(table, &QTableWidget::itemSelectionChanged, ctx, [box, id, table]() {
-            const int row = table->currentRow();
-            if (row < 0) return;
-            auto *first = table->item(row, 0);
-            if (!first) return;
-            Array payload;
-            payload.set("row", Variant(static_cast<Int>(row)));
-            // ── 选区上报 ──
-            // 开了 select_mode=multi/extended 之后，只报 currentRow() 的话上层
-            // 拿不到「选中了哪几行」，批量填充之类的操作就无从下手。
-            // 这里按行序扫一遍被选中的行（selectionBehavior 是 SelectRows，
-            // 所以判第 0 列是否被选中即可），把行号与行 id 一起带上去。
-            // 用逗号串而不是嵌套数组：桥接的 Array 只稳定承载标量，
-            // 上层 explode(',', …) 还原。
-            QStringList rows;
-            QStringList rowIds;
-            for (int r = 0; r < table->rowCount(); ++r) {
-                QTableWidgetItem *cell = table->item(r, 0);
-                if (!cell || !cell->isSelected()) continue;
-                rows << QString::number(r);
-                rowIds << cell->data(Qt::UserRole).toString();
-            }
-            payload.set("rows", toPhpString(rows.join(QLatin1Char(','))));
-            payload.set("row_ids", toPhpString(rowIds.join(QLatin1Char(','))));
-            payload.set("count", Variant(static_cast<Int>(rows.size())));
-            box->enqueue(QStringLiteral("select"), id, first->data(Qt::UserRole).toString(), payload);
-        });
-        QObject::connect(table, &QTableWidget::itemDoubleClicked, ctx, [box, id](QTableWidgetItem *item) {
-            box->enqueue(QStringLiteral("activate"), id, item->data(Qt::UserRole).toString());
-        });
-        // 单元格被就地编辑：editable 表格要靠它把改动收回状态。
-        // payload 带 row / col，value 是新文本。
-        QObject::connect(table, &QTableWidget::cellChanged, ctx, [box, id, table](int row, int col) {
-            auto *cell = table->item(row, col);
-            Array payload;
-            payload.set("row", Variant(static_cast<Int>(row)));
-            payload.set("col", Variant(static_cast<Int>(col)));
-            box->enqueue(QStringLiteral("cell"), id, cell ? cell->text() : QString(), payload);
-        });
-        return table;
-    }
-    if (type == QLatin1String("tree")) {
-        auto *tree = new QTreeWidget();
-        tree->setColumnCount(1);
-        QObject::connect(tree, &QTreeWidget::itemSelectionChanged, ctx, [box, id, tree]() {
-            auto *item = tree->currentItem();
-            if (!item) return;
-            box->enqueue(QStringLiteral("select"), id, item->data(0, Qt::UserRole).toString());
-        });
-        QObject::connect(tree, &QTreeWidget::itemDoubleClicked, ctx, [box, id](QTreeWidgetItem *item, int) {
-            box->enqueue(QStringLiteral("activate"), id, item->data(0, Qt::UserRole).toString());
-        });
-        // 展开/折叠：懒加载子节点、记住展开状态都要靠它。
-        // value 是节点 id，payload.expanded 给最终状态（省得自己判方向）。
-        QObject::connect(tree, &QTreeWidget::itemExpanded, ctx, [box, id](QTreeWidgetItem *item) {
-            Array payload;
-            payload.set("expanded", Variant(true));
-            box->enqueue(QStringLiteral("expand"), id, item->data(0, Qt::UserRole).toString(), payload);
-        });
-        QObject::connect(tree, &QTreeWidget::itemCollapsed, ctx, [box, id](QTreeWidgetItem *item) {
-            Array payload;
-            payload.set("expanded", Variant(false));
-            box->enqueue(QStringLiteral("collapse"), id, item->data(0, Qt::UserRole).toString(), payload);
-        });
-        return tree;
-    }
-    if (type == QLatin1String("webview")) {
-        return qtCreateWebView(box, id);
-    }
-    return nullptr;  // spacer 与未知类型
+    return nullptr;
 }
 
 // ────────────────────────────── 重型重建（需要整个节点） ──────────────────────────────
@@ -1020,6 +1110,9 @@ void qtApplyProp(QtWindowBox *box, QWidget *widget, const QString &type, const Q
         else if (auto *list = qobject_cast<QListWidget *>(widget)) list->setSelectionMode(selection);
         else if (auto *tree = qobject_cast<QTreeWidget *>(widget)) tree->setSelectionMode(selection);
         return;
+    }
+    if (qtStrictMode()) {
+        qWarning("[qt] applyProp: unknown prop '%s' on %s, ignored", qPrintable(key), qPrintable(type));
     }
 
     // columns/rows/row_ids/headers/nodes/expanded 由 Box 在节点上下文里处理。

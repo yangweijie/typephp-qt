@@ -22,10 +22,11 @@
 | macOS (Apple Silicon) | ✅ | ✅ `dist/<Name>.app`（macdeployqt + ad-hoc 签名） | `brew install qtbase libiconv` |
 | Linux (Debian/Ubuntu) | ✅ | ✅ `dist/<name>/`（ldd 依赖闭包 + patchelf 改 DT_RPATH + `qt.conf`） | 见下 |
 
-**只用到 Qt 的 `Core` / `Gui` / `Widgets` 三个模块**（没有 QML/Quick、Network、Sql），
+**只用到 Qt 的 `Core` / `Gui` / `Widgets` / `Network` 四个模块**（没有 QML/Quick、Sql；
+`Network` 给 `qt_http_request()` 用），
 所以最小安装就够。各系统的安装方式、其他发行版的包名、非默认 Qt 版本怎么指定、链接报错怎么查，
 见 **[Qt 的安装与编译](https://yangweijie.github.io/typephp-qt/zh/guide/qt-setup.html)**。
-`qtphp` 自动探测的是 Qt **6.9.3** 的常见路径；其他版本用 `QT_DIR` 指定（优先级高于自动探测）。
+`qtphp` 自动探测的是 Qt **6.9.3** 的常见路径；其他版本用 `QT_ROOT`（CI 通用）或 `QT_DIR` 指定，两者都优先于自动探测。
 
 Linux 侧的实测环境是 Debian 12 arm64 + `qt6-base-dev 6.4.2` + `cmake 3.25.1`：
 `build` 产出 ELF PIE 可执行文件，`QT_QPA_PLATFORM=offscreen` 下三个验收开关全部 rc=0
@@ -138,9 +139,18 @@ brew libiconv + libc++/libSystem，`--selftest` / `--difftest` / `--shot` 出图
 清掉 `build/cache/` 下的 `objects`/`incremental`/`link` 后重建即回干净口径，功能无差异。详见
 [CLI 参考 → nano](https://yangweijie.github.io/typephp-qt/zh/reference/cli.html#nano)。
 
-`qtphp new` 生成的新项目同时带 `project.yml`（Windows 段）、`project.macos.yml`（mac 入口）、
-`project.linux.yml`（Linux 入口，Debian 多架构路径按生成机推导）与 `Info.macos.plist`（打包 `.app` 用），
-Windows 便捷脚本 `build.bat` / `run.bat` / `package.bat` 也一并给出。macOS 与 Linux 上首次 `qtphp build`
+`qtphp new` 生成的新项目同时带 `project.yml`（公共段 + Windows 段）、`project.macos.yml`（mac 入口）、
+`project.linux.yml`（Linux 入口，Debian 布局按生成机的多架构三元组推导，其它发行版回落
+`/usr/include/qt6`）与 `Info.macos.plist`（打包 `.app` 用），Windows 便捷脚本
+`build.bat` / `run.bat` / `package.bat` 也一并给出。
+
+后两份入口只有十几行，因为 `sources` 只在 `project.yml` 里写一次，平台差异用 tpc 支持的
+**条件条目**表达（`- path: …qt_webview_wk.mm` + `if: PHP_OS_FAMILY == "Darwin"`）；Qt 头目录
+放进 `cxx-flags` 的 `-I`，因此平台入口从不覆盖 `include-paths`，仓库内的两条路径自动继承。
+这一点很关键：include 合并时**列表是整体替换、不是追加**，一旦在平台入口重写 `include-paths`，
+公共段里的路径就全丢了。
+
+macOS 与 Linux 上首次 `qtphp build`
 会让 tpc 从 php-src 现编私有 embed 运行时并缓存在 `~/.typephp`（缓存目录名带平台指纹，两平台互不复用），
 之后所有构建复用。注意 tpc 每次构建都要先访问 php.net 的 releases 索引核对源码 SHA-256，
 纯离线机器第一次构建会失败。
@@ -149,26 +159,43 @@ Windows 便捷脚本 `build.bat` / `run.bat` / `package.bat` 也一并给出。m
 
 ```
 typephp-qt/
-├── bin/qtphp              # CLI（doctor/new/build/run/package/test/lint）
+├── bin/qtphp              # CLI 入口（doctor/new/build/run/package/test/lint）
+├── bin/lib/               # CLI 实现：按域拆成的全局函数文件（discovery/new/build/package/…）
+├── project.yml            # 库模式的编译配置（mode: lib），供下游按包引用
 ├── cpp-src/               # C++ 桥接（参与应用编译）
 │   ├── qt_common.h        # 共享头：转换工具、Box 类、ChildSlot
-│   ├── qt_bridge.cc       # 窗口/渲染 diff/装饰/对话框/包装符号
-│   └── qt_widgets.cc      # 控件工厂/属性应用/取值
+│   ├── qt_loop.cc         # 事件循环/窗口生命周期/包装符号
+│   ├── qt_render.cc       # 渲染遍历与差异更新（render/patch）
+│   ├── qt_decor.cc        # 装饰（菜单/托盘/状态栏）/对话框/几何/a11y
+│   ├── qt_widgets.cc      # 控件工厂/属性应用/取值
+│   └── qt_webview.cc      # webview 统一入口（WebView2 / WKWebView / QTextBrowser）
 ├── php-src/qt.stub.php    # 桥接契约（PHP 签名，函数体必须为空）
 ├── src/                   # PHP 框架层
 │   ├── QtApp.php          # 应用框架（事件循环/错误兜底）
 │   ├── WidgetTree.php     # 声明式控件树构建器
+│   ├── AppData.php        # 配置/缓存/数据目录
+│   ├── JsonStore.php      # 原子写入的 JSON 键值存储
 │   └── FakeBridge.php     # 纯 PHP 桥接替身（测试用）
 ├── tests/                 # 单元测试
-└── examples/hello/        # 示例应用
-    ├── project.yml        # Windows 编译入口（`build.bat` 直接用）
-    ├── project.macos.yml  # macOS 入口：include 上面的公共段再整体替换 Qt 段
-    └── project.linux.yml  # Linux 入口：同上，走 Debian 多架构的 -I/-lQt6Xxx（无 framework）
+└── examples/
+    ├── hello/             # 最小示例（25 项 selftest + 20 项 difftest）
+    │   ├── project.yml        # 公共段 + Windows 段，sources 只写在这里
+    │   ├── project.macos.yml  # macOS 入口：include 公共段，只覆盖 Qt 编译/链接参数
+    │   └── project.linux.yml  # Linux 入口：同上，走 Debian 多架构的 -I/-lQt6Xxx（无 framework）
+    └── taskboard/         # 综合示例：表格 + 过滤 + 表单 + 菜单 + 状态栏 + 几何持久化
 ```
 
-桥接 C++ 的编译验证就是 `qtphp build examples/hello` —— 两个 `.cc` 是示例 `sources` 的一部分，
-Windows / macOS / Linux 各自走自己的入口 yml，没有单独的仓库根编译配置。
-契约（stub ↔ C++ 实现）层面用 `qtphp lint`，它直接读 `php-src/qt.stub.php` 与 `cpp-src/*.cc`。
+桥接 C++ 的编译验证就是 `qtphp build examples/hello` —— 三个 `.cc` 是示例 `sources` 的一部分，
+Windows / macOS / Linux 各自走自己的入口 yml；仓库根另有一份 `mode: lib` 的 `project.yml`
+供下游作为库引用。契约（stub ↔ C++ 实现）层面用 `qtphp lint`，它直接读
+`php-src/qt.stub.php` 与 `cpp-src/*.cc`。
+
+综合示例 `examples/taskboard` 覆盖表格、过滤、表单、菜单、状态栏与窗口几何持久化，
+同样带一份 `--selftest`，可以直接当作真实应用的骨架：
+
+```bash
+php bin/qtphp build examples/taskboard
+```
 
 ## 架构
 
@@ -182,7 +209,10 @@ Windows / macOS / Linux 各自走自己的入口 yml，没有单独的仓库根�
 
 - **桥接契约**：`php-src/qt.stub.php` 声明签名 ⇄ `cpp-src/*.cc` 实现 `php_` 前缀符号
 - **渲染**：PHP 传控件树数组，C++ 按节点 `id` 做 diff —— 新增则建、消失则删、存在则只更新变化属性
-- **无 id 节点**：C++ 用**结构路径**（`_p0.1.2`）当稳定 id，保证每帧映射到同一控件
+- **无 id 节点**：C++ 用**结构路径**（`_p0.1.2`）当 id —— 它只在**同一帧内**稳定。前面兄弟的
+  数量一变，后面的节点全部位移、id 跟着变，控件会被判成「旧的删除 + 新的创建」，输入光标、
+  选中行、滚动位置随之丢失，长列表还会出现空白/闪烁。动态容器（表格行、树节点、条件分支）
+  里的孩子**必须显式给 `id`**。
 - **事件**：所有信号只入队，PHP 主循环取走分派；处理器异常弹错误框但不中断循环
 
 ## 多窗口 / 托盘 / 定时器
@@ -339,7 +369,9 @@ $w->patch([
 qtphp test
 ```
 
-116 个测试全部走纯 PHP 桥接替身，**不需要 Qt 或编译器**。
+160 个测试（263 条断言）全部走纯 PHP 桥接替身，**不需要 Qt 或编译器**。覆盖桥接契约一致性、
+事件分发、控件树 diff、`AppData`/`JsonStore`、以及 CLI 的参数解析；C++ 侧没有单测，靠
+`examples/hello` 的 `--selftest` / `--difftest` 做端到端验收。
 
 视觉验收用无头截图（`qtphp run` 会把其后的参数原样透传给应用）：
 

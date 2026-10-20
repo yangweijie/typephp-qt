@@ -8,6 +8,8 @@ This section covers how the framework works internally, and the constraints that
 | [Hand-written Bridge](/advanced/bridge.md) | To use a Qt widget the package does not expose, or to understand the bridge internals |
 | [Diff Engine](/advanced/diff-engine.md) | To understand why widget state survives a re-render |
 | [Headless Verification](/advanced/headless.md) | To wire up CI, or to verify without a display |
+| [Performance](/advanced/performance.md) | To keep a large UI smooth, or to understand what one frame actually costs |
+| [Pitfalls](/advanced/pitfalls.md) | When something does nothing, or a bug makes no sense — a symptom-first checklist |
 
 ## In one line
 

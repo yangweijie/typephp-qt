@@ -56,6 +56,22 @@ namespace TypePHP\Qt\Fake {
         /** @var array<int, array> 所有已渲染的树，便于断言 */
         public static array $renders = [];
 
+        /** @var array<string, array> 窗口 id -> 最近一次渲染的树（a11y_tree 要用） */
+        public static array $trees = [];
+
+        /** @var array<int, array> qt_http_request() 收到的请求轨迹 */
+        public static array $httpRequests = [];
+
+        /**
+         * 预置的 HTTP 响应队列。
+         *
+         * 假桥**绝不发真实网络请求**：队列为空时返回失败结构，让测试显式决定
+         * 「网络坏了」这条分支怎么走；需要成功响应时用 test_set_http_response()。
+         *
+         * @var array<int, array>
+         */
+        public static array $httpResponses = [];
+
         public static function reset(): void
         {
             self::$windows = [];
@@ -69,6 +85,9 @@ namespace TypePHP\Qt\Fake {
             self::$seq = 0;
             self::$snapshots = [];
             self::$renders = [];
+            self::$trees = [];
+            self::$httpRequests = [];
+            self::$httpResponses = [];
         }
     }
 
@@ -93,7 +112,17 @@ namespace {
     function qt_window_create(string $title, array $options = []): mixed
     {
         $id = 'win_' . (++FakeState::$seq);
-        FakeState::$windows[$id] = ['title' => $title, 'open' => true, 'options' => $options];
+        FakeState::$windows[$id] = [
+            'title' => $title,
+            'open' => true,
+            'options' => $options,
+            // 真实桥接里窗口一开始就有几何（options 的 width/height 或 Qt 默认值），
+            // 假桥同样先铺好，好让 geometry() 在任何时候都返回完整四元组。
+            'x' => (int) ($options['x'] ?? 0),
+            'y' => (int) ($options['y'] ?? 0),
+            'width' => (int) ($options['width'] ?? 800),
+            'height' => (int) ($options['height'] ?? 600),
+        ];
         FakeState::$queues[$id] = [];
         FakeState::$values[$id] = [];
         FakeState::$props[$id] = [];
@@ -104,6 +133,8 @@ namespace {
     function qt_window_render(mixed $window, array $tree): void
     {
         FakeState::$renders[] = $tree;
+        // 保留最近一帧，a11y_tree() 要按它递归出结构化快照。
+        FakeState::$trees[$window] = $tree;
         qt_fake_walk($window, $tree);
     }
 
@@ -220,7 +251,8 @@ namespace {
             FakeState::$queues[$window],
             FakeState::$values[$window],
             FakeState::$props[$window],
-            FakeState::$timers[$window]
+            FakeState::$timers[$window],
+            FakeState::$trees[$window]
         );
     }
 
@@ -233,6 +265,160 @@ namespace {
     function qt_window_widget_value(mixed $window, string $id): mixed
     {
         return FakeState::$values[$window][$id] ?? null;
+    }
+
+    // ── 窗口集合与几何 ──
+
+    function qt_window_list(): array
+    {
+        // `__app__` 不是窗口，是 qt_app_create() 的选项袋子。
+        return array_values(array_filter(
+            array_keys(FakeState::$windows),
+            static fn ($id): bool => $id !== '__app__'
+        ));
+    }
+
+    function qt_window_id(mixed $window): string
+    {
+        // 假桥的句柄本来就是 id 字符串。
+        return (string) $window;
+    }
+
+    function qt_window_focus(mixed $window): void
+    {
+        if (isset(FakeState::$windows[$window])) {
+            FakeState::$windows[$window]['minimized'] = false;
+            FakeState::$windows[$window]['active'] = true;
+        }
+    }
+
+    function qt_window_center(mixed $window): void
+    {
+        if (!isset(FakeState::$windows[$window])) {
+            return;
+        }
+        // 真实桥接按所在屏幕的可用区域算中心；假桥没有屏幕概念，
+        // 用固定虚拟屏幕（1920x1080）推出同样的四元组，好让断言可预测。
+        $w = (int) (FakeState::$windows[$window]['width'] ?? 0);
+        $h = (int) (FakeState::$windows[$window]['height'] ?? 0);
+        FakeState::$windows[$window]['x'] = intdiv(1920 - $w, 2);
+        FakeState::$windows[$window]['y'] = intdiv(1080 - $h, 2);
+        FakeState::$windows[$window]['centered'] = true;
+    }
+
+    function qt_window_set_parent(mixed $window, mixed $parent): void
+    {
+        if (!isset(FakeState::$windows[$window])) {
+            return;
+        }
+        if ($parent === null) {
+            unset(FakeState::$windows[$window]['parent']);
+            return;
+        }
+        FakeState::$windows[$window]['parent'] = (string) $parent;
+    }
+
+    function qt_window_geometry(mixed $window): array
+    {
+        $info = FakeState::$windows[$window] ?? [];
+        return [
+            'x' => (int) ($info['x'] ?? 0),
+            'y' => (int) ($info['y'] ?? 0),
+            'width' => (int) ($info['width'] ?? 0),
+            'height' => (int) ($info['height'] ?? 0),
+        ];
+    }
+
+    function qt_window_set_geometry(mixed $window, array $rect): void
+    {
+        if (!isset(FakeState::$windows[$window])) {
+            return;
+        }
+        // 缺省的键保持不动 —— 与真实桥接的语义一致。
+        foreach (['x', 'y', 'width', 'height'] as $key) {
+            if (array_key_exists($key, $rect)) {
+                FakeState::$windows[$window][$key] = (int) $rect[$key];
+            }
+        }
+    }
+
+    // ── 事件注入与内省 ──
+
+    function qt_window_send_event(mixed $window, array $event): void
+    {
+        // 注入的是「PHP 收到的事件」，不经过 Qt，所以这里和 test_inject_event 等价。
+        test_inject_event($window, $event);
+    }
+
+    function qt_window_find(mixed $window, string $id): array
+    {
+        $props = FakeState::$props[$window][$id] ?? null;
+        if (!is_array($props)) {
+            return [];
+        }
+        $type = (string) ($props['type'] ?? '');
+        return [
+            'id' => $id,
+            'type' => $type,
+            'value' => FakeState::$values[$window][$id] ?? null,
+            'visible' => (bool) ($props['visible'] ?? true),
+            'enabled' => (bool) ($props['enabled'] ?? true),
+            // 假桥没有布局引擎，几何统一报零；断言几何请走真实桥接的 headless 测试。
+            'geometry' => ['x' => 0, 'y' => 0, 'width' => 0, 'height' => 0],
+        ];
+    }
+
+    function qt_window_a11y_tree(mixed $window, int $maxDepth = 6): array
+    {
+        $tree = FakeState::$trees[$window] ?? null;
+        if (!is_array($tree)) {
+            return [];
+        }
+        return qt_fake_a11y_node($window, $tree, max(0, $maxDepth));
+    }
+
+    function qt_window_poll_events(mixed $window, int $max = 64): array
+    {
+        $queue = FakeState::$queues[$window] ?? [];
+        if (empty($queue) || $max <= 0) {
+            return [];
+        }
+        $taken = array_splice($queue, 0, $max);
+        FakeState::$queues[$window] = $queue;
+        return array_values($taken);
+    }
+
+    function qt_window_toast(mixed $window, string $message, int $durationMs = 3000): void
+    {
+        FakeState::$windows[$window]['toasts'][] = ['message' => $message, 'duration' => $durationMs];
+    }
+
+    // ── 网络原语 ──
+
+    /**
+     * 假桥绝不发真实网络请求。
+     *
+     * 队列里有预置响应就取一条；没有就返回失败结构（status=0 + error），
+     * 这样「网络坏了」这条分支永远是测试显式选择的结果，不会因环境抖动。
+     */
+    function qt_http_request(array $spec): array
+    {
+        FakeState::$httpRequests[] = $spec;
+        if (FakeState::$httpResponses !== []) {
+            $response = array_shift(FakeState::$httpResponses);
+            return [
+                'status' => (int) ($response['status'] ?? 200),
+                'headers' => (array) ($response['headers'] ?? []),
+                'body' => (string) ($response['body'] ?? ''),
+                'error' => (string) ($response['error'] ?? ''),
+            ];
+        }
+        return [
+            'status' => 0,
+            'headers' => [],
+            'body' => '',
+            'error' => 'fake bridge: no network',
+        ];
     }
 
     function qt_window_set_title(mixed $window, string $title): void
@@ -351,6 +537,18 @@ namespace {
         FakeState::$webViewBackend = $backend;
     }
 
+    /** 预置一条 HTTP 响应，qt_http_request() 会按顺序取走。 */
+    function test_set_http_response(array $response): void
+    {
+        FakeState::$httpResponses[] = $response;
+    }
+
+    /** 读取 HTTP 请求轨迹。 */
+    function test_http_requests(): array
+    {
+        return FakeState::$httpRequests;
+    }
+
     // ── 内部 ──
 
     /** 递归登记树里每个有 id 的节点，并按类型推导初始值。 */
@@ -378,5 +576,39 @@ namespace {
             'label', 'button' => $node['text'] ?? '',
             default => null,
         };
+    }
+
+    /**
+     * 把声明式节点转成无障碍快照。
+     *
+     * 真实桥接读的是 QWidget 的实际状态；假桥只能读渲染树 + 已记录的属性，
+     * 所以 visible/enabled 一律按「未声明即为真」推导，geometry 报零。
+     * 目的是让「树里有没有这个节点、层级对不对」可断言，而不是验像素。
+     */
+    function qt_fake_a11y_node(mixed $window, array $node, int $depth): array
+    {
+        $type = (string) ($node['type'] ?? '');
+        $id = (string) ($node['id'] ?? '');
+        $result = [
+            'role' => $type,
+            'id' => $id,
+            'text' => (string) ($node['text'] ?? $node['label'] ?? $node['title'] ?? ''),
+            'value' => FakeState::$values[$window][$id] ?? ($node['value'] ?? null),
+            'visible' => (bool) ($node['visible'] ?? true),
+            'enabled' => (bool) ($node['enabled'] ?? true),
+            'geometry' => ['x' => 0, 'y' => 0, 'width' => 0, 'height' => 0],
+        ];
+        if ($depth > 0) {
+            $children = [];
+            foreach ($node['children'] ?? [] as $child) {
+                if (is_array($child)) {
+                    $children[] = qt_fake_a11y_node($window, $child, $depth - 1);
+                }
+            }
+            if ($children !== []) {
+                $result['children'] = $children;
+            }
+        }
+        return $result;
     }
 }

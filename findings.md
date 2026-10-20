@@ -2478,3 +2478,85 @@ cpp-src 3,259 / src 1,152 / `bin/qtphp` 2,432 / stub 157 ⇒ **7,000 行**。
 `git stash` 掉 `cpp-src/` 两个文件 → 重编 → 记哈希 → `git stash pop` → 重编 → 记哈希。
 **不能**直接拿本轮的 `b263a747…` 去比 F44 记的那次出图（教训 21：产物内嵌构建时间戳，且 F44 只记了
 尺寸没记哈希，两侧都不可比）。这也说明**基线哈希必须在改动前后各存一次**，事后补不回来。
+
+## F48. CLI 的两个「只对作者友好」的默认值：ANSI 无降级、桥接源要手抄（Session 33）
+
+### §0 共同形态：维护者本地永远看不见的那一类
+
+F46 是「声明了但静默不生效」（应用写的东西没效果），F48 是它的镜像：**框架作者用自己的终端/自己的仓库
+验证一切正常，而消费者一装上就踩**。两条都属 CLI 层，改动量小，但都是"第一次跑就遇到"的位置。
+
+### §1 `color()` 从不判断 stdout 是不是终端（bin/lib/output.php）
+
+`color()` 无条件拼 `\033[..m`，于是 CI 日志、重定向到文件、管道给别的工具时全是乱码控制符。这类问题在
+TTY 上**永远复现不出来** —— 而本地终端恰好是维护者唯一的验证环境。
+
+修法是三档优先级（不发明新变量，直接对齐既有生态约定）：
+
+1. `NO_COLOR` 非空 ⇒ 关。它是"用户明确说不要"，必须压过一切（含 `CLICOLOR_FORCE`）。
+2. `CLICOLOR_FORCE` 非空且 ≠ `'0'` ⇒ 开。它是"明确说要"，压过自动探测。`'0'` 的语义是**「未强制」而不是「强制关」** —— 继续走第 3 档，真 TTY 下仍然是彩色（40.10 实测确认）。
+3. 否则 `defined('STDOUT') && function_exists('stream_isatty') ? @stream_isatty(STDOUT) : false`。
+   两道防御是必要的：AOT/嵌入场景下 `STDOUT` 常量不一定存在；`stream_isatty` 在少数环境下会告警。
+
+**故意不缓存结果**。缓存能省一次系统调用，但会让"同一进程内切 env 再断言"的测试失效 —— 而切 env 是
+这条逻辑唯一可靠的验证手段（`tests/CliTest.php` 就是这么写的）。这是个明确的取舍：**可测性 > 几个纳秒**。
+
+复现真 TTY 的办法（工具/CI 的父进程 stdout 通常已被重定向，`AllocConsole()` 与 `> CON` 都拿不到字符设备）：
+`Start-Process -FilePath php -ArgumentList … -WindowStyle Hidden -Wait` 让子进程获得新的真实控制台句柄，
+此时 PHP 侧 `stream_isatty(STDOUT)=true`。实测：无 env ⇒ `\033[31mX\033[0m`；`NO_COLOR=1` ⇒ `X`；
+`CLICOLOR_FORCE=0` ⇒ 仍彩色（回落 isatty）；管道下只有 `CLICOLOR_FORCE=1` 出转义、`NO_COLOR` 压过 force。
+它只能断言**字节**，配色是否好看仍需人眼看一次真终端。
+
+### §2 `extra.bridge` 只有声明，没有消费者（bin/lib/build.php）
+
+`composer.json` 里写 `extra.bridge = { "stub": "...", "sources": ["cpp-src/*.cc"] }` 只是**声明**：
+包自身构建时 `bin/qtphp` 直接读本仓库的 `project.yml`，根本用不到它；而下游 `composer require` 之后，
+桥接 C++ 源码躺在 `vendor/yangweijie/typephp-qt/` 里、项目 `sources:` 里没有它们 ⇒ 链接期缺 `qt_*` 符号。
+声明与消费必须在同一批交付，否则那段 JSON 就是一行注释（呼应教训 26「编译过 ≠ 入库过」的同型错误：
+**声明过 ≠ 被消费**）。
+
+契约（实现即规格）：
+
+| 项 | 行为 |
+|---|---|
+| `installed.json` 布局 | 兼容 composer 1（顶层数组）与 composer 2（`{"packages": [...]}`） |
+| `install-path` 解析 | 有该字段时依次试 `vendor/composer/<p>`、`vendor/<p>`，都走 `realpath` 兜底（composer 2 常写 `../../`） |
+| composer 1 无 `install-path` | **字段缺失**时回落到 `realpath(vendor/<package.name>)`。初版只认 `install-path`，于是 composer 1 的包被整包 `continue` 跳过，「兼容两种布局」名存实亡 —— 单元测试也只覆盖了 composer 2 的路径，直到 40.10 用顶层数组夹具才暴露；教训 32 |
+| 顺序 | `stub` 恒在 `sources` 之前（PHP 侧声明先于实现） |
+| 去重 | 按**绝对路径**去重（同一包被 include 两次也不重复编） |
+| 缺失文件 | `warning()` 后跳过，不中断整次 build |
+| 内联数组 `sources: [a, b]` | **拒绝**（返回 null + 提示）。字符串注入要正确处理它得先解析 yaml；本仓库无依赖，手写 yaml 解析器的风险远大于收益 |
+| 无 `vendor` / 无 bridge | 返回 null ⇒ tpc 命令行与改动前**逐字一致**（`examples/hello` 属此类，示例行为未被碰过） |
+
+### §3 临时 yaml 的落点不是卫生问题，是语义问题
+
+`buildMergedProjectYaml()` 写 `<projectDir>/.qtphp-bridge-<getmypid()>.yml`。**必须在项目目录内**：
+tpc 解析 `sources:` 的相对路径以 **yaml 所在目录**为基准。放到 `sys_get_temp_dir()` 看起来更"干净"，
+实际会让所有相对源路径立刻失效，报错是「找不到 src/main.php」—— 这行报错会把排查引向"源文件路径写错了"，
+而真因是"yaml 不在项目里"。
+
+清理放在两处 `passthru` 的 `try/finally` 里（vcvars 批处理分支与直调分支各一处）：构建失败、Ctrl-C、
+异常都走同一条清理路径。成功路径上 `info()` 打印注入数量与临时文件名，便于排查"到底注了什么"。
+
+### §4 端到端探针：这类改动的单测证明不了什么
+
+`tests/CliTest.php` 的 16 例只覆盖纯函数（`injectSourcesIntoProjectYaml` 的缩进保持 / 内联数组拒绝 /
+空列表 / composer 双布局 / 去重；`colorEnabled` 的三档 env）。它们**不能**证明"注入之后 tpc 真的多编了一个 TU"，
+因为那要跑完整构建。
+
+所以做了一次真实探针：`examples/_bridge_probe` 造假 composer 包 ——
+`vendor/composer/installed.json` 里 `"install-path": "."`、`extra.bridge.sources = ["cpp-src/probe_extra.cc"]`，
+探针源只有一行 `void php_probe_extra_marker(void) {}`；`project.yml` 由 hello 复制并改名。实测：
+
+```
+[INFO] 已注入 1 个桥接源（临时 .qtphp-bridge-11704.yml）
+Successfully compiled 15 files          # 14 + 1
+Build successful
+```
+
+判据是 TU 数从 14 变 15 —— 这是唯一能证明"多出来的那个源真的进了编译单元"的读数。构建后 `.qtphp-bridge-*`
+无残留（`finally` 生效）。另用真实 `examples/hello/project.yml` 验过注入形态：插在 `sources:` 首条之前、
+保持 2 空格缩进、只增 2 行、`link-libs:` 段一字未动。
+
+**未验**：`CLICOLOR_FORCE` 在真 TTY 上的观感（只验了 env 优先级与返回值）、Linux/macOS 的 `stream_isatty`
+分支、composer 1 的真实安装（目前只有按两种 JSON 布局造的夹具）。

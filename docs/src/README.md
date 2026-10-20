@@ -25,3 +25,1219 @@ features:
     details: --shot renders a PNG, --selftest fires every event, --difftest covers table/tree diff boundaries. No display needed in CI.
 footer: MIT Licensed | Copyright © yangweijie
 ---
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers
+
+## Explore the docs
+
+- [Guide](/guide/) — installation, architecture, events, layout, and more
+- [Widget Catalog](/widgets/) — every widget with properties and examples
+- [Advanced Topics](/advanced/) — AOT notes, bridge internals, diff engine, performance
+- [Reference](/reference/) — CLI, API, packaging, platform notes
+- [FAQ](/faq.html) — common questions and answers

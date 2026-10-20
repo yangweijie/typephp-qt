@@ -1,0 +1,75 @@
+name: taskboard
+mode: bin
+output: build/taskboard
+
+# 桥接 C++ 源码直接参与本应用编译（源码内联方案）。
+# 不依赖预编译的 qtphp-bridge.lib —— 那样会和 Qt/PHPX 版本强绑定。
+#
+# 三份配置的分工（tpc 的 include 语义：map 递归合并、**list 整体替换**）：
+#   - 本文件 = 公共段 + Windows 默认段。sources 只写一遍，平台差异用条件条目表达。
+#   - project.linux.yml / project.macos.yml = include 本文件，只覆盖平台相关的
+#     link-libs / link-paths / cxx-flags / ld-flags。
+#   - qtphp build 按 PHP_OS_FAMILY 自动挑入口；Windows 直接用本文件。
+#
+# 平台差异之所以能用条件条目而不是复制整份 sources：tpc 的 sources/objects/
+# embedded-files 支持 `path:` + `if:`，而 include-paths 不支持。所以 Qt 的
+# 头文件目录在 Linux/macOS 入口里放进 cxx-flags（-I），这样 include-paths 不被
+# 替换、本文件里的两条仓库内路径可以继续继承。
+sources:
+  - src/main.php
+  - ../../src/QtApp.php
+  - ../../src/WidgetTree.php
+  # 持久化：任务列表与窗口几何落在用户配置目录，重启后还在。
+  - ../../src/AppData.php
+  - ../../src/JsonStore.php
+  - ../../php-src/qt.stub.php
+  - ../../cpp-src/qt_loop.cc
+  - ../../cpp-src/qt_render.cc
+  - ../../cpp-src/qt_decor.cc
+  - ../../cpp-src/qt_widgets.cc
+  - ../../cpp-src/qt_webview.cc
+  # Windows nano：php-nano 缺 crc32 SIMD / Fiber CE / MSVC inline seed256 的目标文件
+  - path: ../../compat/msvc/php_nano_win_stubs.c
+    if: PHP_OS_FAMILY == "Windows"
+  # macOS 的 WKWebView 后端是 ObjC++；其他平台不能看到它，否则会被当成
+  # 普通 C++ 交给 cl/g++ 去编，直接炸在 #import 上。
+  - path: ../../cpp-src/qt_webview_wk.mm
+    if: PHP_OS_FAMILY == "Darwin"
+
+build-dir: build
+
+# 编译参数固化在这（直连 tpc 也吃这里，不再只靠 qtphp 的 CLI 默认）：
+#   - cxx-std 必须是 c++17：nano 严格校验这一项，写 c++20 会被直接拒绝
+#   - optimize: 2 即命令行 -O2；不写这项时直连 tpc 会按默认 -O0 编
+cxx-std: c++17
+optimize: 2
+
+include-paths:
+  - ../../cpp-src
+  - ../../php-src
+  - D:/tools/Qt/6.9.3/msvc2022_64/include
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtCore
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtGui
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtWidgets
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtNetwork
+
+link-paths:
+  - ../../third_party/webview2/x64
+  - D:/tools/Qt/6.9.3/msvc2022_64/lib
+
+link-libs:
+  - WebView2Loader.dll.lib
+  - Qt6Core.lib
+  - Qt6Gui.lib
+  - Qt6Widgets.lib
+  - Qt6Network.lib
+
+cxx-flags:
+  - /Zc:__cplusplus
+  - /permissive-
+  - /EHsc
+  # WebView2 后端（完整 Chromium）。不定义 QT_WEBVIEW2 时会退化成
+  # QTextBrowser（HTML 子集、不支持 JS），一样能编译运行。
+  # 路径相对本文件：../../third_party/webview2 是仓库里 vendor 的 SDK。
+  - /DQT_WEBVIEW2
+  - /I"../../third_party/webview2/include"

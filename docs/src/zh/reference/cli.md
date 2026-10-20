@@ -88,6 +88,18 @@ Windows 上编译成功后**自动部署运行时 DLL** 到 `build/`：
 
 产物：`build/<name>.exe`（Windows）或 `build/<name>`（macOS/Linux）。
 
+### 库使用者的桥接源注入
+
+如果 `<path>/vendor/composer/installed.json` 存在，且其中某个包声明了 `extra.bridge`
+（TypePHP\Qt 就是这样：`stub` 加上 `sources`），`build` 会把它们解析成绝对路径，并进
+**项目目录内**的临时 `.qtphp-bridge-<pid>.yml` 的 `sources:`，再把这份文件交给 tpc。
+tpc 没有 `--add-source`，没有这一步，用库的项目就得自己把 `php-src/` 和 `cpp-src/`
+抄进自己的 yml。
+
+临时 yml 在编译结束后删除，无论退出码是多少。没有这类包的项目完全按原 yml 编译，
+行为和以前一致。如果项目 yml 把 `sources:` 写成内联数组 `sources: [...]`，列表没法安全
+扩展，`build` 会打一条警告并退回原 yml。
+
 ::: tip 首次构建会慢
 macOS/Linux 上第一次 `build` 会让 tpc 从 php-src 现编一份私有 embed 运行时，缓存在 `~/.typephp`。之后复用。注意 tpc 每次构建都要访问 php.net 核对源码 SHA-256 —— **纯离线机器第一次会失败**。
 [`--nano`](#nano) 不走这一步。
@@ -190,6 +202,9 @@ OK (112 tests, 183 assertions)
 | `TPC` | 直接指定 tpc 可执行文件路径（跳过运行时探测） |
 | `TPC_DIR` | 指定 tpc 安装目录 |
 | `TPC_RUNTIME_DIR` | 指定 PHP/PHPX 运行时库目录 |
-| `QT_DIR` | 指定 Qt 安装目录 |
+| `QT_ROOT` | 指定 Qt 安装目录（CI 动作常用的名字，优先于 `QT_DIR`） |
+| `QT_DIR` | 指定 Qt 安装目录（本项目旧名，仍然有效） |
 | `PHPX_HOME` | 指定 phpx 源码树位置（影响 tpc 的运行时解析） |
 | `QT_QPA_PLATFORM` | Qt 平台插件；无头环境设 `offscreen` |
+| `NO_COLOR` | 关闭 CLI 输出的 ANSI 颜色（stdout 不是 TTY 时也会自动关闭） |
+| `CLICOLOR_FORCE` | 强制上色，即使 stdout 不是 TTY；设了 `NO_COLOR` 则忽略。取 `0` 表示「未强制」，回落到自动探测 |

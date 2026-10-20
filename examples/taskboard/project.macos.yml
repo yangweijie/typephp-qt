@@ -1,0 +1,49 @@
+# macOS 入口。只覆盖平台相关的链接/编译参数，别的全部继承 project.yml：
+#   - 不写 sources：qt_webview_wk.mm 由 project.yml 里
+#     `if: PHP_OS_FAMILY == "Darwin"` 的条件条目带进来
+#   - 不写 include-paths：tpc 合并时 list 是整体替换。这里一旦写 include-paths，
+#     project.yml 的 ../../cpp-src 和 ../../php-src 就没了。Qt 头文件目录改用
+#     cxx-flags 的 -I 传，include-paths 保持继承。
+#
+# Homebrew 的 qtbase 是 framework 布局：头文件在
+#   <prefix>/lib/Qt<Module>.framework/Headers/
+# 代码里写的是裸名 `#include <QApplication>`，所以要 -I 指向 Headers 目录；
+# 同时 -F 指向 framework 根，供 `#include <QtWidgets/QApplication>` 这种限定名用。
+# 前缀按 Apple Silicon 写死（/opt/homebrew）；Intel Mac 上是 /usr/local。
+include: project.yml
+
+link-libs: []
+link-paths: []
+
+cxx-flags:
+  - -F/opt/homebrew/opt/qtbase/lib
+  - -I/opt/homebrew/opt/qtbase/lib/QtCore.framework/Headers
+  - -I/opt/homebrew/opt/qtbase/lib/QtGui.framework/Headers
+  - -I/opt/homebrew/opt/qtbase/lib/QtWidgets.framework/Headers
+  - -I/opt/homebrew/opt/qtbase/lib/QtNetwork.framework/Headers
+  - -DQT_CORE_LIB
+  - -DQT_GUI_LIB
+  - -DQT_WIDGETS_LIB
+  - -DQT_NETWORK_LIB
+  # 走原生 WKWebView 后端（objc++ 实现），不需要 WebView2
+  - -DQT_WEBVIEW_WK
+  - -fobjc-arc
+
+ld-flags:
+  - -F/opt/homebrew/opt/qtbase/lib
+  - -Wl,-framework,QtWidgets
+  - -Wl,-framework,QtGui
+  - -Wl,-framework,QtCore
+  - -Wl,-framework,QtNetwork
+  - -Wl,-framework,Foundation
+  - -Wl,-framework,AppKit
+  - -Wl,-framework,WebKit
+  # Qt 依赖 libiconv，Homebrew 的 keg-only，得显式给路径 + rpath
+  - -L/opt/homebrew/opt/libiconv/lib
+  - -liconv
+  - -Wl,-rpath,/opt/homebrew/opt/libiconv/lib
+  - -Wl,-rpath,/opt/homebrew/opt/qtbase/lib
+
+php-builder:
+  extensions: []
+  zts: false

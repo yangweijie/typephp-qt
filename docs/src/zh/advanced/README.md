@@ -8,6 +8,8 @@
 | [手写桥接](/zh/advanced/bridge.md) | 要用包未暴露的 Qt 控件，或想理解桥内部 |
 | [diff 引擎](/zh/advanced/diff-engine.md) | 想理解"控件状态为什么能保留" |
 | [无头验收](/zh/advanced/headless.md) | 要接 CI，或在无显示器环境验证 |
+| [性能](/zh/advanced/performance.md) | 想让大界面保持流畅，或想搞清楚一帧到底花了多少开销 |
+| [坑](/zh/advanced/pitfalls.md) | 某个东西没反应、或 bug 毫无头绪时 —— 按症状查的清单 |
 
 ## 一句话概括
 

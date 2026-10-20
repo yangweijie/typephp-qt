@@ -352,6 +352,153 @@ final class QtApp
         return (bool) $this->value($id);
     }
 
+    // ── 窗口集合 ──
+
+    /** 当前存活窗口的 id 列表（按创建顺序），多窗口应用不必自己维护句柄表。 */
+    public function listWindows(): array
+    {
+        return \qt_window_list();
+    }
+
+    /** 本窗口的稳定 id（`win_N`），跨帧不变，可直接当几何持久化的键。 */
+    public function windowId(): string
+    {
+        return \qt_window_id($this->handle());
+    }
+
+    public function focus(): void
+    {
+        \qt_window_focus($this->handle());
+    }
+
+    public function center(): void
+    {
+        \qt_window_center($this->handle());
+    }
+
+    /**
+     * 把本窗口设成 $parent 的临时子窗口（跟随父窗口最小化/关闭），传 null 解除。
+     *
+     * setParent() 会隐藏窗口，桥接层内部会重新 show() —— 不要用 Qt 层的 setParent
+     * 语义去理解它。
+     */
+    public function setParent(?QtApp $parent): void
+    {
+        \qt_window_set_parent($this->handle(), $parent?->handle());
+    }
+
+    // ── 几何持久化 ──
+
+    /**
+     * 读取窗口几何。x/y 是**客户区左上角**的屏幕坐标，所以返回值可以直接
+     * 回喂给 setGeometry()（不需要自己减去标题栏高度）。
+     */
+    public function geometry(): array
+    {
+        return \qt_window_geometry($this->handle());
+    }
+
+    /** 设置窗口几何；只处理传入的键，缺的键保持原样。 */
+    public function setGeometry(array $geometry): void
+    {
+        \qt_window_set_geometry($this->handle(), $geometry);
+    }
+
+    /** 记住当前几何，配合 restoreGeometry() 实现窗口位置/大小的持久化。 */
+    public function saveGeometry(): array
+    {
+        return $this->geometry();
+    }
+
+    /** 恢复几何（传 saveGeometry() 的返回值，或任意含 x/y/width/height 的数组）。 */
+    public function restoreGeometry(array $geometry): void
+    {
+        $this->setGeometry($geometry);
+    }
+
+    // ── 内省与测试驱动 ──
+
+    /**
+     * 从外部注入一个事件，走与真实信号完全相同的 PHP 分派路径。
+     *
+     * 不经过 Qt，所以无头环境也能用 —— 这是 --selftest 的底层机制。
+     */
+    public function sendEvent(array $event): void
+    {
+        \qt_window_send_event($this->handle(), $event);
+    }
+
+    /** 按 id 查控件信息（type/value/visible/enabled/geometry）；控件不存在返回 null。 */
+    public function find(string $id): ?array
+    {
+        $found = \qt_window_find($this->handle(), $id);
+        return empty($found) ? null : $found;
+    }
+
+    /** 导出可访问性树（role/id/text/value/children），用于无头验收。 */
+    public function a11yTree(int $maxDepth = 0): array
+    {
+        return \qt_window_a11y_tree($this->handle(), $maxDepth);
+    }
+
+    /**
+     * 一次取走一帧内积压的至多 $max 个事件（每个元素是一个事件数组）。
+     *
+     * 单事件版 poll_event 在高频信号下每帧只消费一个，队列会堆；高吞吐场景用这个。
+     */
+    public function pollEvents(int $max = 64): array
+    {
+        return \qt_window_poll_events($this->handle(), $max);
+    }
+
+    // ── 提示条 ──
+
+    /** 在窗口底部弹一条会自动消失的提示（非模态，不阻塞事件循环）。 */
+    public function toast(string $message, int $durationMs = 3000): void
+    {
+        \qt_window_toast($this->handle(), $message, $durationMs);
+    }
+
+    // ── 网络 ──
+
+    /**
+     * 发一个同步 HTTP 请求。
+     *
+     * 内部跑嵌套 QEventLoop，所以窗口在请求期间仍然响应；返回
+     * status/headers/body/error（error 为空串表示成功）。
+     *
+     * @param array{method?:string, url:string, headers?:array, body?:string, timeout_ms?:int, follow_redirects?:bool} $spec
+     */
+    public function httpRequest(array $spec): array
+    {
+        return \qt_http_request($spec);
+    }
+
+    /** GET 一个 URL，返回响应体；失败抛异常（附 status 与 error）。 */
+    public function httpGet(string $url, array $headers = []): string
+    {
+        $response = $this->httpRequest(['method' => 'GET', 'url' => $url, 'headers' => $headers]);
+        if (($response['error'] ?? '') !== '') {
+            throw new \RuntimeException('HTTP GET ' . $url . ' 失败: ' . $response['error']);
+        }
+        return (string) ($response['body'] ?? '');
+    }
+
+    /** POST 一个 URL，返回响应体；失败抛异常（附 status 与 error）。 */
+    public function httpPost(string $url, string $body = '', array $headers = []): string
+    {
+        $response = $this->httpRequest([
+            'method' => 'POST',
+            'url' => $url,
+            'headers' => $headers,
+            'body' => $body,
+        ]);
+        if (($response['error'] ?? '') !== '') {
+            throw new \RuntimeException('HTTP POST ' . $url . ' 失败: ' . $response['error']);
+        }
+        return (string) ($response['body'] ?? '');
+    }
+
     // ── 事件循环 ──
 
     /**

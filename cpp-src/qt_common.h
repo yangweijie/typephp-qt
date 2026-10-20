@@ -2,7 +2,9 @@
 //
 // 只放声明与 inline 工具函数；实现分在几个翻译单元里，用来验证 tpc 能编译
 // cpp-src/ 下的多个源文件并正确链接：
-//   qt_bridge.cc   应用/窗口/事件循环/渲染遍历/装饰与对话框
+//   qt_loop.cc     应用/窗口生命周期、事件循环
+//   qt_render.cc   渲染遍历与差异更新
+//   qt_decor.cc    装饰（菜单/托盘/状态栏）与对话框
 //   qt_widgets.cc  控件工厂与属性应用（控件目录）
 //   qt_webview.cc  webview 的统一入口 + WebView2/QTextBrowser 后端
 //   qt_webview_wk.mm  WKWebView 后端（仅 macOS，且仅在 QT_WEBVIEW_WK 下进 sources）
@@ -41,11 +43,15 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QScrollArea>
+#include <QScreen>
 #include <QList>
 #include <QSet>
 #include <QSignalBlocker>
@@ -162,20 +168,61 @@ inline QUrl qtResolveUrl(const QString &raw) {    const QString trimmed = raw.tr
     return QUrl::fromLocalFile(qtResolvePath(trimmed));
 }
 
-/** 取一个"签名"字符串。数组递归展开，用于跨调用比对属性是否变化。 */
-inline QString qtSignature(const Variant &value) {
-    if (value.isUndef() || value.isNull()) return QStringLiteral("\x01");
+/**
+ * 取一个属性的"签名"，用于跨帧比对属性是否变化。
+ *
+ * 以前是把整个值递归拼成字符串再比 —— 表格几千行时每帧要构造几 MB 的
+ * 临时字符串，光签名就比渲染本身贵。这里改成 FNV-1a 64 位哈希：
+ * 常数内存、8 字节比较，碰撞概率可以忽略。
+ *
+ * 数组必须**连键一起**进哈希。旧实现按下标取值，关联数组的键被丢掉，
+ * 于是 `{a:1}` 和 `{b:1}` 签名相同、只改键名不触发更新。
+ */
+inline quint64 qtHashMix(quint64 h, quint64 v) {
+    // 参考 boost::hash_combine 的混合常数，避免相邻值聚成同一个桶
+    h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+    return h;
+}
+
+inline quint64 qtHashBytes(quint64 h, const QByteArray &bytes) {
+    for (const char c : bytes) {
+        h ^= static_cast<quint64>(static_cast<unsigned char>(c));
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+inline quint64 qtSignature(const Variant &value) {
+    constexpr quint64 kOffset = 1469598103934665603ULL;
+    if (value.isUndef() || value.isNull()) return qtHashBytes(kOffset, QByteArrayLiteral("\x01"));
     if (value.isArray()) {
         const Array array = value.toArray();
-        QString out = QStringLiteral("[");
-        for (size_t i = 0; i < array.count(); ++i) {
-            out += qtSignature(array.get(i));
-            out += QChar(0x1f);
+        quint64 h = qtHashBytes(kOffset, QByteArrayLiteral("["));
+        for (auto it = array.begin(); it != array.end(); ++it) {
+            h = qtHashBytes(h, toQString(it.key()).toUtf8());
+            h = qtHashBytes(h, QByteArrayLiteral("\x1e"));
+            h = qtHashMix(h, qtSignature(it.value()));
+            h = qtHashBytes(h, QByteArrayLiteral("\x1f"));
         }
-        return out + QLatin1Char(']');
+        return qtHashBytes(h, QByteArrayLiteral("]"));
     }
-    if (value.isBool()) return value.toBool() ? QStringLiteral("1") : QStringLiteral("0");
-    return toQString(value);
+    if (value.isBool()) {
+        return qtHashBytes(kOffset, value.toBool() ? QByteArrayLiteral("1") : QByteArrayLiteral("0"));
+    }
+    return qtHashBytes(kOffset, toQString(value).toUtf8());
+}
+
+/**
+ * QT_DEBUG_STRICT=1：未知控件类型 / 属性 / patch method / id 从静默忽略
+ * 变成 qWarning。
+ *
+ * 默认静默是为了向前兼容（老代码里可能有拼错的属性，不该因此崩），
+ * 但静默也让「拼错一个属性名、界面就是不更新」变成最难查的一类 bug，
+ * 所以给一个开关把它变成可见的告警。
+ */
+inline bool qtStrictMode() {
+    static const bool strict = qEnvironmentVariableIsSet("QT_DEBUG_STRICT");
+    return strict;
 }
 
 inline Variant qtField(const Variant &node, const char *key) {
@@ -251,10 +298,10 @@ inline Qt::Alignment qtAlignOf(const QString &spec) {
 
 class QtWindowBox;
 
-/** 按 type 造一个控件；返回 nullptr 表示类型未知。 */
+/** 按 type 造一个控件；返回 nullptr 表示类型未知（QT_DEBUG_STRICT 下会告警）。 */
 QWidget *qtCreateWidget(QtWindowBox *box, const QString &type, const Variant &node);
 
-/** 把节点上的一个属性应用到控件上。未知 key 静默忽略。 */
+/** 把节点上的一个属性应用到控件上。未知 key 默认静默忽略，QT_DEBUG_STRICT 下告警。 */
 void qtApplyProp(QtWindowBox *box, QWidget *widget, const QString &type, const QString &key, const Variant &value);
 
 /** 该 type 是否是容器（有自己的子布局/子页）。 */
@@ -315,6 +362,22 @@ inline int qt_argc = 1;
 inline char qt_program_name[] = "typephp-qt-app";
 inline char *qt_argv[] = {qt_program_name, nullptr};
 inline QApplication *qt_application = nullptr;
+
+// ────────────────────────────── 跨 TU 小工具 ──────────────────────────────
+
+/** 从 options 数组里取字符串，带默认值。 */
+inline QString optString(const Array &options, const char *key, const QString &fallback = {}) {
+    const Variant v = options.get(key);
+    return v.isUndef() || v.isNull() ? fallback : toQString(v);
+}
+
+inline bool optBool(const Array &options, const char *key, bool fallback = false) {
+    const Variant v = options.get(key);
+    return v.isUndef() || v.isNull() ? fallback : v.toBool();
+}
+
+/** 从 Variant 里取出 QtWindowBox 指针。 */
+inline QtWindowBox *boxFrom(Variant box) { return box.toBox<QtWindowBox>(); }
 
 // ────────────────────────────── 子槽位 ──────────────────────────────
 
@@ -382,6 +445,37 @@ class QtWindowBox : public Box {
     QVBoxLayout *rootLayout() const { return rootLayout_; }
     QString typeById(const QString &id) const { return types_.value(id); }
 
+    /** 创建时分配的稳定窗口 id（win_N），跨帧不变。 */
+    QString windowId() const { return id_; }
+
+    /** 激活窗口：取消最小化、置前、把键盘焦点交给它。 */
+    void focusWindow();
+    /** 居中到窗口当前所在屏幕（跨屏幕不会跑到主屏去）。 */
+    void centerWindow();
+    /**
+     * Qt 的 transient parent：子窗口随父窗口一起最小化/关闭，但仍是一个
+     * 独立顶层窗口（不是控件嵌入）。传 nullptr 解除。
+     */
+    void setTransientParent(QtWindowBox *parent);
+
+    /** 客户区几何：屏幕坐标的 x/y（不含标题栏边框）+ 客户区宽高。 */
+    Array geometryRect() const;
+    /** 按需设置几何，只处理传入的键，缺省键保持不动。 */
+    void setGeometryRect(const Array &rect);
+
+    /** 注入一个事件（无头验收用：不经过 Qt，只走 PHP 侧分派链路）。 */
+    void sendEvent(const Array &event);
+    /** 一次取走最多 max 个待处理事件。 */
+    Array drainEvents(int max);
+
+    /** 按 id 查控件状态，geometry 为窗口相对坐标；找不到返回空数组。 */
+    Array findWidget(const QString &id) const;
+    /** 无障碍树快照；maxDepth <= 0 时只出根节点。 */
+    Array a11yTree(int maxDepth) const;
+
+    /** 窗口内浮层提示（非阻塞，durationMs 后自毁）。 */
+    void showToast(const QString &message, int durationMs);
+
   private:
     QWidget *buildNode(const Variant &node, QWidget *parentWidget, const QString &parentType,
                        QList<ChildSlot> &siblings, const QString &path);
@@ -408,10 +502,11 @@ class QtWindowBox : public Box {
     QMainWindow *window_ = nullptr;
     QWidget *central_ = nullptr;
     QVBoxLayout *rootLayout_ = nullptr;
+    QString id_;                                            // win_N：创建时分配，跨帧稳定
 
     QHash<QString, QWidget *> widgets_;                     // id -> 控件
     QHash<QString, QString> types_;                         // id -> 节点类型
-    QHash<QString, QHash<QString, QString>> propSigs_;      // id -> key -> 上次签名
+    QHash<QString, QHash<QString, quint64>> propSigs_;      // id -> key -> 上次签名哈希
     QHash<QWidget *, QList<ChildSlot>> slots_;              // 容器 -> 上一次的子槽位
     QHash<QWidget *, QString> nodeTitles_;                  // 控件 -> 节点 title（tab 页签用）
     QHash<QWidget *, QString> nodeLabels_;                  // 控件 -> 节点 label（form 行标用）
@@ -422,3 +517,11 @@ class QtWindowBox : public Box {
     QSet<QString> seen_;                                    // 本帧见过的 id
     std::deque<Array> events_;
 };
+
+/**
+ * 存活窗口注册表：构造时登记，cleanup() 时摘除。
+ *
+ * PHP 侧拿到的只是不透明的 Box，没有这张表就无法枚举进程内的窗口 ——
+ * 窗口 id + 集合是「记住上次开着的窗口」这类持久化的基础。
+ */
+inline QList<QtWindowBox *> qt_windows;

@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # 同一分支连续推送时只跑最后一次：C++ 编译很贵，中间态没必要占 runner
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: PHP 单测与契约校验
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          # 必须 8.4：phpunit 13 要求 >=8.4.1，php-nano / typephp 要求 >=8.4 <8.6。
+          # composer.json 里写的 >=8.1 是库本身的最低声明，不代表 dev 依赖能跑。
+          php-version: '8.4'
+          extensions: mbstring, dom, xmlwriter, libxml, json, filter, tokenizer
+          coverage: none
+          cache: composer
+
+      - name: 安装依赖
+        # 仓库有意不提交 composer.lock（库项目不锁依赖），所以这里是解析式安装
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: PHP 单测
+        # 纯 PHP 桥接替身，不需要 Qt、不需要编译器
+        run: php vendor/bin/phpunit --no-coverage
+
+      - name: 桥接契约校验
+        # stub ⇄ C++ 的函数集合必须一致，否则 AOT 编译时才会炸，代价大得多
+        run: php bin/qtphp lint
+
+      - name: CLI 语法检查
+        run: php -l bin/qtphp
+
+  build-windows:
+    name: Windows 编译与无头自测
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, dom, xmlwriter, libxml, json, filter, tokenizer
+          coverage: none
+          cache: composer
+
+      - name: 配置 MSVC 环境
+        uses: ilammy/msvc-dev-cmd@v1
+        # qtphp 自己也会通过 vswhere 找 vcvars64.bat，但这里先把 INCLUDE/LIB 铺好，
+        # 等于给 tpc 一个确定的编译环境，省掉临时 bat 那一层
+
+      - name: 安装 Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.9.3'
+          arch: win64_msvc2022_64
+          # 不指定 modules：QtNetwork 属于 qtbase，默认就装；
+          # 只有 qtwebengine/qtnetworkauth 这类才需要显式列出
+          cache: true
+
+      - name: 把示例里的 Qt 路径指向 runner 的安装位置
+        shell: pwsh
+        run: |
+          # examples/hello/project.yml 里的 Qt 路径是写死的（本地可直接 tpc 编译），
+          # CI 上必须替换成 install-qt-action 装好的那份，否则 cl.exe 找不到 QWidget 头文件
+          $yml = 'examples/hello/project.yml'
+          $content = Get-Content -LiteralPath $yml -Raw
+          $qtRoot = $env:QT_ROOT_DIR -replace '\\', '/'
+          if (-not $qtRoot) { throw 'QT_ROOT_DIR 未设置，install-qt-action 没有生效' }
+          $content = $content -replace [regex]::Escape('D:/tools/Qt/6.9.3/msvc2022_64'), $qtRoot
+          Set-Content -LiteralPath $yml -Value $content -NoNewline
+          Write-Host "Qt root: $qtRoot"
+          Select-String -LiteralPath $yml -Pattern 'Qt6Core.lib|/include$' | Select-Object -First 6
+
+      - name: 安装依赖
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: 编译示例
+        # --nano：把 PHP 运行时源码内联进 exe，CI 上没有预编译的 phpx/php8ts 运行时目录，
+        # 非 nano 模式会卡在链接阶段。nano 首次编译要十几分钟，已设 timeout-minutes 兜底。
+        run: php bin/qtphp build examples/hello --nano
+
+      - name: 无头自测
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: build\hello.exe --selftest
+
+      - name: 渲染差异测试
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: build\hello.exe --difftest

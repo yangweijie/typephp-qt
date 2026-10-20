@@ -1,5 +1,90 @@
 # Progress Log — typephp-qt
 
+## Session 33 — 2026-10-20（CLI 可用性：ANSI 自动降级 + 库使用者的桥接源注入）
+
+### 任务来源
+
+两类「只对作者友好」的默认行为，都属于**别人一用就踩、但维护者本地永远看不见**的那一类：
+
+| 现象 | 真因 |
+|---|---|
+| CI 日志 / 重定向到文件时全是 `\033[36m[INFO]\033[0m` 这类乱码 | `color()` 无条件拼 ANSI，从不判断 stdout 是不是终端 |
+| 下游 composer 装了 `yangweijie/typephp-qt` 后 `qtphp build` 报找不到 `qt_*` 符号 | 桥接 C++ 源码在包内，但项目 `sources:` 里只有自己的 `src/main.php`；`extra.bridge` 语义只在 composer.json 里声明，CLI 从不消费 |
+
+两条的共同点：**库作者视角下的默认值，在消费者视角下就是缺陷**。第一条顺手让 `NO_COLOR` / `CLICOLOR_FORCE` 这两个既有生态约定生效（不发明新变量）。
+
+### 本轮改动（工作区未提交，5 文件）
+
+| 文件 | 改动 | 对应 |
+|---|---|---|
+| `bin/lib/output.php` | 新增 `colorEnabled(): bool`；`color()` 首行短路返回原文 | 现象 1 |
+| `bin/lib/build.php` | 新增 `bridgeSourcesFromVendor()` / `injectSourcesIntoProjectYaml()` / `buildMergedProjectYaml()`，`cmdBuild()` 接线 | 现象 2 |
+| `tests/CliTest.php` | 新建，16 tests / 23 assertions（纯函数级） | 两条的回归 |
+| `docs/src/reference/cli.md` | build 段加 `### Bridge sources for library consumers` + 环境变量表补两行 | 文档 |
+| `docs/src/zh/reference/cli.md` | 同上中文节 `### 库使用者的桥接源注入` | 镜像同步 |
+
+净增行数无法用 git 给出：`bin/lib/` 与 `tests/CliTest.php` **整体仍是未跟踪**（`git status` 里是 `??`），`git diff` 看不见它们。按最终文件体量记：`output.php` 60 行、`build.php` 421 行、`CliTest.php` 184 行、两篇 `cli.md` 合计 +33 −2。
+
+### 关键实现选择（为什么这么写）
+
+- **`colorEnabled()` 不缓存**。缓存一次能省几个纳秒，但会让同一进程内切 env 的测试失效 —— 而这条逻辑唯一的验证方式就是切 env。宁可在每次 `color()` 上多做一次 `stream_isatty`。
+- **优先级 `NO_COLOR` > `CLICOLOR_FORCE` > isatty**。`NO_COLOR` 是「用户明确说不要」，必须压过一切；`CLICOLOR_FORCE` 是「明确说要」，压过自动探测；两者同时存在时以「关」为准（少打扰优于多上色）。
+- **注入走临时 yaml，不改用户文件**。`injectSourcesIntoProjectYaml()` 是纯字符串函数（不落盘），落盘只由 `buildMergedProjectYaml()` 负责，命名 `.qtphp-bridge-<pid>.yml`。
+- **临时文件必须落在项目目录内**。tpc 解析 `sources:` 相对路径是**相对 yaml 所在目录**的，放 `%TEMP%` 会让所有相对源路径立刻失效 —— 症状是「找不到 src/main.php」，排查方向很容易跑偏。
+- **内联数组 `sources: [a, b]` 直接拒绝**（返回 null 并给提示），不猜。字符串注入要正确处理内联数组就得先解析 yaml，本仓库无依赖、手写 yaml 解析器的风险远大于收益。
+- **没有 `vendor` 的项目完全走原路径**：`buildMergedProjectYaml()` 返回 null，tpc 命令行与改动前**逐字一致**。`examples/hello` 正属此类（无 vendor），所以示例行为没被这轮改动碰过。
+
+### 验收（本轮现测，全部 Windows 本机）
+
+```
+php vendor/bin/phpunit --no-coverage   → OK (176 tests, 286 assertions)                    rc=0   # 前值 160
+php bin/qtphp lint                     → [OK] 契约一致！(39 stub ⇄ 39 C++)                 rc=0
+php bin/qtphp build examples/hello     → compiled 14 files + Build successful + 已部署 14  rc=0
+hello.exe --selftest（offscreen）      → 全部 ok + selftest passed                        EXIT=0
+php bin/qtphp doctor                   → [OK] 核心工具链就绪！（PHP 8.5.11 / tpc v0.9.5 /
+                                         Qt 6.9.3 / MSVC vcvars64 / PHPUnit 13.3.6）        rc=0
+```
+
+**端到端**（本轮唯一能证明注入真生效的证据，单测证明不了）：在 `examples/_bridge_probe` 造了一个假 composer 包 —— `vendor/composer/installed.json` 里 `"install-path": "."`、`extra.bridge.sources = ["cpp-src/probe_extra.cc"]`，探针源只有一行 `void php_probe_extra_marker(void) {}`；`project.yml` 由 hello 复制改名。结果：
+
+```
+[INFO] 已注入 1 个桥接源（临时 .qtphp-bridge-11704.yml）
+Successfully compiled 15 files          # 14 + 1，多出来的就是探针源
+Build successful
+```
+
+构建结束后 `.qtphp-bridge-*` 无残留（`try/finally` 生效）。探针目录与一次性脚本已删，未进工作区。
+
+另用真实 `examples/hello/project.yml` 验过注入形态：插在 `sources:` 第一条之前、保持 2 空格缩进、只增 2 行、后续 `link-libs:` 段一字未动；内联数组样例返回 NULL。
+
+### 40.10 本机验证（Session 33 补测）
+
+颜色三档在**真控制台**上验过。父 shell 的 stdout 被工具接管（`[Console]::IsOutputRedirected=True`），`AllocConsole()` 返回 false、`> CON` 也拿不到字符设备；改用 `Start-Process -FilePath php -ArgumentList … -WindowStyle Hidden -Wait` 让子进程自己拿到一个新的真实控制台句柄，PHP 侧 `stream_isatty(STDOUT)=true`：
+
+| 环境 | isatty | colorEnabled | 实际字节 |
+|---|---|---|---|
+| 控制台，无 env | true | true | `1b5b33316d 58 1b5b306d` |
+| 控制台，`NO_COLOR=1` | true | false | `58` |
+| 控制台，`CLICOLOR_FORCE=0` | true | true（回落到 isatty） | `1b5b33316d 58 1b5b306d` |
+| 管道，无 env | false | false | `58` |
+| 管道，`CLICOLOR_FORCE=1` | false | true | 带转义 |
+| 管道，`NO_COLOR=1` + `CLICOLOR_FORCE=1` | false | false | `58` |
+
+结论：优先级与文档一致；`CLICOLOR_FORCE=0` 是「不强开」而非「强关」。人眼观感仍需真人在真终端看一眼（本机只断言了转义字节）。
+
+**顺带修掉一个真 bug**：`bridgeSourcesFromVendor()` 原来只认 `install-path`，而 composer 1 的 `installed.json` 根本没有这个字段（顶层数组 + 包名），于是整包被 `continue` 跳过 ——「兼容 composer 1/2」当时只是句注释。现改为 `install-path` 缺失时回落到 `realpath($vendorDir . '/' . $package['name'])`，并补 `testBridgeSourcesReadComposerOneLayout`（顶层数组、无 install-path、stub 与 sources 指同一文件 ⇒ 去重后 1 条）。phpunit **177/288**、lint 39⇄39。
+
+### 教训
+
+- **教训 29**：只在本地终端验过的输出格式，等于没验。ANSI 这套东西在 TTY 上永远是对的，只有重定向到文件 / CI / 管道时才现形 —— 而这三处恰好是别人第一次跑你的 CLI 的地方。
+- **教训 30**：「库作者能跑通」与「消费者能跑通」之间差一次 **composer 安装后的路径重算**。`extra.bridge` 写在 composer.json 里只是**声明**，没有代码消费它就是一行注释；声明与消费必须同批交付。
+- **教训 31**：临时文件的落点不是卫生问题，是**语义问题**。放 `sys_get_temp_dir()` 更「干净」，却会让所有相对路径的解析基准从项目目录变成临时目录 —— 这类 bug 的报错文本（「找不到源文件」）会把人引向完全错误的方向。
+- **教训 32**：「兼容 composer 1/2」不能只写两行 `if` 就算完。两个版本的真实差异在**字段存不存在**：composer 1 的 `installed.json` 没有 `install-path`，只认这个字段的代码会把旧布局整包跳过 —— 而夹具如果没有覆盖「字段缺失」这一路，测试照样全绿。回落分支（`vendor/<name>`）和主路径一样是契约的一部分。
+
+### 新增 findings
+
+- F48 CLI 两个「只对作者友好」的默认行为：ANSI 无降级、桥接源要手抄（含 `extra.bridge` 契约、临时 yaml 落点约束、端到端探针配方）
+
 ## Session 32 — 2026-10-15（Windows：下游反馈的「静默不生效」四件套 + 一次被 A/B 否掉的截图修复）
 
 ### 任务来源

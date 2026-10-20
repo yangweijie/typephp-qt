@@ -250,7 +250,7 @@ function main(int $argc, array $argv): void
     // 无头验收：--shot <path> 渲染几帧后存 PNG 退出。
     $shot = shot_path($argv);
     if ($shot !== '') {
-        // 3 帧就够：瞬态动画由 snapshot() 推到终点（见 cpp-src/qt_bridge.cc），
+        // 3 帧就够：瞬态动画由 snapshot() 推到终点（见 cpp-src/qt_loop.cc），
         // 不靠多泵帧等它跑完，所以出图不再取决于墙钟相位。
         $app->runFrames(3);
         $ok = $app->snapshot($shot);

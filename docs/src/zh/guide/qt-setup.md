@@ -5,15 +5,16 @@
 
 ## 到底需要什么
 
-桥接只用**三个 Qt 模块，别的都不用**：
+桥接只用**四个 Qt 模块，别的都不用**：
 
 | 模块 | 提供 |
 |---|---|
 | `QtCore` | `QString`、容器、事件循环、定时器、`QFileInfo`、`QDir` |
 | `QtGui` | `QIcon`、`QPixmap`、`QFont`、`QClipboard`、`QScreen`、`QAction` |
 | `QtWidgets` | 全部控件：`QMainWindow`、`QPushButton`、`QTableWidget` … |
+| `QtNetwork` | `qt_http_request()` —— `QNetworkAccessManager`（含 HTTPS） |
 
-没有 QML/Quick，没有 Network，没有 Sql —— 这是对着 `cpp-src/` 里每一个 `#include` 核过的。
+没有 QML/Quick，没有 Sql —— 这是对着 `cpp-src/` 里每一个 `#include` 核过的。
 所以**装一个最小的 Qt Widgets 就够了**，下面给的就是最小集。
 
 ::: tip webview 控件不需要额外的 Qt 模块
@@ -144,12 +145,15 @@ pkg-config --modversion Qt6Widgets    # 需要 qt6-base-dev
 ## 让构建指向非默认位置的 Qt
 
 `qtphp` 的探测覆盖的是 6.9.3 的常见位置。**其他情况 —— 不同版本、自定义前缀、第二份 Qt ——
-都要给 `QT_DIR`，它的优先级高于所有自动探测到的路径：**
+都要给 `QT_ROOT` 或 `QT_DIR`，它们的优先级高于所有自动探测到的路径：**
 
 ```bash
-QT_DIR=/path/to/Qt/6.8.2/gcc_64    qtphp build .
-QT_DIR=C:/Qt/6.10.0/msvc2022_64    qtphp build .
+QT_ROOT=/path/to/Qt/6.8.2/gcc_64    qtphp build .
+QT_DIR=C:/Qt/6.10.0/msvc2022_64     qtphp build .
 ```
+
+先认 `QT_ROOT` 是因为 CI 上的 `jurplel/install-qt-action` 等动作导出的就是这个名字；
+`QT_DIR` 是本项目更早的名字，仍然有效，老脚本不会因为升级而静默失效。
 
 `qtphp new` 会把探测到的路径**以纯字符串**写进 `project.yml` / `project.macos.yml` /
 `project.linux.yml`，所以你也可以直接改那几个文件 —— 对要反复构建的项目往往更省事：
@@ -170,14 +174,14 @@ link-paths:
 qtphp doctor     # 打印它将要使用的 Qt 路径
 ```
 
-`QT_DIR` 优先于自动探测，所以即使机器上已经有一份位于探测路径里的 Qt，它照样生效。
+`QT_ROOT` / `QT_DIR` 优先于自动探测，所以即使机器上已经有一份位于探测路径里的 Qt，它照样生效。
 如果它指向的目录不存在，`qtphp` 会告警并回落到自动探测。
 
 ## 排错
 
 | 现象 | 原因与解法 |
 |---|---|
-| `doctor` 报 `Qt: 未找到` | Qt 不在探测位置上 → 设 `QT_DIR` |
+| `doctor` 报 `Qt: 未找到` | Qt 不在探测位置上 → 设 `QT_ROOT`（或 `QT_DIR`） |
 | `fatal error: 'QApplication': No such file or directory` | `include-paths` 里缺 `include/QtWidgets`（或 framework 的 `-I`） |
 | MSVC 报 `cannot open file 'Qt6Widgets.lib'` | `link-paths` 缺 `<QT>/lib`，**或**装成了 MinGW kit 而不是 `msvc2022_64` |
 | GCC/Clang 报 `undefined reference to 'QApplication::…'` | `link-libs` 缺 `-lQt6Widgets`（macOS 上是 `-Wl,-framework,QtWidgets`） |

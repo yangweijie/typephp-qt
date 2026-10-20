@@ -88,6 +88,19 @@ On Windows a successful compile **auto-deploys the runtime DLLs** into `build/`:
 
 Artifact: `build/<name>.exe` (Windows) or `build/<name>` (macOS/Linux).
 
+### Bridge sources for library consumers
+
+If `<path>/vendor/composer/installed.json` exists and a package there declares `extra.bridge`
+(TypePHP\Qt does — `stub` plus `sources`), `build` resolves those entries to absolute paths,
+merges them into `sources:` of a temporary `.qtphp-bridge-<pid>.yml` **inside the project
+directory**, and hands that file to tpc instead. tpc has no `--add-source`, and without this a
+consumer would have to hand-copy `php-src/` and `cpp-src/` into its own yml.
+
+The temporary yml is deleted after the compile, whatever the exit code. Projects without such a
+package build from their own yml exactly as before. If the project yml writes `sources: [...]`
+inline, the list cannot be extended safely and `build` falls back to the original yml with a
+warning.
+
 ::: tip The first build is slow
 On macOS/Linux the first `build` makes tpc compile a private embed runtime from php-src, cached under `~/.typephp`; later builds reuse it. Note that tpc contacts php.net on every build to verify the source SHA-256 — **a fully offline machine fails the first time**.
 [`--nano`](#nano) skips that step entirely.
@@ -198,6 +211,9 @@ On a mismatch it lists the specific symbols. Run it after any bridge change.
 | `TPC` | Point straight at a tpc executable (skips the runtime probe) |
 | `TPC_DIR` | Point at a tpc install directory |
 | `TPC_RUNTIME_DIR` | Point at the PHP/PHPX runtime library directory |
-| `QT_DIR` | Point at the Qt install directory |
+| `QT_ROOT` | Point at the Qt install directory (the name CI actions export; wins over `QT_DIR`) |
+| `QT_DIR` | Point at the Qt install directory (this project's older name, still honoured) |
 | `PHPX_HOME` | Point at the phpx source tree (affects tpc's runtime resolution) |
 | `QT_QPA_PLATFORM` | Qt platform plugin; set `offscreen` in a headless environment |
+| `NO_COLOR` | Drop ANSI colors from CLI output (also automatic when stdout is not a TTY) |
+| `CLICOLOR_FORCE` | Force colors even when stdout is not a TTY; ignored when `NO_COLOR` is set. `0` means "not forced" and falls back to auto-detection |
