@@ -2558,5 +2558,12 @@ Build successful
 无残留（`finally` 生效）。另用真实 `examples/hello/project.yml` 验过注入形态：插在 `sources:` 首条之前、
 保持 2 空格缩进、只增 2 行、`link-libs:` 段一字未动。
 
-**未验**：`CLICOLOR_FORCE` 在真 TTY 上的观感（只验了 env 优先级与返回值）、Linux/macOS 的 `stream_isatty`
-分支、composer 1 的真实安装（目前只有按两种 JSON 布局造的夹具）。
+**补充验证 1（Windows 真控制台观感）**：`Start-Process cmd.exe` 起真实控制台跑配色样本，截图像素统计 + 放大目视：`[INFO]` 青蓝（mean 52,133,195）、`[OK]` 绿、`[WARN]` 黄（181,147,1）、`[ERROR]` 红，整行着色、bold 白、**无字面转义字符** —— conhost 已解释 VT。`stream_isatty(STDOUT)=true`。人眼观感一项通过（维护者自测，非独立第二人）。
+
+**补充验证 2（composer 1 真实安装）**：`composer.phar 1.10.27` + `php85`（8.5.5），fixture 项目用 path repository（`symlink:false`）+ `packagist:false` 装本地包 ⇒ rc=0。产物 `installed.json` 为顶层数组、条目无 `install-path`，`bridgeSourcesFromVendor()` 从中解析出 2 条（stub + `cpp-src`），路径均存在 —— 真实 composer 1 输出与回落分支对上了。
+
+**composer 1 + PHP 8.5 的坑**：默认 `COMPOSER_HOME`（`%APPDATA%\Composer`）里若有腾讯镜像 repo，composer 1 拉 `packages.json` 时触发
+`stream_context_create(): Argument #1 ($options) must be an array with valid callbacks ... Composer\Util\RemoteFilesystem::callbackGet()`，
+Fatal（PHP 8.5 收紧了 callable 校验）。规避：`COMPOSER_HOME` 指向无全局镜像配置的目录 + `packagist:false` 断网。**这是全局配置触发的网络栈不兼容，不是安装器本身不可用**。
+
+**仍未验**：Linux/macOS 的 `stream_isatty` 分支（用户明确「不测linux 不用wsl」）。

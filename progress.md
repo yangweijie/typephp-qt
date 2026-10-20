@@ -13,7 +13,7 @@
 
 两条的共同点：**库作者视角下的默认值，在消费者视角下就是缺陷**。第一条顺手让 `NO_COLOR` / `CLICOLOR_FORCE` 这两个既有生态约定生效（不发明新变量）。
 
-### 本轮改动（工作区未提交，5 文件）
+### 本轮改动（5 文件，已随 `88ca264` 提交）
 
 | 文件 | 改动 | 对应 |
 |---|---|---|
@@ -84,6 +84,37 @@ Build successful
 ### 新增 findings
 
 - F48 CLI 两个「只对作者友好」的默认行为：ANSI 无降级、桥接源要手抄（含 `extra.bridge` 契约、临时 yaml 落点约束、端到端探针配方）
+
+### 提交（Session 33 收尾）
+
+用户指令「整理提交信息并提交」后，`git add -A` → **60 files staged（+10894 −3839）** → 单次提交 **`88ca264`**：
+
+> 拆分 CLI 与 C++ 桥接层，新增 CLI 色彩降级和库使用者桥接源自动注入（Session 33）
+
+body 六条：`bin/qtphp` 2409 行 → 41 行入口 + `bin/lib/` 12 文件；`qt_bridge.cc` → `qt_loop`/`qt_render`/`qt_decor`/`qt_widgets`/`qt_webview`(+WK)，共用声明进 `qt_common.h`；`colorEnabled()` 三档；`extra.bridge` 自动注入 composer 1/2 + 临时 yaml `finally` 清理；`AppData`/`JsonStore` + `examples/taskboard` + 中英文档 + CI + CHANGELOG + AGENTS.md；验收 177/288、lint 39⇄39、hello `--selftest` EXIT=0。
+
+staged 列表逐项核对过：无 `build/`、`dist/`、`vendor/`、`.phpunit.cache/`、`.exe/.dll/.lib/.log`。提交后 `git status --porcelain` 无输出，HEAD 为 `88ca264`（前一提交 `d798cb8` Session 32）。
+
+### 40.10b 补验（Windows 真 TTY 观感 + composer 1 真实安装）
+
+40.10a 只证明了「真 TTY 下会输出转义字节」，40.10b 补三件中的两件（第三件被用户禁测）：
+
+**① Windows 真控制台的人眼观感**。父进程（工具 shell）的 stdout 已被重定向，`AllocConsole()`/`> CON` 都拿不到字符设备；用 `Start-Process cmd.exe` 另起一个真实控制台窗口，在里面跑配色样本（info/success/warning/error + bold + 整行）。截图像素统计：`[INFO]` 青蓝（mean 52,133,195，≈ Campbell cyan #3A96DD）、`[OK]` 绿、`[WARN]` 黄（181,147,1）、`[ERROR]` 红，整行底色/前景正确、bold 白，**画面上没有任何字面 `\033[` 字符** —— 说明 conhost 确实解释了 VT 序列。同时 `stream_isatty(STDOUT)=true`、`colorEnabled()=true`。放大裁剪图逐行目视确认，观感通过。
+
+**② composer 1 真实安装**。之前只用「按两种 JSON 布局手造」的夹具，不能证明真 composer 1 写出来的 `installed.json` 长什么样。这次：
+- 下载 `composer.phar` **1.10.27**（PHP 8.5 下可启动，有大量 `Implicitly marked nullable` deprecation 噪音）；
+- 造本地包 `acme/qt-bridge` v1.0.0（`extra.bridge.stub` + `sources:["cpp-src"]`）；
+- fixture 项目用 path repository（`symlink:false`）+ `packagist:false`，`php85 ... install` ⇒ **rc=0**（「Installing acme/qt-bridge (1.0.0): Mirroring… / Writing lock file / Generating autoload files」）；
+- 产物 `installed.json` 是**顶层数组**、条目只有 `name/version/dist/type/extra/installation-source/transport-options`，**没有 `install-path`**；
+- 用真实 `bridgeSourcesFromVendor()` 探针读取该 vendor ⇒ 返回 **2 条**（`vendor/acme/qt-bridge/php-src/qt.stub.php` + `vendor/acme/qt-bridge/cpp-src`），两条路径都存在。
+
+**踩到的坑（composer 1 × PHP 8.5）**：默认 `COMPOSER_HOME`（`%APPDATA%\Composer`）里配了腾讯镜像 repo，composer 1 拉 `packages.json` 时抛
+`stream_context_create(): Argument #1 ($options) must be an array with valid callbacks as values, cannot access protected method Composer\Util\RemoteFilesystem::callbackGet()`
+（PHP 8.5 收紧了 callable 校验）⇒ Fatal、rc=255。换成不含全局镜像配置的 `COMPOSER_HOME` 并断网（`packagist:false`）后安装正常。**这是全局配置触发的网络栈不兼容，不是安装器本身不可用**；也说明「composer 1 兼容」在 PHP 8.5 上只适用于离线/path 场景。
+
+**仍未验**：Linux/macOS 的 `stream_isatty` 分支 —— 用户明确「不测linux 不用wsl」，保留为未勾项 40.10b-3。
+
+**教训 33**：「兼容 X 版本」要用 X 版本**真实产出**验证，不能用手写夹具代替。手造 JSON 只能证明解析器认识我以为的形状；真实 composer 1 是否写 `install-path`、字段名是否如我所想，只有让它自己写一遍才知道。同一轮里「真 TTY 观感」也一样：字节断言证明协议对，像素/目视才证明给人看是对的。
 
 ## Session 32 — 2026-10-15（Windows：下游反馈的「静默不生效」四件套 + 一次被 A/B 否掉的截图修复）
 
