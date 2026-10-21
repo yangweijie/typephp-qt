@@ -137,9 +137,12 @@ jobs:
         run: php bin/qtphp doctor
 
       - name: 编译示例
-        # 不再加 --nano：发行包自带 php8ts.dll + phpx.dll + 全套导入库，走默认的
-        # 动态链接路径即可，和本地开发/打包完全同一条链路
-        run: php bin/qtphp build examples/hello
+        # 必须 --nano：非 nano 模式下 tpc 的 php-builder 会现编一遍 php-src
+        # （CompilerBase: `phpBuilderEnabled && !isNanoMode()`），CI 上十几分钟起步；
+        # nano 把 php-nano 运行时源码内联进 exe，不碰 php-builder。
+        # 发行包在这里的作用只有两个：满足 detectPlatform 的 php8ts/php8embed 探测，
+        # 以及提供 SDK 头文件。
+        run: php bin/qtphp build examples/hello --nano
 
       - name: 无头自测
         env:
