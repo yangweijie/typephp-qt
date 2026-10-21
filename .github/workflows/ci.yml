@@ -88,7 +88,7 @@ jobs:
             'php.ini',
             'SDK\lib\php8ts.lib',
             'SDK\lib\php8embed.lib',
-            'SDK\include\php\main\php.h',
+            'SDK\include\main\php.h',
             'phpx\lib\phpx.lib',
             'php8ts.dll',
             'phpx.dll'
@@ -97,8 +97,8 @@ jobs:
             $p = Join-Path $env:TPC_RUNTIME_DIR $rel
             if (-not (Test-Path -LiteralPath $p)) { throw "运行时发行包缺少 $rel（$p）" }
           }
-          php -v
-          php -r "echo 'PHP ', PHP_VERSION, ' ZTS=', PHP_ZTS, PHP_EOL;"
+          # GITHUB_PATH 只对后续 step 生效，本 step 内必须用绝对路径调
+          & "$env:TPC_RUNTIME_DIR\php.exe" -r "echo 'PHP ', PHP_VERSION, ' ZTS=', PHP_ZTS, PHP_EOL;"
 
       - name: 配置 MSVC 环境
         uses: ilammy/msvc-dev-cmd@v1
