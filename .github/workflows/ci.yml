@@ -29,7 +29,6 @@ jobs:
           php-version: '8.4'
           extensions: mbstring, dom, xmlwriter, libxml, json, filter, tokenizer
           coverage: none
-          cache: composer
 
       - name: 安装依赖
         # 仓库有意不提交 composer.lock（库项目不锁依赖），所以这里是解析式安装
@@ -50,16 +49,56 @@ jobs:
     name: Windows 编译与无头自测
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      # 编译期硬前置：tpc 的 detectPlatform() 在翻译任何 PHP 之前就去找
+      # php8ts.lib / php8embed.lib，找不到直接 `Fatal error: Neither php8ts.lib nor
+      # php8.lib found`（exit 255）。setup-php 装的运行时压缩包里只有 php8.dll，
+      # 没有 .lib —— 所以这条作业必须自带 tpc 原生发行包。
+      #
+      # 发行包同时给了 SDK/include（PHP 头文件）、SDK/lib（php8ts/php8embed/gmp/mpfr/
+      # libmpdec 导入库）、phpx/lib/phpx.lib 和运行期 DLL，等于一套完整的 Windows
+      # AOT 构建环境，因此本作业不再需要 setup-php。
+      TPC_RUNTIME_DIR: ${{ github.workspace }}\.tpc-runtime
+      PHP_HOME: ${{ github.workspace }}\.tpc-runtime
+      PHPX_HOME: ${{ github.workspace }}\.tpc-runtime\phpx
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装 PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-          extensions: mbstring, dom, xmlwriter, libxml, json, filter, tokenizer
-          coverage: none
-          cache: composer
+      - name: 安装 tpc 原生运行时（Windows x64 / PHP 8.4 ZTS）
+        shell: pwsh
+        run: |
+          # 版本必须与下方 composer 解析到的 swoole/typephp 对齐：运行时 DLL 与
+          # tpc 生成的代码是同一套 ABI，版本错配的症状是链接期符号缺失而不是
+          # 版本提示。升级 tpc 时同步改这两个常量。
+          $release = 'v0.9.5'
+          $asset   = 'tpc_v0.9.5_windows_x64_php8.4.26-zts.zip'
+          $url     = "https://github.com/swoole/typephp/releases/download/$release/$asset"
+
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\tpc.zip"
+          Expand-Archive -LiteralPath "$env:RUNNER_TEMP\tpc.zip" -DestinationPath "$env:RUNNER_TEMP\tpc" -Force
+          $root = (Get-ChildItem "$env:RUNNER_TEMP\tpc" -Directory | Select-Object -First 1).FullName
+          Move-Item -LiteralPath $root -Destination $env:TPC_RUNTIME_DIR
+
+          # 后续所有 step 的 `php` 都指向发行包自带的那份（ZTS 8.4.26），
+          # 与 SDK 头文件、运行期 DLL 同源，避免"宿主编译器 / 目标运行时"错配。
+          $env:TPC_RUNTIME_DIR | Out-File -FilePath $env:GITHUB_PATH -Append
+
+          $must = @(
+            'php.exe',
+            'php.ini',
+            'SDK\lib\php8ts.lib',
+            'SDK\lib\php8embed.lib',
+            'SDK\include\php\main\php.h',
+            'phpx\lib\phpx.lib',
+            'php8ts.dll',
+            'phpx.dll'
+          )
+          foreach ($rel in $must) {
+            $p = Join-Path $env:TPC_RUNTIME_DIR $rel
+            if (-not (Test-Path -LiteralPath $p)) { throw "运行时发行包缺少 $rel（$p）" }
+          }
+          php -v
+          php -r "echo 'PHP ', PHP_VERSION, ' ZTS=', PHP_ZTS, PHP_EOL;"
 
       - name: 配置 MSVC 环境
         uses: ilammy/msvc-dev-cmd@v1
@@ -92,10 +131,15 @@ jobs:
       - name: 安装依赖
         run: composer install --prefer-dist --no-progress --no-interaction
 
+      - name: 工具链自检
+        # doctor 会把"运行时库 / Qt / MSVC / tpc"逐项打出来 —— 编译失败时先看这一段，
+        # 比读 cl.exe 的报错快得多
+        run: php bin/qtphp doctor
+
       - name: 编译示例
-        # --nano：把 PHP 运行时源码内联进 exe，CI 上没有预编译的 phpx/php8ts 运行时目录，
-        # 非 nano 模式会卡在链接阶段。nano 首次编译要十几分钟，已设 timeout-minutes 兜底。
-        run: php bin/qtphp build examples/hello --nano
+        # 不再加 --nano：发行包自带 php8ts.dll + phpx.dll + 全套导入库，走默认的
+        # 动态链接路径即可，和本地开发/打包完全同一条链路
+        run: php bin/qtphp build examples/hello
 
       - name: 无头自测
         env:
