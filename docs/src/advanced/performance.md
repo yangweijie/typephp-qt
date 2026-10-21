@@ -1,6 +1,6 @@
 # Performance
 
-This page is about the three things that actually decide whether a TypePHP\Qt app feels instant or feels sticky. Everything below is measured against the real engine (`cpp-src/qt_bridge.cc`), not guessed.
+This page is about the three things that actually decide whether a TypePHP\Qt app feels instant or feels sticky. Everything below is measured against the real engine (`cpp-src/qt_render.cc`), not guessed.
 
 **If you are building a small form, you do not need this page.** The defaults are fine up to a few hundred widgets. Read it when a list grows long, a page starts flickering, or the frame budget is visibly being eaten.
 

@@ -1,5 +1,83 @@
 # Progress Log — typephp-qt
 
+## Session 34 — 2026-10-22（macOS 回归：Windows 侧永远看不见的两处缺陷）
+
+### 任务来源
+
+用户一句「最近 windows 上更新了很多 重新 mac 回归一下测试」。Session 32/33 的验收全在 Windows 本机，
+`177/288`、`lint 39⇄39`、`hello --selftest` 这些数字都没有在 Darwin 上复现过 —— 本轮就是去复现它们。
+
+环境：macOS 26.6.2 arm64 / Apple clang 21.0.0 / PHP 8.5.7 (Homebrew) / Qt 6.11.2 (brew，framework 布局) / tpc v0.9.5。
+
+### 回归矩阵（全部本机现测）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| PHP 单测 | `phpunit --no-coverage` | **修前 177/286 + 1 failure**；修后 **OK 178 tests / 289 assertions** |
+| 桥接契约 | `qtphp lint` | `[OK] 契约一致！`（39 stub ⇄ 39 实现） |
+| 工具链自检 | `qtphp doctor` | `[OK] 核心工具链就绪！`（tpc / PHP 8.5.11 / Qt / clang++ / phpunit 五项全绿） |
+| 干净构建 | `qtphp build examples/hello` | 14 TU，`Build successful`，rc=0（12 秒；旧 `build/` 先改名留底，验完删） |
+| 端到端自检 | `hello --selftest`（offscreen） | 25 项 `ok` + `selftest passed`，rc=0 |
+| 差异更新 | `hello --difftest`（offscreen） | 20 项 `ok` + `difftest passed`，rc=0 |
+| 无头截图 | `hello --shot` / `qtphp run examples/hello --shot` | rc=0，PNG 37255 B，两次同尺寸（渲染确定）；目视布局/中文/WebView 占位区正常 |
+| 综合示例 | `qtphp build examples/taskboard` + `--selftest` | 16 TU，rc=0，`selftest passed` |
+| 打包 | `qtphp package examples/hello` | `Hello.app` 93.2 MB，macdeployqt + ad-hoc 签名 + 包内 offscreen 自检全过 |
+| 包自包含 | `env -i QT_QPA_PLATFORM=offscreen Contents/MacOS/hello --selftest` | 空环境下 rc=0、`selftest passed`；`otool -L` 主二进制**无** `/opt/homebrew` 残留 |
+| 脚手架 | `qtphp new` → `build` → `--selftest` | **修前 build 直接 Fatal**；修后 rc=0 全链路通 |
+| CLI 子命令 | `qtphp test` | OK 178/289，rc=0 |
+| 颜色三档 | 管道 / 管道+`CLICOLOR_FORCE` / PTY(`script -q /dev/null`) | 与 Windows 表逐格一致（补齐未勾项 40.10b-3 的 macOS 部分） |
+
+### 本轮修掉的两个真缺陷
+
+**① `AppData` 的 Darwin 分支让 config 与 data 指向同一个目录**（`src/AppData.php`）。
+`phpunit` 在 mac 上多出的那条 failure 就是它：`testCacheAndDataDirsDifferFromConfig` 断在 `dataDir()`。
+后果不止测试：`configPath('x.json')` 与 `dataPath('x.json')` 是同一个文件，配置与用户数据互相覆盖。
+Windows（APPDATA/LOCALAPPDATA）和 Linux（XDG 两个变量）天然分开，所以这条在 Windows 上永远是绿的。
+修法不猜：本机编了个 5 行 Qt 程序读 `QStandardPaths`，实测 `AppConfigLocation = ~/Library/Preferences`，
+据此把 Darwin 的 config 改到 `Preferences`，data 留在 `Application Support`。
+
+**② `qtphp new` 模板还在引用已删除的 `qt_bridge.cc`**（`bin/lib/new.php`）。
+Session 33 拆分桥接时，示例 yml / AGENTS / CHANGELOG 都跟上了，唯独脚手架 heredoc 模板漏改 ⇒
+每个新用户第一次 `qtphp new && qtphp build` 就 `Fatal error: Source file not exists`，
+而且报错路径是框架仓库的绝对路径，第一眼像"包没装好"。
+除改模板外补了静态守卫 `CliTest::testNewTemplateBridgeSourcesMatchCppSrc()`：模板引用的 `.cc` 集合
+必须等于 `cpp-src/*.cc` 磁盘集合（双向）。**正控制**：用 `git show HEAD:bin/lib/new.php` 的旧内容跑同一逻辑
+⇒ 引用集 3 个（含已删的 qt_bridge.cc）、磁盘集 5 个，断言失败 —— 守卫确实会红。
+
+### 文档校正（同一根因的残留）
+
+`qt_bridge.cc` 在文档里还活着，且 `project-structure.md` 的 `sources:` 片段是**可复制**的，照抄即坏：
+
+| 文件（en + zh 镜像同步） | 改动 |
+|---|---|
+| `docs/src/{,zh/}guide/project-structure.md` | 目录树补 5 个拆分文件；`sources:` 片段改为 5 条 |
+| `docs/src/{,zh/}advanced/aot-notes.md` | `sources:` 片段改为 5 条（原文还说"qtphp new 生成的是正确的"，本轮之前是假的） |
+| `docs/src/{,zh/}advanced/bridge.md` | 示例实现注释 `// cpp-src/qt_bridge.cc` → `qt_render.cc` |
+| `docs/src/{,zh/}advanced/performance.md` | "对着真实引擎（…）核对过" 路径同步 |
+
+### 附带观察（非本仓库缺陷）
+
+`qtphp build` 重定向到文件时，tpc 的编译进度条仍吐 `\033[36m` —— 来自
+`vendor/swoole/typephp/src/Build/NativeSourceProjectBuilder.php`，不是本仓库 `color()`。
+本仓库三档在 mac 上逐档正确：管道 `isatty=false → 无转义`、`CLICOLOR_FORCE=1 → 带转义`、
+PTY(`script`) `isatty=true → 带转义`、PTY+`NO_COLOR=1 → 无转义`、`NO_COLOR` 压过 `CLICOLOR_FORCE`。
+
+### 教训
+
+- **教训 34**：「在 Windows 上验过」对一个跨平台库来说只是三分之一。这轮两个缺陷都不是"Windows 特有 bug"，
+  而是**只有换平台才会被触发**的代码路径（Darwin 分支、脚手架 → 用户项目路径）。多平台 CI 的价值不在于
+  抓 Windows 的错，而在于让"另一条分支"至少被执行一次。
+- **教训 35**：拆分文件时，"引用这个文件的地方"必须**全量搜一遍**，不能只改跑得起来的那条路径。
+  `examples/hello` 的 yml 是跑得起来的那条，`bin/lib/new.php` 的 heredoc 是跑不起来的那条 ——
+  后者没有测试、也没有人天天跑，于是它是唯一漏的。**能跑的路径会自我验证，不能跑的路径只能靠搜。**
+- **教训 36**：断言数与基线差 2 这种细节值得追。`286 vs 288` 正好是失败点之后被跳过的断言数，
+  它先于任何排查告诉我"只有一条测试中途死了"，而不是"一批测试变了"。
+
+### 改动清单（11 文件，未提交）
+
+`src/AppData.php`、`bin/lib/new.php`、`tests/CliTest.php`（+1 守卫）、8 份文档（en/zh 各 4）。
+`git status` 干净：无 `build/`、`dist/`、临时脚手架目录残留（探针与旧 `build/` 留底均已删）。
+
 ## Session 33 — 2026-10-20（CLI 可用性：ANSI 自动降级 + 库使用者的桥接源注入）
 
 ### 任务来源

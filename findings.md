@@ -2567,3 +2567,68 @@ Build successful
 Fatal（PHP 8.5 收紧了 callable 校验）。规避：`COMPOSER_HOME` 指向无全局镜像配置的目录 + `packagist:false` 断网。**这是全局配置触发的网络栈不兼容，不是安装器本身不可用**。
 
 **仍未验**：Linux/macOS 的 `stream_isatty` 分支（用户明确「不测linux 不用wsl」）。
+
+## F49. macOS 回归（Session 34）：Windows 上永远发现不了的两处缺陷 —— AppData 的 Darwin 分支、脚手架模板漏跟桥接拆分
+
+**触发**：用户「最近 windows 上更新了很多 重新 mac 回归一下测试」。Session 33 的验收全在 Windows 本机做，
+`177/288` 这个数字在 mac 上复现不出来 —— 于是暴露出两处只有换平台/换路径才会现形的缺陷。
+
+**环境**：macOS 26.6.2 arm64 / Apple clang 21.0.0 / PHP 8.5.7 (Homebrew) / Qt 6.11.2 (brew, framework 布局) / tpc v0.9.5。
+
+### 49.1 `AppData` 在 macOS 上 config 与 data 是同一个目录
+
+**症状**：`phpunit` 在 mac 上 `177 tests / 286 assertions` 且 1 failure ——
+`AppDataTest::testCacheAndDataDirsDifferFromConfig` 断在 `assertNotSame($data->configDir(), $data->dataDir())`。
+断言数比 Windows 少 2，正是那两条被跳过断言的数目（失败在 80 行，81–83 行不再执行）—— 数字本身就是线索。
+
+**真因**：`baseDir()` 的 Darwin 分支把 `config` 与 `data` 都映射到 `~/Library/Application Support`：
+
+```php
+$root = $kind === 'cache' ? self::home().'/Library/Caches'
+                          : self::home().'/Library/Application Support';
+```
+
+后果不只是"测试挂了"：`configPath('x.json')` 与 `dataPath('x.json')` 指向**同一个文件**，
+配置与用户数据互相覆盖；Windows（APPDATA/LOCALAPPDATA）与 Linux（XDG_CONFIG_HOME/XDG_DATA_HOME）
+天然分开，所以这条路径在 Windows 上跑一万次也是绿的。
+
+**修法**：与 Qt 自己的 `QStandardPaths` 对齐（在本机编了个 5 行 Qt 程序实测，不是查文档）：
+
+| QStandardPaths | macOS 实际取值 |
+|---|---|
+| `AppConfigLocation` | `~/Library/Preferences` |
+| `AppDataLocation` | `~/Library/Application Support` |
+| `CacheLocation` | `~/Library/Caches` |
+
+改后三者在 Darwin 上互不相同，`phpunit` 回到 `177/288`（与 Windows 基线逐位一致）。
+taskboard 实测落盘从 `~/Library/Application Support/TypePHP/Taskboard/tasks.json` 变为
+`~/Library/Preferences/TypePHP/Taskboard/tasks.json`。
+
+### 49.2 `qtphp new` 生成的 `sources:` 里还写着已删除的 `qt_bridge.cc`
+
+**症状**：`qtphp new foo && qtphp build foo` ⇒
+
+```
+Fatal error: Source file not exists: `/Volumes/.../typephp-qt/cpp-src/qt_bridge.cc`
+```
+
+**真因**：Session 33 把 `qt_bridge.cc` 拆成 `qt_loop/qt_render/qt_decor/qt_widgets/qt_webview`，
+`examples/hello/project.yml`、AGENTS.md、CHANGELOG 都跟着改了，**只有 `bin/lib/new.php` 里的
+heredoc 模板没改**。示例能构建（它的 yml 是对的），脚手架不能 —— 而 `new` 是每个新用户的第一次 `build`。
+
+**为什么报错指向框架仓库**：模板里的路径是 `{$pkgDir}/cpp-src/...` 绝对路径，所以错误信息里出现的是
+框架安装位置而不是用户项目位置，第一眼极容易判成"包没装好"。
+
+**修法**：模板改成 5 个拆分后的源；同时补一条静态守卫
+`CliTest::testNewTemplateBridgeSourcesMatchCppSrc()` —— 模板引用的 `.cc` 集合必须与 `cpp-src/*.cc`
+磁盘集合**相等**（双向：既防"引用了不存在的文件"，也防"新增源忘了写进模板"）。
+正控制：拿 `git show HEAD:bin/lib/new.php` 的旧内容跑同一段逻辑 ⇒ 引用集 `qt_bridge/qt_webview/qt_widgets`
+vs 磁盘集 5 个，断言失败。守卫有效。
+
+### 49.3 顺带观察（不是本仓库的 bug）
+
+`qtphp build` 的输出被重定向到文件时，tpc 的编译进度条仍吐 `\033[36m...` 转义 —— 来源是
+`vendor/swoole/typephp/src/Build/NativeSourceProjectBuilder.php`，不是本仓库的 `color()`。
+本仓库那三档（`NO_COLOR` > `CLICOLOR_FORCE` > isatty）在 mac 上逐档验过，与 Windows 结论一致。
+
+**仍未验**：Linux（用户明确不测）。

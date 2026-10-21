@@ -58,7 +58,11 @@ sources:
   - ../../src/QtApp.php
   - ../../src/WidgetTree.php
   - ../../php-src/qt.stub.php
-  - ../../cpp-src/qt_bridge.cc
+  - ../../cpp-src/qt_loop.cc
+  - ../../cpp-src/qt_render.cc
+  - ../../cpp-src/qt_decor.cc
+  - ../../cpp-src/qt_widgets.cc
+  - ../../cpp-src/qt_webview.cc
 ```
 
 This surprises people arriving from Composer autoloading. The `sources:` list `qtphp new` generates is correct.

@@ -103,7 +103,7 @@ function qt_window_poll_event(mixed $window): array {}
 ```
 
 ```cpp
-// cpp-src/qt_bridge.cc
+// cpp-src/qt_render.cc
 void php_qt_window_render(php::Variant box, php::Array tree) { /* … */ }
 php::Array php_qt_window_poll_event(php::Variant box)        { /* … */ }
 ```

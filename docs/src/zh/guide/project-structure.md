@@ -7,8 +7,11 @@ typephp-qt/
 ├── bin/qtphp              # CLI（doctor/new/build/run/package/test/lint）
 ├── cpp-src/               # C++ 桥接（参与应用编译）
 │   ├── qt_common.h        # 共享头：转换工具、Box 类、ChildSlot
-│   ├── qt_bridge.cc       # 窗口 / 渲染 diff / 装饰 / 对话框 / 包装符号
-│   └── qt_widgets.cc      # 控件工厂 / 属性应用 / 取值
+│   ├── qt_loop.cc         # 应用/窗口生命周期 + 自驱动事件循环
+│   ├── qt_render.cc       # 渲染遍历与差异更新
+│   ├── qt_decor.cc        # 菜单/托盘/状态栏、对话框、几何、a11y
+│   ├── qt_widgets.cc      # 控件工厂 / 属性应用 / 取值
+│   └── qt_webview.cc      # webview 统一入口（WebView2 / WKWebView / QTextBrowser）
 ├── php-src/qt.stub.php    # 桥接契约（PHP 签名，函数体必须为空）
 ├── src/                   # PHP 框架层
 │   ├── QtApp.php          # 应用框架（事件循环 / 错误兜底）
@@ -57,8 +60,11 @@ sources:
   - ../../src/QtApp.php
   - ../../src/WidgetTree.php
   - ../../php-src/qt.stub.php
-  - ../../cpp-src/qt_bridge.cc
+  - ../../cpp-src/qt_loop.cc
+  - ../../cpp-src/qt_render.cc
+  - ../../cpp-src/qt_decor.cc
   - ../../cpp-src/qt_widgets.cc
+  - ../../cpp-src/qt_webview.cc
 ```
 
 tpc 按 `project.yml` **所在目录**解析相对路径，所以同一份相对路径在三个平台都成立。

@@ -37,7 +37,9 @@ sources:
   - {$pkgDir}/src/QtApp.php
   - {$pkgDir}/src/WidgetTree.php
   - {$pkgDir}/php-src/qt.stub.php
-  - {$pkgDir}/cpp-src/qt_bridge.cc
+  - {$pkgDir}/cpp-src/qt_loop.cc
+  - {$pkgDir}/cpp-src/qt_render.cc
+  - {$pkgDir}/cpp-src/qt_decor.cc
   - {$pkgDir}/cpp-src/qt_widgets.cc
   - {$pkgDir}/cpp-src/qt_webview.cc
   # nano 在 Windows 上缺几个目标文件（crc32 SIMD / Fiber CE / MSVC seed256）

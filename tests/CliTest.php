@@ -230,6 +230,25 @@ final class CliTest extends TestCase
         self::assertNull(\builtBinary($dir));
     }
 
+    // ── 脚手架模板 ──
+
+    public function testNewTemplateBridgeSourcesMatchCppSrc(): void
+    {
+        // 桥接 C++ 拆分（qt_bridge.cc → qt_loop/render/decor/widgets/webview）时，
+        // 模板里漏改一个名字，`qtphp new` 生成的项目就必然编译失败（Source file not exists），
+        // 而这条路径没有任何单测会走到 —— build 要 Qt、要编译器。只能静态核对：
+        // 模板引用的每个 .cc 都要存在，cpp-src/ 下的每个 .cc 也都要被引用。
+        $template = (string) file_get_contents(__DIR__ . '/../bin/lib/new.php');
+        preg_match_all('#cpp-src/([A-Za-z0-9_.-]+\.cc)#', $template, $matches);
+        $referenced = array_values(array_unique($matches[1]));
+
+        $onDisk = array_map('basename', glob(__DIR__ . '/../cpp-src/*.cc') ?: []);
+
+        sort($referenced);
+        sort($onDisk);
+        self::assertSame($onDisk, $referenced, '脚手架模板的桥接源列表与 cpp-src/ 实际文件不一致');
+    }
+
     private static function removeTree(string $dir): void
     {
         if (!is_dir($dir)) {

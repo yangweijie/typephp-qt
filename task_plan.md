@@ -643,7 +643,7 @@
 - [x] 40.10a 本机（Windows 真控制台）验证三档颜色：`Start-Process -WindowStyle Hidden` 让 PHP 继承真实控制台句柄（`stream_isatty(STDOUT)=true`）——无 env 输出 `1b5b33316d 58 1b5b306d`、`NO_COLOR=1` 纯文本、`CLICOLOR_FORCE=0` 回落到 isatty 仍彩色；管道下只有 `CLICOLOR_FORCE=1` 出转义、`NO_COLOR` 压过 force。**顺带发现并修复**：composer 1 的 `installed.json` 没有 `install-path`，原实现直接 `continue` ⇒ 包目录回落到 `vendor/<name>`，补 1 条单测（177/288）。
 - [x] 40.10b-1 Windows 真控制台的**人眼观感**：`Start-Process cmd.exe` 起真实控制台跑配色样本，截图像素统计 + 放大目视 —— `[INFO]` 青蓝（mean 52,133,195 ≈ Campbell cyan）、`[OK]` 绿、`[WARN]` 黄（181,147,1）、`[ERROR]` 红、整行着色、bold 白、**无字面转义字符**（conhost 解释 VT）；`stream_isatty(STDOUT)=true`。
 - [x] 40.10b-2 composer 1 **真实安装**：`composer.phar 1.10.27` + `php85`（8.5.5）在 fixture 装本地包（path repo、`symlink:false`、`packagist:false`）⇒ rc=0；`installed.json` 为顶层数组、**无 `install-path`**；`bridgeSourcesFromVendor()` 返回 2 条（stub + `cpp-src`）且路径均存在。坑：默认 `COMPOSER_HOME` 的腾讯镜像在 PHP 8.5 触发 `stream_context_create` callable 校验 Fatal，须换空 `COMPOSER_HOME` 断网（F48 §4）。
-- [ ] 40.10b-3 Linux/macOS 的 `stream_isatty` 分支：用户明确「不测linux 不用wsl」，保留未验。
+- [x] 40.10b-3 **macOS 侧已验（Session 34）**：管道 `isatty=false → 纯文本`、`CLICOLOR_FORCE=1 → 带转义`、真 PTY（`script -q /dev/null`）`isatty=true → 带转义`、PTY+`NO_COLOR=1 → 纯文本`、`NO_COLOR` 压过 `CLICOLOR_FORCE`，与 Windows 表逐格一致。**Linux 仍未验**（用户明确「不测linux 不用wsl」）。
 - [x] 40.11 提交工作区 → **`88ca264`**（60 files，+10894 −3839；提交后 `git status --porcelain` 无输出）。39.8/39.9 仍为未勾历史项，按 39.10 的顺序留待后续。
 
 ## Errors Encountered

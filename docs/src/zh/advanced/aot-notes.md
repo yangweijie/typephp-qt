@@ -58,7 +58,11 @@ sources:
   - ../../src/QtApp.php
   - ../../src/WidgetTree.php
   - ../../php-src/qt.stub.php
-  - ../../cpp-src/qt_bridge.cc
+  - ../../cpp-src/qt_loop.cc
+  - ../../cpp-src/qt_render.cc
+  - ../../cpp-src/qt_decor.cc
+  - ../../cpp-src/qt_widgets.cc
+  - ../../cpp-src/qt_webview.cc
 ```
 
 这对从 Composer 自动加载过来的人很意外。`qtphp new` 生成的 `sources:` 是正确的。

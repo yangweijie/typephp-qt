@@ -7,8 +7,11 @@ typephp-qt/
 ├── bin/qtphp              # CLI (doctor/new/build/run/package/test/lint)
 ├── cpp-src/               # the C++ bridge (compiled into your app)
 │   ├── qt_common.h        # shared header: converters, Box, ChildSlot
-│   ├── qt_bridge.cc       # window / render diff / decoration / dialogs / wrappers
-│   └── qt_widgets.cc      # widget factory / property application / value reads
+│   ├── qt_loop.cc         # app/window lifecycle + the self-driven event loop
+│   ├── qt_render.cc       # render traversal and diff updates
+│   ├── qt_decor.cc        # menus/tray/status bar, dialogs, geometry, a11y
+│   ├── qt_widgets.cc      # widget factory / property application / value reads
+│   └── qt_webview.cc      # webview entry point (WebView2 / WKWebView / QTextBrowser)
 ├── php-src/qt.stub.php    # the bridge contract (PHP signatures, empty bodies)
 ├── src/                   # the PHP framework layer
 │   ├── QtApp.php          # application framework (event loop / error fallback)
@@ -57,8 +60,11 @@ sources:
   - ../../src/QtApp.php
   - ../../src/WidgetTree.php
   - ../../php-src/qt.stub.php
-  - ../../cpp-src/qt_bridge.cc
+  - ../../cpp-src/qt_loop.cc
+  - ../../cpp-src/qt_render.cc
+  - ../../cpp-src/qt_decor.cc
   - ../../cpp-src/qt_widgets.cc
+  - ../../cpp-src/qt_webview.cc
 ```
 
 tpc resolves relative paths against the **directory containing `project.yml`**, so the same relative paths hold on all three platforms.
