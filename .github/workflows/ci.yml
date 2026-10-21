@@ -147,9 +147,10 @@ jobs:
       - name: 无头自测
         env:
           QT_QPA_PLATFORM: offscreen
-        run: build\hello.exe --selftest
+        # 产物落在项目目录下（project.yml 的 output: build/hello），不是仓库根
+        run: examples\hello\build\hello.exe --selftest
 
       - name: 渲染差异测试
         env:
           QT_QPA_PLATFORM: offscreen
-        run: build\hello.exe --difftest
+        run: examples\hello\build\hello.exe --difftest
