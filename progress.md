@@ -1,5 +1,56 @@
 # Progress Log — typephp-qt
 
+## Session 35 — 2026-10-22（CI 从「加进去就没绿过」到全绿：Windows 作业的四个坑）
+
+### 任务来源
+
+用户「github 上 ci 运行失败了 能否读取相关信息 并修复」。查 `gh run list` 发现 CI 自 **Session 33 引入起
+四次运行全红**（`39366307675`、`39691094376` 都是同一条报错），也就是说这份 workflow 从提交那天起就没工作过 ——
+README 里「新增 CI（PHPUnit + qtphp lint + Windows 构建）」这句当时没有运行证据。
+
+### 四个坑（按被踩到的顺序）
+
+| # | 现象 | 真因 | 修法 |
+|---|---|---|---|
+| 1 | `Fatal error: Neither php8ts.lib nor php8.lib found`（tpc exit 255） | tpc 的 `detectPlatform()` 在翻译任何 PHP **之前**就找 `php8ts.lib` / `php8embed.lib`；`setup-php` 装的是运行时压缩包，只有 `php8.dll`，没有导入库 | 作业改用 tpc 官方发行包 `tpc_v0.9.5_windows_x64_php8.4.26-zts.zip`（自带 `SDK/lib`、`SDK/include`、`phpx/lib/phpx.lib`、运行期 DLL），并设 `PHP_HOME` / `PHPX_HOME` / `TPC_RUNTIME_DIR` |
+| 2 | 若走非 nano：`php-builder` 要现编 php-src | `CompilerBase`：`phpBuilderEnabled && !isNanoMode()` —— 非 nano 一定触发私有运行时构建 | 编译保持 `--nano`（发行包只用于检测与头文件） |
+| 3 | `fatal error C1083: Cannot open include file: 'WebView2.h'` | **真缺陷**：`qtphp build` 只有在自己调 vcvars 的分支里 `cd /d <项目目录>`；「MSVC 已就绪」分支不 cd，于是 `-I"../../third_party/webview2/include"` 被解析成相对**仓库根**，差一层 | `bin/lib/build.php` 的 else 分支补 `chdir(项目目录)` + `finally` 还原（VS 开发者命令行用户同样受益） |
+| 4 | `The module 'build' could not be loaded` | 自测步骤写的 `build\hello.exe`，产物实际在 `examples/hello/build/` | 路径改成 `examples\hello\build\hello.exe` |
+
+坑 3 是这轮唯一改到产品代码的地方，也是最值得记的：**同一个项目的相对 `-I` 在两条分支上语义不同**，
+而两条分支的触发条件（有没有预先配好 MSVC）恰好对应「作者本机」与「CI / 开发者命令行」两种环境。
+
+### 验收（`39693161951`，本机 `gh` 读取）
+
+```
+✓ Windows 编译与无头自测 in 3m22s
+  ✓ 安装 tpc 原生运行时（Windows x64 / PHP 8.4 ZTS）
+  ✓ 配置 MSVC 环境   ✓ 安装 Qt   ✓ 安装依赖   ✓ 工具链自检
+  ✓ 编译示例 → Successfully compiled 266 files / Build successful: examples\hello\build\hello.exe
+  ✓ 无头自测 → selftest passed
+  ✓ 渲染差异测试 → difftest passed
+✓ PHP 单测与契约校验 in 11s（phpunit + lint + php -l）
+```
+
+`doctor` 在 runner 上的读数：`PHP 8.4.26` / `tpc: .tpc-runtime\tpc.exe` / `PHP 运行时库: .tpc-runtime` /
+`MSVC: vcvars64.bat` / `核心工具链就绪`。
+
+### 迭代记录（4 轮，每轮 ~3 分钟）
+
+1. 加运行时安装 + 断言 → 断言自己先炸：`SDK\include\php\main\php.h` 实际是 `SDK\include\main\php.h`；
+2. 改路径 → 通过运行时安装，卡在 `php8ts.lib`（非 nano 触发 php-builder，已取消运行止损）；
+3. 改 `--nano` → 编到 266/266 时 `qt_webview.cc` C1083（坑 3）；
+4. 修 CWD → 编译通过，自测路径错（坑 4）；改完 **全绿**。
+
+### 教训
+
+- **教训 37**：加了 CI 但没看它跑完，等于没加。这份 workflow 四次运行全红，而 CHANGELOG/README 已经写着
+  「新增 CI」——「有配置文件」被当成了「有 CI」。判断标准只能是 run 的结论，不是文件存在。
+- **教训 38**：`chdir` 这类「环境准备」在两个分支里各写一遍时，漏掉的那个分支迟早会以「路径找不到」的形式
+  报复你，而且报错文本（`Cannot open include file`）会把锅甩给头文件，而不是工作目录。
+- **教训 39**：CI 里的「断言」要写具体路径。第 1 轮那个 `$must` 清单第一次跑就把自己的拼写错误抓出来了 ——
+  比等到 `cl.exe` 在 266 个文件后报 C1083 快了三分钟。
+
 ## Session 34 — 2026-10-22（macOS 回归：Windows 侧永远看不见的两处缺陷）
 
 ### 任务来源

@@ -2632,3 +2632,60 @@ vs 磁盘集 5 个，断言失败。守卫有效。
 本仓库那三档（`NO_COLOR` > `CLICOLOR_FORCE` > isatty）在 mac 上逐档验过，与 Windows 结论一致。
 
 **仍未验**：Linux（用户明确不测）。
+
+## F50. CI 自引入起就没绿过：Windows 作业的四个坑（Session 35）
+
+**触发**：用户「github 上 ci 运行失败了」。`gh run list` 显示 Session 33 引入的 CI **四次运行全红**，
+两条失败记录的报错完全相同 —— 说明这份 workflow 从提交起就没工作过，而 README/CHANGELOG 已写着「新增 CI」。
+
+### 50.1 tpc 在翻译任何 PHP 之前就要 PHP 导入库
+
+```
+Fatal error: Neither php8ts.lib nor php8.lib found
+#0 CompilerDiagnosticTrait->fatal() ← Translator.php:310 detectPlatform()
+```
+
+`Windows::detectPhpLibs()` 在 `$phpDir` 下依次找 `SDK\lib`、`lib`、`$phpDir` 里的
+`php8embed.lib` + `php8ts.lib`/`php8.lib`，缺任一直接 `error()`。`setup-php` 装的是运行时压缩包，
+**只有 `php8.dll`，没有 `.lib`**，所以这条路在 CI 上必死；而 `--nano` 也绕不过去（检测早于模式判定）。
+
+修法：用 tpc 官方发行包 `tpc_v0.9.5_windows_x64_php8.4.26-zts.zip`（56 MB），它同时提供
+`SDK/lib`（php8ts / php8embed / gmp / mpfr / libmpdec 导入库）、`SDK/include`（PHP 头文件）、
+`phpx/lib/phpx.lib`、`php.exe` 与运行期 DLL —— 等于一套完整 Windows AOT 环境。
+环境变量三件套：`PHP_HOME`（detectPhpLibs）、`PHPX_HOME`（PhpxLocator）、`TPC_RUNTIME_DIR`（qtphp 的 DLL 部署）。
+
+**版本要对齐**：发行包是 PHP 8.4.26 ZTS，`swoole/typephp` 是 `>=0.9`（当前 0.9.5）。升级 tpc 时两个常量同步改，
+错配的症状是链接期符号缺失，不会提示版本。
+
+### 50.2 非 nano 会现编 php-src
+
+`CompilerBase::isPhpBuilderBuild()` = `phpBuilderEnabled && !isNanoMode()` ⇒ CI 上必须 `--nano`，
+否则 tpc 下载 php-src 现编私有运行时（十几分钟起步，Windows 还要 bison/re2c 一类依赖）。
+发行包在 nano 模式下的作用只有两个：满足 detectPlatform 探测、提供 SDK 头文件。
+
+### 50.3 相对 `-I` 只在「qtphp 自己调 vcvars」那条分支成立（真缺陷）
+
+```
+cpp-src\qt_webview.cc(27): fatal error C1083: Cannot open include file: 'WebView2.h'
+```
+
+`examples/hello/project.yml` 里写的是 `-I"../../third_party/webview2/include"`，按**项目目录**解析才对。
+`cmdBuild()` 有两条分支：
+
+- 需要 qtphp 自己 `call vcvars64.bat`：临时 .bat 里有 `cd /d "<项目目录>"` ⇒ 相对路径正确；
+- `msvcEnvironmentReady()` 为真（VS 开发者命令行、CI 的 `ilammy/msvc-dev-cmd`）：直接 `passthru`，
+  **不 cd** ⇒ cl.exe 继承的 CWD 是仓库根，`../../third_party` 差一层。
+
+修法：else 分支补 `chdir(dirname($projectAbs))` + `finally` 还原。macOS/Linux 走的是同一条 else 分支，
+只是它们的 yml 用绝对路径（`/opt/homebrew/...`）所以从没暴露 —— 又一个「只有一条分支被日常走到」的例子。
+
+### 50.4 自测路径写错
+
+`build\hello.exe` 实际在 `examples\hello\build\hello.exe`（`output: build/hello` 相对项目目录）。
+PowerShell 报 `The module 'build' could not be loaded` —— 因为找不到同名文件时会尝试当模块导入，
+这个报错比「文件不存在」更难联想。
+
+### 验收
+
+`39693161951`：Windows 作业 3m22s 全绿（266 TU 编译 + selftest + difftest），PHP 作业 11s 全绿。
+`gh run list` 上 main 的最近一次运行结论为 `success`。
