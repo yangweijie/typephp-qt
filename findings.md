@@ -3107,3 +3107,36 @@ metaobject，成品 receiver 是手工静态表——机制差异已坐实，版
   改名 + plutil -lint 过）。
 - 附件：qmlclock `--nano` 4,407,176 B + offscreen selftest passed（CI 的 nano 模式预演），
   切回 embed 无缓存污染（Phase 32 先例复现）。
+
+## F56. Windows CI 的 qtdeclarative 死结 + QT_QML dev-run 依赖闭包实测（Session 37）
+
+- **CI 失败根因（41.13）**：`install-qt-action` 传 `modules: qtdeclarative` 后，aqt 报
+  `The packages ['qtdeclarative'] were not found while parsing XML of package information!`
+  —— 第一手取证（Qt 官方元数据 `online/qtsdkrepository/windows_x86/desktop/qt6_693/
+  qt6_693/Updates.xml`，注意**双层 qt6_693 目录**）：基础组件 `qt.qt6.693.win64_msvc2022_64`
+  的 `DownloadableArchives` = qtbase / qtsvg / **qtdeclarative** / qttools / qttranslations /
+  d3dcompiler_47 / opengl32sw，默认安装就带；`addons` 下**没有** `qtdeclarative` 条目
+  （qt3d、qt5compat 都有），所以 `-m qtdeclarative` 无处解析。本机在线安装器默认勾选装的
+  Qt 6.9.3 同样 Qt6Qml.lib / qml/ 齐全，两证互洽。**修法：删掉 `modules:` 行**。
+  本地 Qt 安装目录路径为 `D:/tools/Qt/6.9.3/msvc2022_64`（与示例 yml 写死的一致）。
+- **QT_QML 应用 Windows dev-run 的完整依赖闭包（41.14 实测，dumpbin -DEPENDENTS）**：
+  exe 导入表里只有 Qt6Qml.dll / Qt6QuickWidgets.dll（直接链接的两个）；传递链
+  Qt6Quick → Qt6QmlMeta → **Qt6QmlWorkerScript**（QmlMeta 静态导入它）+
+  Qt6QmlModels / Qt6OpenGL 只在 Qt 自身 DLL 的导入表里。整套 = **7 个 DLL**：
+  Qml / QmlModels / QmlMeta / QmlWorkerScript / Quick / QuickWidgets / OpenGL。
+  逐个补 DLL 的实录：缺 QuickWidgets → 加载器**点名**；缺 QmlWorkerScript（传递）→
+  Git Bash 只报 `?: cannot open shared object file` **连名字都不给**。
+- **qml/ 模块目录在 Windows dev-run 也不需要**（F55 mac 结论的 Windows 侧延伸+修正）：
+  F55 曾预测「动态 qml 插件是 Windows 侧的形态」——实测证否。`QML_IMPORT_TRACE=1` 实录：
+  import 路径表里有 `build/qml`（不存在）与 `qrc:/qt-project.org/imports`，qmldir 实际
+  加载自 **`:/qt-project.org/imports/QtQuick/qmldir` 内建 qrc**，与 mac 同机制。7 个 DLL
+  补齐后 qmlclock offscreen selftest 9/9 passed（QT_QUICK_BACKEND=software 同 9/9）。
+- **实施偏差（41.14 台账原文 vs 落地）**：原文写「按生效 yml 含 QT_QML 标记条件追加
+  （文本启发式）」——落地改用**exe 导入 Qt6Qml.dll** 判定，与同函数 Qt6Network 的
+  判定同一先例：yml 的 -DQT_QML 是意图，exe 导入是事实（QT_QML 未定义时 qt_qml.cc
+  是占位 TU、exe 不导入 Qt6Qml.dll）。反向同样成立：exe 不导入时清掉上轮留下的
+  QML DLL（不删会打进最终产物，同 Network 理由）——实测：往 hello/build 里种
+  Qt6Qml.dll → 重编 → 被清掉；hello selftest + difftest 全 rc=0。
+- 顺带核验：qt_qml.cc 的占位诊断字符串只提 `QT_QML`（开关名）不提 `Qt6Qml.dll`，
+  exe 字节 substring 探测没有来自它的假阳性；'Qt6Qml.dll' 也不是
+  'Qt6QmlModels.dll' / 'Qt6Qmld.dll' 的子串。

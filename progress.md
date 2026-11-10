@@ -1,5 +1,74 @@
 # Progress Log — typephp-qt
 
+## Session 37 — 2026-11-11（Windows 收尾：CI qtdeclarative 死结 + 41.14 QML 运行库白名单）
+
+### 任务来源
+
+用户「继续 windows 上工作」。接 Session 36 留下的两条未勾项：41.13（CI 红）、
+41.14（Windows DLL 白名单）——都是 Windows 侧、且本机就是 Windows（Qt 6.9.3
+msvc2022_64 + tpc 0.9.5 工具链齐全，doctor 全 OK）。**不 commit（用户未令）。**
+
+### 41.13：CI 两连红的根因与修复
+
+- 现状：QML 接线已随 cd6fdcc push，但 CI run 42914049258 / 42914551844 两连红，
+  1m13s 即死在「安装 Qt」步：aqt 报
+  `The packages ['qtdeclarative'] were not found while parsing XML of package information!`
+- 根因（Updates.xml 第一手取证，注意元数据路径是**双层目录**
+  `desktop/qt6_693/qt6_693/Updates.xml`）：Qt 6.9.3 win64_msvc2022_64 的基础组件
+  `qt.qt6.693.win64_msvc2022_64` 的 DownloadableArchives =
+  qtbase / qtsvg / **qtdeclarative** / qttools / qttranslations / d3dcompiler_47 / opengl32sw
+  —— qtdeclarative **默认安装就带**；`addons` 下没有 qtdeclarative 条目（qt3d / qt5compat
+  都有），所以 `modules: qtdeclarative` 无处解析。本机 Qt（在线安装器默认勾选）同样
+  Qt6Qml.lib / qml/ 齐全，两证互洽。
+- 修复：删掉 ci.yml 的 `modules: qtdeclarative` 行，注释记录为什么不能加（F56）。
+  **未 commit**；最终判据（CI 全绿）待 push 验证，推送需用户点头。
+
+### 41.14：deployRuntimeDlls 的 QML 运行库白名单（实测驱动）
+
+- 逐个补 DLL 实录（先手工模拟白名单行为再写代码）：缺 QuickWidgets → 加载器点名
+  `Qt6QuickWidgets.dll: cannot open shared object file`；补上 6 个后仍 127 但报 **`?` 无名**
+  —— Qt6QmlMeta 静态导入 Qt6QmlWorkerScript，这条传递链 dumpbin 才看得见
+  （exe 导入表只有 Qt6Qml / Qt6QuickWidgets 两个）。整套闭包 = **7 DLL**：
+  Qml / QmlModels / QmlMeta / QmlWorkerScript / Quick / QuickWidgets / OpenGL。
+- **qml/ 模块目录不需要**：F55（mac）预测「动态 qml 插件是 Windows 侧形态」被实测证否
+  —— `QML_IMPORT_TRACE=1` 实录 qmldir 加载自内建 qrc
+  `:/qt-project.org/imports/QtQuick/qmldir`（import 路径表里的 `build/qml` 根本不存在），
+  与 mac 同机制。
+- 落地（`bin/lib/build.php`）：判定信号用 **exe 导入表含 Qt6Qml.dll**（与同函数
+  Qt6Network 判定同一先例：yml 的 -DQT_QML 是意图、exe 导入是事实），一次拷整套 7 DLL；
+  exe 不导入时反向清掉上轮残留（同 Network 理由）。实施偏差（41.14 原文写「yml 文本
+  启发式」）已在 task_plan 实施注里记账。
+- 假阳性排查：qt_qml.cc 占位诊断只提 `QT_QML` 开关名不提 DLL 名；'Qt6Qml.dll' 不是
+  'Qt6QmlModels.dll' / 'Qt6Qmld.dll' 的子串。
+
+### 验收（全部本会话现测，Windows 真机）
+
+| 项 | 结果 |
+|---|---|
+| qmlclock 全清 → `qtphp build` → 部署 21 文件（含 7 QML DLL） | ✅ rc=0 |
+| qmlclock offscreen `--selftest` | ✅ **9/9 passed** rc=0（errors 空、payload 读回、reload 重放全过） |
+| qmlclock offscreen + `QT_QUICK_BACKEND=software`（CI 同环境） | ✅ 9/9 ok 行，rc=0 |
+| 负控制：种 Qt6Qml.dll 进 hello/build → 重编 hello | ✅ DLL 被清掉（不删会打进产物） |
+| hello 回归 offscreen `--selftest` + `--difftest` | ✅ 双 passed rc=0 |
+| `php vendor/bin/phpunit --no-coverage` | ✅ **OK (206 tests, 334 assertions)**（基线 200/324 + F54 合并进来的 6 用例） |
+| `php bin/qtphp lint` | ✅ 「契约一致！」（41 ⇄ 41） |
+
+### 未过项 / 待用户项
+
+- **CI 全绿未验证**：ci.yml 修复未 commit / 未 push（推送需用户点头）。
+- 本轮改动均未 commit：`.github/workflows/ci.yml`、`bin/lib/build.php`、
+  planning 三件套（task_plan / findings F56 / progress）。
+
+### 教训
+
+- **教训 46**：「模块名是否合法」不能靠记忆拍板——qtdeclarative 这种人尽皆知的模块，
+  在 Qt 6 Windows 桌面元数据里是基础组件的一部分而非 addon；CI 红了别急着改 yml
+  参数组合，直接下 Updates.xml 看第一手证据（两层目录、DownloadableArchives、
+  addons 命名空间）比 WebSearch 二手结论快且准。
+- **教训 47**：依赖闭包要沿**整条链**的导入表算，不能只算自己的——exe 不导入
+  Qt6QmlWorkerScript，但 QmlMeta 导入它；漏掉的传递依赖报错连名字都不给（`?`）。
+  「逐个补、每次跑一遍」是最笨但最可靠的实测法，dumpbin 只是把它一次算完。
+
 ## Session 36 — 2026-11-10（QML 支持：'qml' 控件类型经 QQuickWidget 嵌入现有控件树）
 
 ### 任务来源

@@ -815,17 +815,27 @@ AGENTS.md 全文无测试数基线（`grep -n '128\|178\|177\|tests' AGENTS.md` 
   非空（链路已走到 connect，失败被显式记录）」，判据走 rc（F34）。
   教训：探针在 6.11.2/6.12.0 探针版上「connect 成立」，成品在 keg 6.12.0_2 上失败——
   探针与成品必须同版本 Qt 才可比。
-- [ ] 41.13 CI（.github/workflows/ci.yml）：install-qt-action（:108-115）加
-  `modules: qtdeclarative`（hello 作业同用一次安装，多装的模块对它无害）；
-  Qt 路径替换步骤（:117-129）**现在只改 hello 一份 yml**，要改成 hello+qmlclock 两份都替换
-  （两份同样写死 `D:/tools/Qt/6.9.3/msvc2022_64`，漏一份就是 C1083）；加 qmlclock 编译 +
-  offscreen `--selftest` 步骤，产物路径写全 `examples\qmlclock\build\qmlclock.exe`
-  （Session 35 坑 4 的教训）。
-- [ ] 41.14 Windows 开发期运行：`bin/lib/build.php` `deployRuntimeDlls` 的 DLL 白名单
-  （:401）按「生效 yml 含 QT_QML 标记」条件追加 Qt6Qml/Qt6Quick/Qt6QuickWidgets.dll
-  （注释写清为什么用文本启发式、漏判的症状是 0xC0000135 且报错不说缺哪个）；QtQuick
-  的插件依赖（software backend 渲染插件等）待 41.12 在装有 qtdeclarative 的环境实测后
-  按需补——不在摸底阶段拍脑袋。
+- [x] 41.13 CI（.github/workflows/ci.yml）：qmlclock 接线本体（`modules: qtdeclarative`、
+  路径替换覆盖 hello+qmlclock 两份 yml、qmlclock 编译 + offscreen `--selftest` 步骤）
+  已在 Session 36 随 QML 实施一并落进 ci.yml 并 push——**但 CI 两连红**（run 42914049258 /
+  42914551844，1m13s 即死在「安装 Qt」步）。Session 37 修根因：**`modules: qtdeclarative`
+  必须删掉**——Qt 官方元数据（Updates.xml 第一手取证，F56）显示 qtdeclarative 在基础组件
+  `qt.qt6.693.win64_msvc2022_64` 的 DownloadableArchives（默认安装就带），addons 下无条目，
+  `-m` 无处解析 → aqt 报 `packages ['qtdeclarative'] were not found while parsing XML`。
+  ci.yml 修复已落盘（未 commit）；**最终判据（CI 全绿）待 push 验证，推送需用户点头**。
+- [x] 41.14 Windows 开发期运行：`bin/lib/build.php` `deployRuntimeDlls` 已补 QML 运行库
+  白名单。**实施偏差（有意）**：判定信号不用「yml 含 QT_QML 文本标记」而用
+  **exe 导入表含 Qt6Qml.dll**——与同函数 Qt6Network 判定同一先例（yml 是意图、exe 导入
+  是事实，QT_QML 未定义时占位 TU 不导入 Qt6Qml.dll）。白名单是 **7 个 DLL 的整套传递
+  闭包**（Qml/QmlModels/QmlMeta/QmlWorkerScript/Quick/QuickWidgets/OpenGL，6.9.3
+  dumpbin 实测）：exe 导入表只有 Qml/QuickWidgets 两个，Quick → QmlMeta →
+  QmlWorkerScript 链只在 Qt DLL 的导入表里，逐个探测必漏；漏判症状实测两形态——直接缺
+  的点名（0xC0000135）、传递缺的 Git Bash 报 `?` 无名。exe 不导入 Qt6Qml.dll 时反向清掉
+  上轮残留（种 DLL 进 hello/build 重编被清，实测）。**qml/ 模块目录不需要**（QtQuick
+  从内建 qrc 解析，QML_IMPORT_TRACE 实录，F56/F55 同机制）——F55「动态 qml 插件是
+  Windows 侧形态」的预测被 Windows 实测证否。本机全清验证：qmlclock 重编 → 部署 7 DLL
+  → offscreen selftest 9/9 passed（含 `QT_QUICK_BACKEND=software` 同 9/9）；
+  hello 回归 selftest + difftest rc=0。
 - [x] 41.15 文档：`docs/src/widgets/qml.md` + `docs/src/zh/widgets/qml.md` 镜像（叶子语义、
   能力查询、错误通道、无头读回、QT_QML 开关与三平台接线、**QML import 打包不自动部署**
   的显式警告）；**新页的四处接线（评审二轮补，全部无守卫，漏一处页面成孤儿/目录过期）**：
@@ -922,6 +932,7 @@ AGENTS.md 全文无测试数基线（`grep -n '128\|178\|177\|tests' AGENTS.md` 
 | combo 传 id 型 `current`（如 `8.2.19`）在空表上 `findText` 落空 ⇒ `setCurrentIndex(-1)`，随后 `items` 把首项设成当前，界面"像选了默认值" | 1 | 先按 `itemData` 找、再按文本、都找不到**保持原样**；表为空时挂 `qt_pendingCurrent` 待 `items` 落地补应用（F46 §1） |
 | 想拿本轮 `--shot` 哈希去证明 `spacer(1)` 改成了真 stretch 的像素差异 | 1 | 改前 Windows 从未存过基线哈希，跨轮次又不可 diff（教训 21）⇒ 只能做「stash → 重编 → 存哈希 → pop → 重编 → 存哈希」的成对实验（Phase 39.11） |
 | `--selftest`/`--difftest` 25/25、20/20 全绿，却覆盖不到本轮三处新分支 | 1 | 不是 bug 是**验收漏洞**：示例用 `value` 不用 `current`、只用 `spacer(1)`、没有 `scroll` 节点 ⇒ 全绿对它们零鉴别力。教训 27：静默类修复必须先造会失败的正控制（Phase 39.8） |
+| CI「安装 Qt」两连红（run 42914049258 / 42914551844，1m13s 即死）：aqt `packages ['qtdeclarative'] were not found while parsing XML` —— Session 36 接线时加的 `modules: qtdeclarative` 在 Windows 桌面元数据里无处解析 | 1 | Qt 6.9.3 win64_msvc2022_64 的 qtdeclarative 在**基础组件** DownloadableArchives（默认安装就带）、addons 下无条目 ⇒ `-m qtdeclarative` 必炸。删掉 `modules:` 行（F56，Updates.xml 第一手取证） |
 
 ## Decisions Log
 
