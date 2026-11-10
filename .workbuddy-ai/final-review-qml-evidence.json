@@ -1,0 +1,19 @@
+{
+  "format": "craft-anything-evidence-bundle",
+  "records": [],
+  "unknowns": [
+    {
+      "domain": "qml-phase41",
+      "evidence_against": [],
+      "evidence_for": [],
+      "id": "unk_7928f69dab1be805",
+      "probes": [],
+      "question": "QML 方案（Phase 41 / F51）的关键假设是否都经实读验证？",
+      "resolution": "验证完成：①桥接契约——lint 正则（bin/lib/contract.php:36 提取 stub、:52 要求 C++ 行首 Variant|void|Bool|String|Int|Array）与定死的 `Bool php_qt_qml_available()` / `Array php_qt_qml_status(Variant box, String id)` 形态匹配，qt_decor.cc:526 `Array php_qt_window_find(Variant box, String id)` 为先例；②事件队列——qt_loop.cc:202-209 enqueue(type,id,value,payload) 与 qt_common.h:441 签名一致，41.5 的 `box->enqueue(\"qml\", id, 信号名, read快照)` 可直接落地；③编译期开关——qt_webview.cc:24-30 #ifdef 关住 include、:34-51 对外符号无条件返回，qt_qml.cc 照抄成立；④构建接线——hello project.yml:29、taskboard project.yml:30 逐文件列桥接 .cc，41.10 补 taskboard 一条正确（kWidgetTypes 静态表 qt_widgets.cc:486-519 存函数地址，链接不可裁剪）；new.php:44 模板位正确；CI ci.yml:121-129 现只改 hello 一份 yml，41.13 要求改两份+加 qmlclock 步骤正确；mac/linux 平台 yml 只 include 不写 sources（taskboard/project.macos.yml:4-6 注释），零改动判断正确。残留未消歧：41.11 写 qmlclock 的 project.yml（Windows）加 QML flags，但 mac/linux yml 是否全量重写 sources 未明说（hello 的 mac/linux 是继承 sources、整体替换语义 ⇒ qmlclock 若同样继承，须先复制全量 sources 再加条件条目，漏一步 linux yml 会丢 cpp-src）。",
+      "revision": 2,
+      "severity": "medium",
+      "status": "resolved"
+    }
+  ],
+  "version": 1
+}

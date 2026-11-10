@@ -159,6 +159,7 @@ WebView2 画在自己的子窗口里、WKWebView 挂在 Qt 控件的原生 NSVie
 
 ## 相关
 
+- [QML](/zh/widgets/qml.md) —— 姊妹的内嵌控件
 - [控件目录](/zh/widgets/) —— 其他控件
 - [属性](/zh/guide/properties.md) —— 通用属性（`grow`、`size` 等）
 - [打包](/zh/reference/packaging.md) —— 二进制旁边要带哪些东西

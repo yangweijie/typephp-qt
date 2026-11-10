@@ -21,6 +21,7 @@ WidgetTree::button('确定', ['id' => 'ok']);
 | [数据](/zh/widgets/data.md) | `list` `table` `tree` |
 | [展示](/zh/widgets/display.md) | `label` `button` `progress` `image` `link` |
 | [内嵌网页](/zh/widgets/webview.md) | `webview` |
+| [QML](/zh/widgets/qml.md) | `qml` |
 
 ## 速查表
 

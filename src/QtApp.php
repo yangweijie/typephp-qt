@@ -332,6 +332,50 @@ final class QtApp
         $this->patch([['op' => 'call', 'id' => $id, 'method' => 'goForward']]);
     }
 
+    // ── qml ──
+
+    /**
+     * 编译时是否启用了 QML（yml 里定义了 QT_QML 宏）。
+     *
+     * false 时 `'qml'` 类型节点渲染成带诊断文字的占位标签，
+     * 信号/属性/读回全部失效 —— 应用可用它走降级分支，
+     * 而不是让用户看到一块占位。
+     */
+    public function qmlAvailable(): bool
+    {
+        return \qt_qml_available();
+    }
+
+    /**
+     * 读一个 `'qml'` 控件的组件状态（显式错误通道，不静默）。
+     *
+     * 返回
+     *   ['status'=> 'none'|'loading'|'ready'|'error',
+     *    'errors'=> [['line'=>int, 'message'=>string], ...]]
+     *
+     * 控件不存在或不是 qml 类型时返回 []。
+     *
+     * offscreen 平台下组件 status 可能永远停在 loading（平台行为，不是缺陷），
+     * 所以**无头验收的判据不要依赖 status=ready**，用事件到达 + 属性读回
+     * （`value('id')` 返回 read 声明属性的当前快照）作为判据。
+     */
+    public function qmlStatus(string $id): array
+    {
+        return \qt_qml_status($this->handle(), $id);
+    }
+
+    /**
+     * 让 qml 控件重新加载 source。
+     *
+     * 走 patch 的 call 通道（与表格 appendRows / 表格 clear 同一类），
+     * 改完必须 `forgetProps` 摘掉 source 签名，下一帧以树为准重新同步。
+     * QT_QML 未定义时是空操作（占位没有 source 可重载）。
+     */
+    public function qmlReload(string $id): void
+    {
+        $this->patch([['op' => 'call', 'id' => $id, 'method' => 'reload']]);
+    }
+
     // ── 取值 ──
 
     /** 读取控件当前值；控件不存在返回 null。 */

@@ -22,6 +22,7 @@ final class CliTest extends TestCase
         require_once __DIR__ . '/../bin/lib/discovery.php';
         require_once __DIR__ . '/../bin/lib/project.php';
         require_once __DIR__ . '/../bin/lib/build.php';
+        require_once __DIR__ . '/../bin/lib/new.php';
 
         $this->root = sys_get_temp_dir() . '/qt_cli_' . bin2hex(random_bytes(6));
         mkdir($this->root, 0777, true);
@@ -247,6 +248,49 @@ final class CliTest extends TestCase
         sort($referenced);
         sort($onDisk);
         self::assertSame($onDisk, $referenced, '脚手架模板的桥接源列表与 cpp-src/ 实际文件不一致');
+    }
+
+
+    // ── qtphp new 的目标目录解析（F54：绝对路径不再被拼进 cwd）──
+
+    public function testNewTargetFromPlainNameUsesCwd(): void
+    {
+        $t = newProjectTarget('demo', '/work');
+        $this->assertSame(['parent' => '/work', 'name' => 'demo'], $t);
+    }
+
+    public function testNewTargetFromAbsolutePathTakesBasename(): void
+    {
+        $t = newProjectTarget('/tmp/qtnew-qml/demo', '/work');
+        $this->assertSame(['parent' => '/tmp/qtnew-qml', 'name' => 'demo'], $t);
+    }
+
+    public function testNewTargetFromRelativeSubPath(): void
+    {
+        $t = newProjectTarget('foo/bar', '/work');
+        $this->assertSame(['parent' => '/work/foo', 'name' => 'bar'], $t);
+    }
+
+    public function testNewTargetTrimsTrailingSeparators(): void
+    {
+        $t = newProjectTarget('demo/', '/work');
+        $this->assertSame(['parent' => '/work', 'name' => 'demo'], $t);
+        $t2 = newProjectTarget('demo\\', '/work');
+        $this->assertSame(['parent' => '/work', 'name' => 'demo'], $t2);
+    }
+
+    public function testNewTargetWindowsDriveIsAbsolute(): void
+    {
+        $t = newProjectTarget('C:\\Users\\me\\demo', '/work');
+        $this->assertSame(['parent' => 'C:/Users/me', 'name' => 'demo'], $t);
+    }
+
+    public function testNewTargetRejectsDegenerateNames(): void
+    {
+        $this->assertNull(newProjectTarget('', '/work'));
+        $this->assertNull(newProjectTarget('.', '/work'));
+        $this->assertNull(newProjectTarget('..', '/work'));
+        $this->assertNull(newProjectTarget('/', '/work'));
     }
 
     private static function removeTree(string $dir): void

@@ -342,4 +342,45 @@ final class WidgetTreeTest extends TestCase
         $node = WidgetTree::webView('assets/help.html', ['id' => 'help']);
         $this->assertSame('assets/help.html', $node['url']);
     }
+
+    // ── qml ──
+
+    /** qml 构造器透传 source 与四个专用键，type='qml'。 */
+    public function testQmlWithSourceAndKeys(): void
+    {
+        $node = WidgetTree::qml('assets/clock.qml', [
+            'id' => 'clock',
+            'signals' => ['tick'],
+            'props' => ['timeText' => '00:00:00'],
+            'read' => ['timeText'],
+        ]);
+        $this->assertSame('qml', $node['type']);
+        $this->assertSame('assets/clock.qml', $node['source']);
+        $this->assertSame('clock', $node['id']);
+        $this->assertSame(['tick'], $node['signals']);
+        $this->assertSame(['timeText' => '00:00:00'], $node['props']);
+        $this->assertSame(['timeText'], $node['read']);
+    }
+
+    /** 空 source 不写键 —— 否则覆盖掉显式传入的 source。 */
+    public function testQmlWithoutSourceOmitsKey(): void
+    {
+        $node = WidgetTree::qml('', ['id' => 'c', 'source' => 'explicit.qml']);
+        $this->assertSame('explicit.qml', $node['source']);
+    }
+
+    /** 叶子控件：children 不在 props 里写，调用方传了也不进节点。 */
+    public function testQmlIsLeaf(): void
+    {
+        $node = WidgetTree::qml('a.qml', ['id' => 'c']);
+        $this->assertArrayNotHasKey('children', $node);
+    }
+
+    /** 通用键（id/size/style/grow/align/...）照常透传。 */
+    public function testQmlPassesCommonKeysThrough(): void
+    {
+        $node = WidgetTree::qml('a.qml', ['id' => 'c', 'grow' => 1, 'style' => 'background:#000']);
+        $this->assertSame(1, $node['grow']);
+        $this->assertSame('background:#000', $node['style']);
+    }
 }

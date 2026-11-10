@@ -27,6 +27,15 @@
 - **调试期诊断**：设置 `QT_DEBUG_STRICT=1` 后，未知控件类型、未知属性、未知
   patch 操作/id/method 会输出警告，不再静默忽略。
 - **示例**：`examples/taskboard`，一个包含表格、过滤、状态栏与几何持久化的完整应用。
+- **QML 支持**：新控件类型 `'qml'`（`WidgetTree::qml()`），经 `QQuickWidget` 把
+  QML 组件嵌进现有控件树——编译期开关 `QT_QML`（需额外引入
+  `QtQml` / `QtQuick` / `QtQuickWidgets` 三个模块）；未开启时退化成带诊断
+  文案的占位标签，不静默白屏。根对象的 `signals` 接进既有事件队列
+  （`type='qml'`、`value`=信号名、payload 是 `read` 属性快照），属性经
+  `props` 写入、`value()` 读回；`QtApp::qmlAvailable()` / `qmlStatus()` 提供
+  能力查询与显式错误通道。配套示例 `examples/qmlclock`。
+  信号经真实 moc 槽（`QPushButton::click()` 跳板）同步投递；mac 打包经藏依赖归因
+  验证自包含（QML 类型注册内嵌 framework，F55）。
 - **CI**：新增 `.github/workflows/ci.yml`（PHPUnit + `qtphp lint` + Windows 构建）。
 - **文档**：新增 `docs/src/advanced/performance.md` 与 `pitfalls.md`；
   `CHANGELOG.md`、`AGENTS.md`。
@@ -50,6 +59,9 @@
 
 ### Fixed
 
+- `qtphp new` 传绝对路径（如 `qtphp new /home/me/demo`）不再把整串路径当项目名：
+  目录按路径落位、yml/plist/bat 里的项目名取 basename（此前会拼出 `cwd//tmp/...`
+  且 `output: build//tmp/...` 链接期直接失败，F54）。
 - `spacer` 在 `QBoxLayout` 中 `size <= 1` 时按文档承诺生成弹性空白（`addStretch`）。
 - 滚动页内容面板在 `grow` 全为 0 时不再把多余高度平均分给子控件。
 

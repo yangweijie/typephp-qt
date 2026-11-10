@@ -78,6 +78,14 @@ A handler may declare 0 or 1 parameters (`array $event`) — the framework probe
 | `webViewGoBack(string $id): void` | Go back (no-op on QTextBrowser) |
 | `webViewGoForward(string $id): void` | Go forward (no-op on QTextBrowser) |
 
+### QML
+
+| Method | Description |
+|---|---|
+| `qmlAvailable(): bool` | Whether the build defined `QT_QML` (the QQuickWidget backend is compiled in) |
+| `qmlStatus(string $id): array` | The component's status and errors: `['status'=>…,'errors'=>…]`; `[]` when the control does not exist or is not a qml type |
+| `qmlReload(string $id): void` | Reload the component's `source` (no-op when `QT_QML` is not defined) |
+
 ### Verification and diagnostics
 
 | Method | Description |
@@ -129,6 +137,7 @@ WidgetTree::table(array $columns, array $rows, array $props = [])
 WidgetTree::tree(array $nodes, array $props = [])
 WidgetTree::webView(string $url = '', array $props = [])
 WidgetTree::html(string $html, array $props = [])
+WidgetTree::qml(string $source = '', array $props = [])
 ```
 
 ---
@@ -155,6 +164,7 @@ WidgetTree::html(string $html, array $props = [])
 | `close` | tabs (close button) | the index | `index` |
 | `loaded` / `navigating` | webview | the URL | `success` on `loaded` |
 | `title` | webview | the document title | — |
+| `qml` | qml (each name in the node's `signals` list) | the signal name | a snapshot of the node's `read` properties |
 
 The event object:
 
@@ -166,7 +176,7 @@ The event object:
 
 ## Bridge contract
 
-The 24 functions declared in `php-src/qt.stub.php` (whose agreement with the C++ implementation `qtphp lint` verifies):
+The 41 functions declared in `php-src/qt.stub.php` (whose agreement with the C++ implementation `qtphp lint` verifies):
 
 | Function | Description |
 |---|---|
@@ -194,6 +204,11 @@ The 24 functions declared in `php-src/qt.stub.php` (whose agreement with the C++
 | `qt_window_set_timer(mixed $window, string $id, int $intervalMs): void` | Timer |
 | `qt_clipboard_read(): string` | Read the clipboard |
 | `qt_clipboard_write(string $text): void` | Write the clipboard |
+| `qt_webview_backend(): string` | Which web view backend is compiled in |
+| `qt_webview_supports_js(): bool` | Whether that backend can run JavaScript |
+| `qt_qml_available(): bool` | Whether `QT_QML` was defined at build time |
+| `qt_qml_status(mixed $window, string $id): array` | A qml component's status and errors; `{}` when the control does not exist or is not a qml type |
+| `qt_http_request(array $spec): array` | Synchronous HTTP request (blocks the event loop until it returns or times out) |
 
 ::: tip These are internal interfaces
 Application code uses `QtApp`'s methods; do not call `qt_*` directly. This section is for people extending the bridge.

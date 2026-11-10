@@ -63,6 +63,7 @@ sources:
   - ../../cpp-src/qt_decor.cc
   - ../../cpp-src/qt_widgets.cc
   - ../../cpp-src/qt_webview.cc
+  - ../../cpp-src/qt_qml.cc
 ```
 
 这对从 Composer 自动加载过来的人很意外。`qtphp new` 生成的 `sources:` 是正确的。

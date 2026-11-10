@@ -1,0 +1,72 @@
+name: qmlclock
+mode: bin
+output: build/qmlclock
+
+# 桥接 C++ 源码直接参与本应用编译（源码内联方案，与 examples/hello 同一份 yml 结构）。
+#
+# 三份配置的分工（tpc 的 include 语义：map 递归合并、**list 整体替换**）：
+#   - 本文件 = 公共段 + Windows 默认段。
+#   - project.linux.yml / project.macos.yml = include 本文件，只覆盖平台相关的
+#     link-libs / link-paths / cxx-flags / ld-flags。
+#   - QtQml/QtQuick/QtQuickWidgets 的头目录与链接同样走 cxx-flags / ld-flags（平台段），
+#     不能写进 include-paths —— 平台入口不覆盖 include-paths（list 是整体替换）。
+#
+# QML 支持：yml 的 cxx-flags 里 -DQT_QML 打开 cpp-src/qt_qml.cc 的 QQuickWidget 后端；
+# 不定义时该文件退化成可诊断占位（hello 保持 QML-free 的正是这条路径）。
+sources:
+  - src/main.php
+  - ../../src/QtApp.php
+  - ../../src/WidgetTree.php
+  - ../../php-src/qt.stub.php
+  - ../../cpp-src/qt_loop.cc
+  - ../../cpp-src/qt_render.cc
+  - ../../cpp-src/qt_decor.cc
+  - ../../cpp-src/qt_widgets.cc
+  - ../../cpp-src/qt_webview.cc
+  - ../../cpp-src/qt_qml.cc
+  # Windows nano：php-nano 缺 crc32 SIMD / Fiber CE / MSVC inline seed256 的目标文件
+  - path: ../../compat/msvc/php_nano_win_stubs.c
+    if: PHP_OS_FAMILY == "Windows"
+  # macOS 的 WKWebView 后端是 ObjC++；其他平台不能看到它，否则会被当成
+  # 普通 C++ 交给 cl/g++ 去编，直接炸在 #import 上。
+  - path: ../../cpp-src/qt_webview_wk.mm
+    if: PHP_OS_FAMILY == "Darwin"
+
+build-dir: build
+
+# cxx-std 必须是 c++17（nano 严格校验）；optimize: 2 即命令行 -O2。
+cxx-std: c++17
+optimize: 2
+
+# 本示例只开 QML，不开 WebView2（示例里不用 webview）：Windows 段的 include/link
+# 相应少一项。Qt 网络模块保留（qt_http_request 用）。
+include-paths:
+  - ../../cpp-src
+  - ../../php-src
+  - D:/tools/Qt/6.9.3/msvc2022_64/include
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtCore
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtGui
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtWidgets
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtNetwork
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtQml
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtQuick
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtQuickWidgets
+
+link-paths:
+  - D:/tools/Qt/6.9.3/msvc2022_64/lib
+
+link-libs:
+  - Qt6Core.lib
+  - Qt6Gui.lib
+  - Qt6Widgets.lib
+  - Qt6Network.lib
+  - Qt6Qml.lib
+  - Qt6Quick.lib
+  - Qt6QuickWidgets.lib
+
+cxx-flags:
+  - /Zc:__cplusplus
+  - /permissive-
+  - /EHsc
+  # 打开 qt_qml.cc 的 QQuickWidget 后端（未定义时是可诊断占位，见该文件头注释）。
+  - /DQT_QML

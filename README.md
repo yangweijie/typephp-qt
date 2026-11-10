@@ -22,9 +22,12 @@
 | macOS (Apple Silicon) | ✅ | ✅ `dist/<Name>.app`（macdeployqt + ad-hoc 签名） | `brew install qtbase libiconv` |
 | Linux (Debian/Ubuntu) | ✅ | ✅ `dist/<name>/`（ldd 依赖闭包 + patchelf 改 DT_RPATH + `qt.conf`） | 见下 |
 
-**只用到 Qt 的 `Core` / `Gui` / `Widgets` / `Network` 四个模块**（没有 QML/Quick、Sql；
+**只用到 Qt 的 `Core` / `Gui` / `Widgets` / `Network` 四个模块**（没有 Sql；
 `Network` 给 `qt_http_request()` 用），
-所以最小安装就够。各系统的安装方式、其他发行版的包名、非默认 Qt 版本怎么指定、链接报错怎么查，
+所以最小安装就够。QML 是**编译期例外**：只有 `QT_QML` 应用额外引入
+`QtQml` / `QtQuick` / `QtQuickWidgets`（`WidgetTree::qml()`，见
+[docs 的 QML 页](docs/src/widgets/qml.md)），未开启的应用零影响、控件退化成可诊断占位。
+各系统的安装方式、其他发行版的包名、非默认 Qt 版本怎么指定、链接报错怎么查，
 见 **[Qt 的安装与编译](https://yangweijie.github.io/typephp-qt/zh/guide/qt-setup.html)**。
 `qtphp` 自动探测的是 Qt **6.9.3** 的常见路径；其他版本用 `QT_ROOT`（CI 通用）或 `QT_DIR` 指定，两者都优先于自动探测。
 
@@ -168,7 +171,8 @@ typephp-qt/
 │   ├── qt_render.cc       # 渲染遍历与差异更新（render/patch）
 │   ├── qt_decor.cc        # 装饰（菜单/托盘/状态栏）/对话框/几何/a11y
 │   ├── qt_widgets.cc      # 控件工厂/属性应用/取值
-│   └── qt_webview.cc      # webview 统一入口（WebView2 / WKWebView / QTextBrowser）
+│   ├── qt_webview.cc      # webview 统一入口（WebView2 / WKWebView / QTextBrowser）
+│   └── qt_qml.cc          # qml 统一入口（QQuickWidget，QT_QML）/ 降级占位
 ├── php-src/qt.stub.php    # 桥接契约（PHP 签名，函数体必须为空）
 ├── src/                   # PHP 框架层
 │   ├── QtApp.php          # 应用框架（事件循环/错误兜底）

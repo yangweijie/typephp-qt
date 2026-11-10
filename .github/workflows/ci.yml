@@ -110,23 +110,25 @@ jobs:
         with:
           version: '6.9.3'
           arch: win64_msvc2022_64
-          # 不指定 modules：QtNetwork 属于 qtbase，默认就装；
-          # 只有 qtwebengine/qtnetworkauth 这类才需要显式列出
+          # qtdeclarative 提供 QtQml/QtQuick/QtQuickWidgets —— qmlclock 示例的
+          # QT_QML 后端要链它们；QtNetwork 属于 qtbase，默认就装
+          modules: qtdeclarative
           cache: true
 
       - name: 把示例里的 Qt 路径指向 runner 的安装位置
         shell: pwsh
         run: |
-          # examples/hello/project.yml 里的 Qt 路径是写死的（本地可直接 tpc 编译），
+          # examples/{hello,qmlclock}/project.yml 里的 Qt 路径是写死的（本地可直接 tpc 编译），
           # CI 上必须替换成 install-qt-action 装好的那份，否则 cl.exe 找不到 QWidget 头文件
-          $yml = 'examples/hello/project.yml'
-          $content = Get-Content -LiteralPath $yml -Raw
           $qtRoot = $env:QT_ROOT_DIR -replace '\\', '/'
           if (-not $qtRoot) { throw 'QT_ROOT_DIR 未设置，install-qt-action 没有生效' }
-          $content = $content -replace [regex]::Escape('D:/tools/Qt/6.9.3/msvc2022_64'), $qtRoot
-          Set-Content -LiteralPath $yml -Value $content -NoNewline
+          foreach ($yml in @('examples/hello/project.yml', 'examples/qmlclock/project.yml')) {
+            $content = Get-Content -LiteralPath $yml -Raw
+            $content = $content -replace [regex]::Escape('D:/tools/Qt/6.9.3/msvc2022_64'), $qtRoot
+            Set-Content -LiteralPath $yml -Value $content -NoNewline
+          }
           Write-Host "Qt root: $qtRoot"
-          Select-String -LiteralPath $yml -Pattern 'Qt6Core.lib|/include$' | Select-Object -First 6
+          Select-String -LiteralPath 'examples/qmlclock/project.yml' -Pattern 'Qt6Qml.lib|/include$' | Select-Object -First 6
 
       - name: 安装依赖
         run: composer install --prefer-dist --no-progress --no-interaction
@@ -154,3 +156,14 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: examples\hello\build\hello.exe --difftest
+
+      - name: 编译 QML 示例（--nano）
+        # qmlclock 的 QT_QML 后端链 QtQml/QtQuick/QtQuickWidgets（上面已装
+        # qtdeclarative modules）；nano 与 hello 同理由
+        run: php bin/qtphp build examples/qmlclock --nano
+
+      - name: QML 示例无头自测
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+        run: examples\qmlclock\build\qmlclock.exe --selftest

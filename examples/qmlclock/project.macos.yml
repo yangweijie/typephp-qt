@@ -1,0 +1,78 @@
+# macOS 入口。只覆盖平台相关的链接/编译参数，别的全部继承 project.yml：
+#   - 不写 sources：qt_webview_wk.mm 由 project.yml 里
+#     `if: PHP_OS_FAMILY == "Darwin"` 的条件条目带进来
+#   - 不写 include-paths：tpc 合并时 list 是整体替换。这里一旦写 include-paths，
+#     project.yml 的 ../../cpp-src 和 ../../php-src 就没了。Qt 头文件目录改用
+#     cxx-flags 的 -I 传，include-paths 保持继承。
+#
+# Homebrew 的 qtbase / qtdeclarative 都是 framework 布局：头文件在
+#   <prefix>/lib/Qt<Module>.framework/Headers/
+# 代码里写的是裸名 `#include <QQuickWidget>`，所以要 -I 指向 Headers 目录；
+# 同时 -F 指向 framework 根，供 `#include <QtWidgets/QApplication>` 这种限定名用。
+#
+# 一条 QML 专属的坑（F51 §51.7 评审探针首编即 fatal）：
+#   QtQmlIntegration/qqmlintegration.h **只在 qtdeclarative 的 umbrella include**
+#   （/opt/homebrew/opt/qtdeclarative/include/QtQmlIntegration/），不在任何
+#   framework 的 Headers 里。所以 framework 的 -F/-I 之外必须再补
+#   -I/opt/homebrew/opt/qtdeclarative/include。
+#
+# 宏用 yml 的 `defines:`（tpc 把它并进 user_defines 传给编译器，
+# 对 C 与 C++ 单元都生效）。cxx-flags 里塞 /D 在 mac clang 下是 Windows 语法，
+# 对 .cc 与 .mm 两条编译线都不可靠（实测 .mm 编过了但宏没进 C++ 单元），
+# 所以 -D 一律不写进 cxx-flags。
+#
+# 前缀按 Apple Silicon 写死（/opt/homebrew）；Intel Mac 上是 /usr/local。
+include: project.yml
+
+link-libs: []
+link-paths: []
+
+# 编译期宏：QT_QML 打开 qt_qml.cc 的 QQuickWidget 后端；
+# QT_WEBVIEW_WK 打开 WKWebView 后端（objc++ 实现，保留与 hello 一致）。
+defines:
+  - QT_CORE_LIB
+  - QT_GUI_LIB
+  - QT_WIDGETS_LIB
+  - QT_NETWORK_LIB
+  - QT_WEBVIEW_WK
+  - QT_QML
+
+cxx-flags:
+  - -F/opt/homebrew/opt/qtbase/lib
+  - -I/opt/homebrew/opt/qtbase/lib/QtCore.framework/Headers
+  - -I/opt/homebrew/opt/qtbase/lib/QtGui.framework/Headers
+  - -I/opt/homebrew/opt/qtbase/lib/QtWidgets.framework/Headers
+  - -I/opt/homebrew/opt/qtbase/lib/QtNetwork.framework/Headers
+  # QML 三件套（brew 公式是 qtdeclarative）
+  - -F/opt/homebrew/opt/qtdeclarative/lib
+  - -I/opt/homebrew/opt/qtdeclarative/lib/QtQml.framework/Headers
+  - -I/opt/homebrew/opt/qtdeclarative/lib/QtQuick.framework/Headers
+  - -I/opt/homebrew/opt/qtdeclarative/lib/QtQuickWidgets.framework/Headers
+  # umbrella include：QtQmlIntegration/qqmlintegration.h 只在 qtdeclarative/include 下
+  - -I/opt/homebrew/opt/qtdeclarative/include
+  - -fobjc-arc
+
+ld-flags:
+  - -F/opt/homebrew/opt/qtbase/lib
+  - -F/opt/homebrew/opt/qtdeclarative/lib
+  - -Wl,-framework,QtWidgets
+  - -Wl,-framework,QtGui
+  - -Wl,-framework,QtCore
+  - -Wl,-framework,QtNetwork
+  # QML 三件套
+  - -Wl,-framework,QtQml
+  - -Wl,-framework,QtQuick
+  - -Wl,-framework,QtQuickWidgets
+  - -Wl,-framework,Foundation
+  - -Wl,-framework,AppKit
+  - -Wl,-framework,WebKit
+  # Qt 依赖 libiconv，Homebrew 的 keg-only，得显式给路径 + rpath
+  - -L/opt/homebrew/opt/libiconv/lib
+  - -liconv
+  - -Wl,-rpath,/opt/homebrew/opt/libiconv/lib
+  - -Wl,-rpath,/opt/homebrew/opt/qtbase/lib
+  - -Wl,-rpath,/opt/homebrew/opt/qtdeclarative/lib
+
+php-builder:
+  extensions: []
+  zts: false

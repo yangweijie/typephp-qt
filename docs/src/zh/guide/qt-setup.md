@@ -14,8 +14,16 @@
 | `QtWidgets` | 全部控件：`QMainWindow`、`QPushButton`、`QTableWidget` … |
 | `QtNetwork` | `qt_http_request()` —— `QNetworkAccessManager`（含 HTTPS） |
 
-没有 QML/Quick，没有 Sql —— 这是对着 `cpp-src/` 里每一个 `#include` 核过的。
-所以**装一个最小的 Qt Widgets 就够了**，下面给的就是最小集。
+没有 QML/Quick，没有 Sql —— 这是对着 `cpp-src/` 里每一个 `#include` 核过的 ——
+**一个显式例外**：定义 `QT_QML` 编译的应用（即用了 [`qml` 控件](/zh/widgets/qml.md)）
+要额外引入 `QtQml`、`QtQuick`、`QtQuickWidgets` 三个模块。和 webview 背后
+vendor 的 WebView2 SDK 一样，这是**按应用的编译期附加项**：不开开关的应用
+依赖就是上面四个模块，**最小 Qt Widgets 安装足够覆盖所有非 QML 应用**。
+
+::: tip 启用 QML 的应用要多装三个模块
+`WidgetTree::qml()` 是编译期开关（各平台的 `/DQT_QML` + 三个头目录/库名，
+完整写法见 [QML](/zh/widgets/qml.md#启用) 页）。你的应用没用它的话可以无视这条。
+:::
 
 ::: tip webview 控件不需要额外的 Qt 模块
 `WidgetTree::webView()` 在 **Windows 上用 WebView2**（微软 Edge 内核，不是 Qt 模块 ——

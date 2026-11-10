@@ -4,15 +4,45 @@ declare(strict_types=1);
 
 // 由 bin/qtphp 拆分而来（函数体逐字未改）。
 
-function cmdNew(string $name): int
+/**
+ * 把 `qtphp new <参数>` 拆成「父目录 + 纯项目名」。
+ *
+ * 项目名会一路流进 yml 的 name:/output: 与 plist 的 CFBundleExecutable，所以
+ * 必须是**纯名字**：绝对路径（/abs/name、C:\\...）按路径拆出 basename，相对
+ * 参数视为 cwd 下的名字。F54：早先无条件 `getcwd() . '/' . $name`，传绝对
+ * 路径会拼出 `cwd//tmp/...`，且 output: 变成 `build//tmp/...` 链接期直接失败。
+ * 返回 null = 参数退化（空、'.'、'..'、纯盘符），调用方报错退出。
+ */
+function newProjectTarget(string $name, string $cwd): ?array
 {
-    $targetDir = getcwd() . DIRECTORY_SEPARATOR . $name;
+    $norm = str_replace('\\', '/', rtrim($name, "/\\ "));
+    $projectName = basename($norm);
+    if ($projectName === '' || $projectName === '.' || $projectName === '..') {
+        return null;
+    }
+    $parent = dirname($norm);
+    // 相对路径并到 cwd 下（Windows 盘符 `C:/` 开头的算绝对，不并）
+    if (!str_starts_with($parent, '/') && !preg_match('#^[A-Za-z]:/#', $parent)) {
+        $parent = ($parent === '.' ? $cwd : $cwd . '/' . $parent);
+    }
+    return ['parent' => $parent, 'name' => $projectName];
+}
+
+function cmdNew(string $nameArg): int
+{
+    $target = newProjectTarget($nameArg, getcwd());
+    if ($target === null) {
+        error("无效的项目名: $nameArg（需要非空、非 '.'/'..' 的名字，或以 / 或盘符开头的完整路径）");
+        return 1;
+    }
+    $name = $target['name'];  // 纯项目名：下游 yml/plist/bat 模板插值的都是它（F54）
+    $targetDir = $target['parent'] . DIRECTORY_SEPARATOR . $name;
     if (is_dir($targetDir)) {
         error("目录已存在: $targetDir");
         return 1;
     }
 
-    info("创建项目: $name");
+    info("创建项目: $targetDir");
 
     // 创建目录结构
     mkdir($targetDir, 0755, true);
@@ -42,6 +72,7 @@ sources:
   - {$pkgDir}/cpp-src/qt_decor.cc
   - {$pkgDir}/cpp-src/qt_widgets.cc
   - {$pkgDir}/cpp-src/qt_webview.cc
+  - {$pkgDir}/cpp-src/qt_qml.cc
   # nano 在 Windows 上缺几个目标文件（crc32 SIMD / Fiber CE / MSVC seed256）
   - path: {$pkgDir}/compat/msvc/php_nano_win_stubs.c
     if: PHP_OS_FAMILY == "Windows"
@@ -525,8 +556,8 @@ MD;
 
     success("项目已创建: $targetDir");
     info(PHP_OS_FAMILY === 'Windows'
-        ? "下一步: cd $name && build.bat"
-        : "下一步: cd $name && qtphp build . && qtphp run . --selftest");
+        ? "下一步: cd /d $targetDir && build.bat"
+        : "下一步: cd $targetDir && qtphp build . && qtphp run . --selftest");
 
     return 0;
 }

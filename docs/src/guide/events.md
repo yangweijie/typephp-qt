@@ -47,6 +47,7 @@ The framework already handles this for you (it probes arity at registration), bu
 | `cell` | table (cell edited, needs `editable`) | new text | `row`, `col` |
 | `expand` / `collapse` | tree | node id | `expanded` |
 | `close` | tabs (close button, needs `closable`) | the index | `index` |
+| `qml` | qml (each name in the node's `signals` list) | the signal name | a snapshot of the node's `read` properties |
 
 An event is an associative array:
 

@@ -21,6 +21,7 @@ WidgetTree::button('OK', ['id' => 'ok']);
 | [Data](/widgets/data.md) | `list` `table` `tree` |
 | [Display](/widgets/display.md) | `label` `button` `progress` `image` `link` |
 | [WebView](/widgets/webview.md) | `webview` |
+| [QML](/widgets/qml.md) | `qml` |
 
 ## Cheat sheet
 

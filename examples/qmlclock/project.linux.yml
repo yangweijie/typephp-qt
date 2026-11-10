@@ -1,0 +1,70 @@
+# Linux 入口（标注：未真机实测，按 examples/hello/project.linux.yml 同构写法）。
+# 只覆盖平台相关的链接/编译参数，别的全部继承 project.yml：
+#   - 不写 sources：由 project.yml 的条件条目决定（.mm 只在 Darwin 进编译）
+#   - 不写 include-paths：tpc 合并时 list 是整体替换，一旦在这里写了
+#     include-paths，project.yml 里的 ../../cpp-src 和 ../../php-src 就全丢了。
+#     所以 Qt 头文件目录改用 cxx-flags 里的 -I 传，include-paths 保持继承。
+#
+# QML 三件套（brew 公式对应 distro 的 qt6-declarative-dev / qtdeclarative 包）：
+# Qt6Qml / Qt6Quick / Qt6QuickWidgets，头目录与 QtWidgets 同布局。
+include: project.yml
+
+# Windows 段的 .lib 在 Linux 上没有意义，清空。
+link-libs: []
+link-paths: []
+
+cxx-flags:
+  - -fPIC
+  - -I/usr/include/qt6
+  - -I/usr/include/qt6/QtCore
+  - -I/usr/include/qt6/QtGui
+  - -I/usr/include/qt6/QtWidgets
+  - -I/usr/include/qt6/QtNetwork
+  - -I/usr/include/qt6/QtQml
+  - -I/usr/include/qt6/QtQuick
+  - -I/usr/include/qt6/QtQuickWidgets
+  - -I/usr/include/x86_64-linux-gnu/qt6
+  - -I/usr/include/x86_64-linux-gnu/qt6/QtCore
+  - -I/usr/include/x86_64-linux-gnu/qt6/QtGui
+  - -I/usr/include/x86_64-linux-gnu/qt6/QtWidgets
+  - -I/usr/include/x86_64-linux-gnu/qt6/QtNetwork
+  - -I/usr/include/x86_64-linux-gnu/qt6/QtQml
+  - -I/usr/include/x86_64-linux-gnu/qt6/QtQuick
+  - -I/usr/include/x86_64-linux-gnu/qt6/QtQuickWidgets
+  - -I/usr/include/aarch64-linux-gnu/qt6
+  - -I/usr/include/aarch64-linux-gnu/qt6/QtCore
+  - -I/usr/include/aarch64-linux-gnu/qt6/QtGui
+  - -I/usr/include/aarch64-linux-gnu/qt6/QtWidgets
+  - -I/usr/include/aarch64-linux-gnu/qt6/QtNetwork
+  - -I/usr/include/aarch64-linux-gnu/qt6/QtQml
+  - -I/usr/include/aarch64-linux-gnu/qt6/QtQuick
+  - -I/usr/include/aarch64-linux-gnu/qt6/QtQuickWidgets
+  # qglobal.h 会拉 mkspecs 下的 qplatformdefs.h
+  - -I/usr/lib/x86_64-linux-gnu/qt6/mkspecs/linux-g++
+  - -I/usr/lib/aarch64-linux-gnu/qt6/mkspecs/linux-g++
+  - -DQT_CORE_LIB
+  - -DQT_GUI_LIB
+  - -DQT_WIDGETS_LIB
+  - -DQT_NETWORK_LIB
+  # 打开 qt_qml.cc 的 QQuickWidget 后端
+  - -DQT_QML
+
+# 链接也写在这里而不是 link-paths/link-libs：Qt6 的 .so 只有带版本号的
+# libQt6Core.so.6，没有开发用的 libQt6Core.so 时 -l 会失败，ld-flags 能精确控制。
+ld-flags:
+  - -L/usr/lib/x86_64-linux-gnu
+  - -L/usr/lib/aarch64-linux-gnu
+  - -lQt6Widgets
+  - -lQt6Gui
+  - -lQt6Core
+  - -lQt6Network
+  # QML 三件套
+  - -lQt6Qml
+  - -lQt6Quick
+  - -lQt6QuickWidgets
+
+# 宿主 PHP 往往只装了 cli（没有 embed 头文件），tpc 会自己编一份私有 embed 运行时，
+# 缓存在 ~/.typephp/php-builder。首次构建会慢很多，之后复用。
+php-builder:
+  extensions: []
+  zts: false

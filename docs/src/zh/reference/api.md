@@ -78,6 +78,14 @@
 | `webViewGoBack(string $id): void` | 后退（QTextBrowser 上无操作） |
 | `webViewGoForward(string $id): void` | 前进（QTextBrowser 上无操作） |
 
+### QML
+
+| 方法 | 说明 |
+|---|---|
+| `qmlAvailable(): bool` | 构建时是否定义了 `QT_QML`（QQuickWidget 后端是否编进来了） |
+| `qmlStatus(string $id): array` | 组件状态与错误：`['status'=>…,'errors'=>…]`；控件不存在或不是 qml 类型时是 `[]` |
+| `qmlReload(string $id): void` | 重新加载组件的 `source`（未定义 `QT_QML` 时是空操作） |
+
 ### 验收与诊断
 
 | 方法 | 说明 |
@@ -129,6 +137,7 @@ WidgetTree::table(array $columns, array $rows, array $props = [])
 WidgetTree::tree(array $nodes, array $props = [])
 WidgetTree::webView(string $url = '', array $props = [])
 WidgetTree::html(string $html, array $props = [])
+WidgetTree::qml(string $source = '', array $props = [])
 ```
 
 ---
@@ -155,6 +164,7 @@ WidgetTree::html(string $html, array $props = [])
 | `close` | tabs（关闭按钮） | 索引 | `index` |
 | `loaded` / `navigating` | webview | URL | `loaded` 带 `success` |
 | `title` | webview | 文档标题 | — |
+| `qml` | qml（节点 `signals` 清单里的每个名字） | 信号名 | 节点 `read` 属性的快照 |
 
 事件对象：
 
@@ -166,7 +176,7 @@ WidgetTree::html(string $html, array $props = [])
 
 ## 桥接契约
 
-`php-src/qt.stub.php` 声明的 24 个函数（`qtphp lint` 校验其与 C++ 实现一致）：
+`php-src/qt.stub.php` 声明的 41 个函数（`qtphp lint` 校验其与 C++ 实现一致）：
 
 | 函数 | 说明 |
 |---|---|
@@ -194,6 +204,11 @@ WidgetTree::html(string $html, array $props = [])
 | `qt_window_set_timer(mixed $window, string $id, int $intervalMs): void` | 定时器 |
 | `qt_clipboard_read(): string` | 读剪贴板 |
 | `qt_clipboard_write(string $text): void` | 写剪贴板 |
+| `qt_webview_backend(): string` | 编译进来的网页视图后端名 |
+| `qt_webview_supports_js(): bool` | 该后端能否运行 JavaScript |
+| `qt_qml_available(): bool` | 构建时是否定义了 `QT_QML` |
+| `qt_qml_status(mixed $window, string $id): array` | 一个 qml 组件的状态与错误；控件不存在或不是 qml 类型时返回 `{}` |
+| `qt_http_request(array $spec): array` | 同步 HTTP 请求（阻塞事件循环直到返回或超时） |
 
 ::: tip 这些是内部接口
 应用代码用 `QtApp` 的方法，不要直接调 `qt_*`。这一节是给扩展桥接的人看的。

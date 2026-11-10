@@ -15,8 +15,17 @@ The bridge uses **four Qt modules and nothing else**:
 | `QtWidgets` | every control: `QMainWindow`, `QPushButton`, `QTableWidget`, … |
 | `QtNetwork` | `qt_http_request()` — `QNetworkAccessManager` (HTTPS included) |
 
-No QML/Quick, no Sql — verified against every `#include` in `cpp-src/`.
-So a **minimal Qt Widgets install is enough**, which is what the commands below give you.
+No QML/Quick, no Sql — verified against every `#include` in `cpp-src/` — **with one opt-in
+exception**: an app that builds with `QT_QML` (the [`qml` widget](/widgets/qml.md)) adds
+`QtQml`, `QtQuick` and `QtQuickWidgets` on top. Those are compile-time extras, like the
+WebView2 SDK behind the web view: without the switch the four modules above are the whole
+dependency, and a **minimal Qt Widgets install is enough** for every non-QML app.
+
+::: tip QML-enabled apps need three more modules
+`WidgetTree::qml()` is a compile-time switch (`/DQT_QML` + the three headers/libraries above,
+per platform — the exact flags are in the [QML](/widgets/qml.md#enabling-it) page). If your app
+does not use it, ignore this tip.
+:::
 
 ::: tip The webview widget does not need extra Qt modules
 `WidgetTree::webView()` uses **WebView2 on Windows** (Microsoft's Edge engine, not a Qt module —

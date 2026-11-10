@@ -173,6 +173,7 @@ reports work fine on all three backends.
 
 ## Related
 
+- [QML](/widgets/qml.md) — the sibling embed control
 - [Widget Catalog](/widgets/) — the other controls
 - [Properties](/guide/properties.md) — common properties (`grow`, `size`, …)
 - [Packaging](/reference/packaging.md) — what ships next to the binary
