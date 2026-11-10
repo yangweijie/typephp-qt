@@ -328,10 +328,11 @@ function cmdBuild(string $path, array $flags = []): int
         // 编译成功后自动部署运行时 DLL，否则双击 exe 会报"找不到 DLL"。
         // nano 产物不链 PHP/PHPX DLL —— 这一点由 tpc 自己的审计保证
         // （NativeDependencyAuditor::assertWindowsImports() 见到 php*.dll 直接把构建判失败），
-        // 所以这里不用再搬。
-        if (!$nano) {
-            deployRuntimeDlls($path);
-        }
+        // 所以只跳过那一段；Qt DLL / MSVC 运行时 / assets/ 照旧要部署 ——
+        // nano 分支曾什么都不拷，CI 上 qmlclock 起来后 assets/clock.qml 404，
+        // selftest 八连 FAIL（F57）。CI 能侥幸跑起来是因为 install-qt-action
+        // 把 Qt 的 bin 放进了 PATH，掩盖了「build 目录没有 Qt DLL」这一层。
+        deployRuntimeDlls($path, !$nano);
     } else {
         // macOS/Linux 的 PHP 运行时是静态链接/私有运行时，没有 DLL 要搬，
         // 但 assets/ 同样要拷 —— 否则开发期相对路径失效、打包后才正常。
@@ -356,11 +357,17 @@ function msvcEnvironmentReady(): bool
 /**
  * 把运行时依赖 DLL 复制到可执行文件旁。
  *
- * 覆盖三类：PHP/PHPX 运行时、Qt 运行库、MSVC 运行时。
+ * 覆盖三类：PHP/PHPX 运行时、Qt 运行库、MSVC 运行时；末尾顺带拷 assets/。
  * Qt 的平台插件（platforms/qwindows.dll）不在这一步，由 package 阶段的
  * windeployqt 负责；开发期直接跑 exe 需要它，所以这里也一并部署。
+ *
+ * $withPhpRuntime = false（nano 产物）：只跳过 PHP/PHPX 运行时段 —— nano 把
+ * php-nano 运行时内联进 exe，导入表里没有 php*.dll（tpc 审计保证）。Qt DLL、
+ * MSVC 运行时（nano 实测仍动态导入 msvcp140/vcruntime140，dumpbin -DEPENDENTS）
+ * 与 assets/ 照旧要部署：曾因 nano 分支什么都不拷，CI 上 qmlclock 起来后
+ * build/assets/clock.qml 404，selftest 八连 FAIL（F57）。
  */
-function deployRuntimeDlls(string $projectPath): void
+function deployRuntimeDlls(string $projectPath, bool $withPhpRuntime = true): void
 {
     $buildDir = rtrim($projectPath, '/\\') . '/build';
     if (!is_dir($buildDir)) {
@@ -381,7 +388,15 @@ function deployRuntimeDlls(string $projectPath): void
         'gmp-10.dll',
         'mpfr-6.dll',
     ];
-    if ($runtimeDir === null) {
+    if (!$withPhpRuntime) {
+        // nano：不搬也不告警 —— exe 根本不导入它们，拷了只会被 package 打进产物。
+        // 反向同理：上一轮 embed 构建留下的 PHP DLL 也要清（同下面 Network/QML 的理由）。
+        foreach ($runtimeDlls as $dll) {
+            if (file_exists($buildDir . '/' . $dll)) {
+                @unlink($buildDir . '/' . $dll);
+            }
+        }
+    } elseif ($runtimeDir === null) {
         warning('未找到 PHP 运行时库目录，跳过 phpx/php8ts 等 DLL 的部署');
         info('请安装 tpc 原生发行包，或设置 TPC_RUNTIME_DIR 指向含 phpx.dll 的目录');
     } else {

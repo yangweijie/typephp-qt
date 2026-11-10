@@ -69,6 +69,26 @@ msvc2022_64 + tpc 0.9.5 工具链齐全，doctor 全 OK）。**不 commit（用�
   Qt6QmlWorkerScript，但 QmlMeta 导入它；漏掉的传递依赖报错连名字都不给（`?`）。
   「逐个补、每次跑一遍」是最笨但最可靠的实测法，dumpbin 只是把它一次算完。
 
+### 追记（同日，第一笔 push 后的 CI 复盘 → F57）
+
+- **第一笔 push（a2da1d8 + d7bf14f，run 42919225213）**：aqt 修复生效——安装 Qt ✓、
+  qmlclock `--nano` 编译链接 ✓（顺带拿到「默认安装含 qtdeclarative」的链接级证据）；
+  hello --selftest / --difftest / PHP 单测与契约校验全 ✓。**但 QML selftest 八连 FAIL**：
+  `build/assets/clock.qml: No such file or directory`（qmlStatus().errors 5 条同文）。
+- 根因：Windows nano 分支 `if (!$nano) deployRuntimeDlls()` **什么都不部署**（assets
+  也不拷）；embed 的 assets 部署藏在 deployRuntimeDlls 尾部被整段跳过。CI 能跑全靠
+  install-qt-action 把 Qt bin 放进 PATH 的侥幸（F57）。hello 判据不读 assets，所以
+  从没暴露。
+- 修复：`deployRuntimeDlls($path, $withPhpRuntime)`——nano 只跳过 PHP 运行时段并
+  清 embed 残留（实测 phpx/php8ts/gmp/mpfr/mpdec 残留清零），Qt DLL / QML 闭包 /
+  平台插件 / VC redist / WebView2Loader / assets 照旧。nano 导入表实证依据：
+  无 php\*.dll、有 MSVCP140/VCRUNTIME140×2、有 Qt6Qml.dll（白名单信号对 nano 成立）。
+- 本机 nano 验收（最小 PATH = System32+Windows，不带 Qt）：qmlclock 部署 19 文件 +
+  assets 到位 + selftest passed rc=0（software 后端同）；hello 部署 7 文件 + 种入的
+  Qt6Qml.dll 被清 + selftest/difftest 双 passed；phpunit 206/334、lint 契约一致。
+- **教训 48**：embed/nano 两条产线的「部署面」必须一起验收；产物级判据站在「自足」
+  上——最小 PATH 跑 selftest 才是部署面的真验收（细节见 F57）。
+
 ## Session 36 — 2026-11-10（QML 支持：'qml' 控件类型经 QQuickWidget 嵌入现有控件树）
 
 ### 任务来源

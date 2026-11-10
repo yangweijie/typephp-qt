@@ -3140,3 +3140,32 @@ metaobject，成品 receiver 是手工静态表——机制差异已坐实，版
 - 顺带核验：qt_qml.cc 的占位诊断字符串只提 `QT_QML`（开关名）不提 `Qt6Qml.dll`，
   exe 字节 substring 探测没有来自它的假阳性；'Qt6Qml.dll' 也不是
   'Qt6QmlModels.dll' / 'Qt6Qmld.dll' 的子串。
+
+## F57. Windows nano 分支零部署：CI 上 qmlclock 的 assets 404（Session 37 追记）
+
+- 现象（CI run 42919225213）：`modules: qtdeclarative` 修复生效（安装 Qt ✓、
+  qmlclock `--nano` 编译链接 ✓ —— 顺带拿到「默认安装含 qtdeclarative」的**链接级**
+  证据），但 QML selftest 八连 FAIL，`qmlStatus().errors` 全是
+  `file:///.../examples/qmlclock/build/assets/clock.qml: No such file or directory`。
+- 根因：`cmdBuild` Windows 分支原来是 `if (!$nano) deployRuntimeDlls($path)` ——
+  nano 模式**什么都不部署**，连 assets/ 都不拷；而 embed 模式的 assets 部署藏在
+  `deployRuntimeDlls()` 尾部的 `deployAssets()` 里，nano 整段跳过时被一起丢掉。
+  hello 的 CI selftest 从没暴露，是因为它的判据不读 assets —— 又一条「全绿对
+  新分支零鉴别力」的实例（教训 27/44 同族）。
+- **CI 侥幸链**：exe 能在 CI 起来，纯靠 install-qt-action 把 Qt 的 bin 放进 PATH
+  （Qt DLL 从 PATH 加载）——「能跑」掩盖了「build 目录没有 Qt DLL」。本机 embed
+  验证全绿同理：embed 走的是完整部署路径，两条产线的分歧根本没被测过。
+- nano 产物导入表实测（dumpbin -DEPENDENTS）：**无任何 php\*.dll**（php-nano 运行时
+  内联成立）但有 MSVCP140 / VCRUNTIME140 / VCRUNTIME140_1（动态 CRT）和全套 Qt6
+  DLL（含 Qt6Qml.dll —— exe 导入探测对 nano 同样成立）。
+- 修法：`deployRuntimeDlls($path, $withPhpRuntime)` —— nano 只跳过 PHP 运行时段，
+  且反向清理上一轮 embed 残留的 phpx/php8ts/gmp/mpfr/mpdec（embed→nano 切换实测
+  残留清零）；Qt DLL / QML 闭包 / 平台插件 / VC redist / WebView2Loader / assets
+  全照旧部署。
+- 验收（全部最小 PATH = System32+Windows，不带 Qt）：qmlclock `--nano` 部署 19 文件
+  （4 Qt 核心 + 7 QML 闭包 + 3 平台插件 + 样式 + 3 VC + WebView2Loader）+ assets/
+  到位 + selftest passed rc=0（software 后端同）；hello `--nano` 部署 7 文件 + 种进
+  build/ 的 Qt6Qml.dll 被清 + selftest/difftest 双 passed；phpunit 206/334、lint 契约一致。
+- **教训 48**：embed/nano 两条产线的「部署面」必须一起验收——assets 部署藏在 embed
+  路径的函数尾部，nano 分支整段跳过就把它一起丢了；而「CI 能跑」可能是 PATH 侥幸。
+  产物级判据要站在「自足」上：**最小 PATH 跑 selftest** 才是部署面的真验收。

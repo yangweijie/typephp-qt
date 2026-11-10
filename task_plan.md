@@ -933,6 +933,7 @@ AGENTS.md 全文无测试数基线（`grep -n '128\|178\|177\|tests' AGENTS.md` 
 | 想拿本轮 `--shot` 哈希去证明 `spacer(1)` 改成了真 stretch 的像素差异 | 1 | 改前 Windows 从未存过基线哈希，跨轮次又不可 diff（教训 21）⇒ 只能做「stash → 重编 → 存哈希 → pop → 重编 → 存哈希」的成对实验（Phase 39.11） |
 | `--selftest`/`--difftest` 25/25、20/20 全绿，却覆盖不到本轮三处新分支 | 1 | 不是 bug 是**验收漏洞**：示例用 `value` 不用 `current`、只用 `spacer(1)`、没有 `scroll` 节点 ⇒ 全绿对它们零鉴别力。教训 27：静默类修复必须先造会失败的正控制（Phase 39.8） |
 | CI「安装 Qt」两连红（run 42914049258 / 42914551844，1m13s 即死）：aqt `packages ['qtdeclarative'] were not found while parsing XML` —— Session 36 接线时加的 `modules: qtdeclarative` 在 Windows 桌面元数据里无处解析 | 1 | Qt 6.9.3 win64_msvc2022_64 的 qtdeclarative 在**基础组件** DownloadableArchives（默认安装就带）、addons 下无条目 ⇒ `-m qtdeclarative` 必炸。删掉 `modules:` 行（F56，Updates.xml 第一手取证） |
+| aqt 修好后又红一步（run 42919225213）：安装 Qt ✓、qmlclock `--nano` 编译 ✓，但 QML selftest 八连 FAIL——`build/assets/clock.qml: No such file or directory` | 1 | Windows nano 分支 `if (!$nano)` **什么都不部署**（embed 的 assets 部署藏在 deployRuntimeDlls 尾部，被整段跳过）；CI 能跑全靠 install-qt-action 把 Qt bin 放进 PATH 的侥幸（F57）。改 `deployRuntimeDlls($path, $withPhpRuntime)`：nano 只跳过 PHP 运行时段并清 embed 残留，Qt/VC/assets 照旧；最小 PATH selftest 实测通过 |
 
 ## Decisions Log
 
