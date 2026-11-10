@@ -823,6 +823,9 @@ AGENTS.md 全文无测试数基线（`grep -n '128\|178\|177\|tests' AGENTS.md` 
   `qt.qt6.693.win64_msvc2022_64` 的 DownloadableArchives（默认安装就带），addons 下无条目，
   `-m` 无处解析 → aqt 报 `packages ['qtdeclarative'] were not found while parsing XML`。
   ci.yml 修复已落盘（未 commit）；**最终判据（CI 全绿）待 push 验证，推送需用户点头**。
+  **闭环（Session 37，用户点头后两笔 push）**：aqt 修复后 CI 又暴露 nano 零部署问题
+  （F57，见 41.14 注），修完 run 42921203420 **全绿**（Windows 编译与无头自测 4m52s，
+  QML selftest 9 ok + passed）。
 - [x] 41.14 Windows 开发期运行：`bin/lib/build.php` `deployRuntimeDlls` 已补 QML 运行库
   白名单。**实施偏差（有意）**：判定信号不用「yml 含 QT_QML 文本标记」而用
   **exe 导入表含 Qt6Qml.dll**——与同函数 Qt6Network 判定同一先例（yml 是意图、exe 导入

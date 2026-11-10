@@ -89,6 +89,13 @@ msvc2022_64 + tpc 0.9.5 工具链齐全，doctor 全 OK）。**不 commit（用�
 - **教训 48**：embed/nano 两条产线的「部署面」必须一起验收；产物级判据站在「自足」
   上——最小 PATH 跑 selftest 才是部署面的真验收（细节见 F57）。
 
+### CI 验收读数（第二笔 push，f1b963f → run 42921203420）
+
+- **CI 全绿**：✓ PHP 单测与契约校验（16s）、✓ Windows 编译与无头自测（4m52s）；
+  QML selftest 步骤日志实录 `ok` 9 条 + `selftest passed`（qmlStatus errors 空）。
+  41.13 / 41.14 至此闭环（run 42914049258 → 42914551844 → 42919225213 → 42921203420，
+  四次运行的失败面分别是：aqt modules 元数据 → nano 零部署，各一次修复）。
+
 ## Session 36 — 2026-11-10（QML 支持：'qml' 控件类型经 QQuickWidget 嵌入现有控件树）
 
 ### 任务来源
