@@ -110,9 +110,13 @@ jobs:
         with:
           version: '6.9.3'
           arch: win64_msvc2022_64
-          # qtdeclarative 提供 QtQml/QtQuick/QtQuickWidgets —— qmlclock 示例的
-          # QT_QML 后端要链它们；QtNetwork 属于 qtbase，默认就装
-          modules: qtdeclarative
+          # **不能加 modules: qtdeclarative**：Qt 6 的 Windows 桌面元数据里
+          # qtdeclarative 在基础组件 qt.qt6.693.win64_msvc2022_64 的
+          # DownloadableArchives（qtbase/qtsvg/qtdeclarative/qttools/qttranslations/
+          # d3dcompiler_47/opengl32sw）里，默认安装就带；addons 下根本没有
+          # qtdeclarative 条目，传给 -m aqt 直接报
+          # "packages ['qtdeclarative'] were not found while parsing XML"。
+          # 本地 Qt 安装（在线安装器默认勾选）同证：Qt6Qml.lib / qml/ 都在。
           cache: true
 
       - name: 把示例里的 Qt 路径指向 runner 的安装位置

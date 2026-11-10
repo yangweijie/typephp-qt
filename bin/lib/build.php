@@ -410,6 +410,42 @@ function deployRuntimeDlls(string $projectPath): void
         if (str_contains($imports, 'Qt6Network.dll')) {
             $qtDlls[] = 'Qt6Network.dll';
         }
+
+        // QML 运行库：判定信号与 Network 同一先例——**exe 导入 Qt6Qml.dll** 才算
+        // QML 应用（QT_QML 未定义时 qt_qml.cc 是占位 TU，exe 不会导入它；yml 的
+        // -DQT_QML 只是意图，exe 导入才是事实，所以这里不读 yml 文本）。
+        //
+        // 必须一次拷**整套传递闭包**，不能逐个探测：exe 导入表里只有直接链接的
+        // Qt6Qml.dll / Qt6QuickWidgets.dll，Qt6Quick → Qt6QmlMeta → Qt6QmlWorkerScript
+        // 这条链只写在 Qt 自身 DLL 的导入表里，exe 字节里 grep 不到。6.9.3 实测闭包
+        // （dumpbin -DEPENDENTS）：Qml / QmlModels / QmlMeta / QmlWorkerScript /
+        // Quick / QuickWidgets / OpenGL。漏判的症状正是 41.14 记的那种：直接缺的报
+        // 0xC0000135（弹窗点名 DLL），**传递缺的连名字都不给**——Git Bash 报 "?"，
+        // QmlWorkerScript 就是这么暴露的（本机全清实测）。
+        // QML 的 qml/ 模块目录（qml/QtQuick/…）**不需要**：Qt 6.9 从内建资源解析
+        // import QtQuick，dev 期 selftest 实测通过（qmlclock 9/9）。
+        $qmlDlls = [
+            'Qt6Qml.dll',
+            'Qt6QmlModels.dll',
+            'Qt6QmlMeta.dll',
+            'Qt6QmlWorkerScript.dll',
+            'Qt6Quick.dll',
+            'Qt6QuickWidgets.dll',
+            'Qt6OpenGL.dll',
+        ];
+        if (str_contains($imports, 'Qt6Qml.dll')) {
+            foreach ($qmlDlls as $dll) {
+                $qtDlls[] = $dll;
+            }
+        } else {
+            // 上一次带 QML 的构建会留下这批 DLL；不删就会被打进最终产物（同 Network 的理由）。
+            foreach ($qmlDlls as $dll) {
+                if (file_exists($buildDir . '/' . $dll)) {
+                    @unlink($buildDir . '/' . $dll);
+                }
+            }
+        }
+
         foreach ($qtDlls as $dll) {
             $src = $qtDir . '/bin/' . $dll;
             if (file_exists($src)) {
