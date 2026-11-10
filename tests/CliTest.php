@@ -22,6 +22,7 @@ final class CliTest extends TestCase
         require_once __DIR__ . '/../bin/lib/discovery.php';
         require_once __DIR__ . '/../bin/lib/project.php';
         require_once __DIR__ . '/../bin/lib/build.php';
+        require_once __DIR__ . '/../bin/lib/new.php';
 
         $this->root = sys_get_temp_dir() . '/qt_cli_' . bin2hex(random_bytes(6));
         mkdir($this->root, 0777, true);
@@ -228,6 +229,68 @@ final class CliTest extends TestCase
         file_put_contents($dir . '/project.yml', "name: app_three\n");
 
         self::assertNull(\builtBinary($dir));
+    }
+
+    // ── 脚手架模板 ──
+
+    public function testNewTemplateBridgeSourcesMatchCppSrc(): void
+    {
+        // 桥接 C++ 拆分（qt_bridge.cc → qt_loop/render/decor/widgets/webview）时，
+        // 模板里漏改一个名字，`qtphp new` 生成的项目就必然编译失败（Source file not exists），
+        // 而这条路径没有任何单测会走到 —— build 要 Qt、要编译器。只能静态核对：
+        // 模板引用的每个 .cc 都要存在，cpp-src/ 下的每个 .cc 也都要被引用。
+        $template = (string) file_get_contents(__DIR__ . '/../bin/lib/new.php');
+        preg_match_all('#cpp-src/([A-Za-z0-9_.-]+\.cc)#', $template, $matches);
+        $referenced = array_values(array_unique($matches[1]));
+
+        $onDisk = array_map('basename', glob(__DIR__ . '/../cpp-src/*.cc') ?: []);
+
+        sort($referenced);
+        sort($onDisk);
+        self::assertSame($onDisk, $referenced, '脚手架模板的桥接源列表与 cpp-src/ 实际文件不一致');
+    }
+
+
+    // ── qtphp new 的目标目录解析（F54：绝对路径不再被拼进 cwd）──
+
+    public function testNewTargetFromPlainNameUsesCwd(): void
+    {
+        $t = newProjectTarget('demo', '/work');
+        $this->assertSame(['parent' => '/work', 'name' => 'demo'], $t);
+    }
+
+    public function testNewTargetFromAbsolutePathTakesBasename(): void
+    {
+        $t = newProjectTarget('/tmp/qtnew-qml/demo', '/work');
+        $this->assertSame(['parent' => '/tmp/qtnew-qml', 'name' => 'demo'], $t);
+    }
+
+    public function testNewTargetFromRelativeSubPath(): void
+    {
+        $t = newProjectTarget('foo/bar', '/work');
+        $this->assertSame(['parent' => '/work/foo', 'name' => 'bar'], $t);
+    }
+
+    public function testNewTargetTrimsTrailingSeparators(): void
+    {
+        $t = newProjectTarget('demo/', '/work');
+        $this->assertSame(['parent' => '/work', 'name' => 'demo'], $t);
+        $t2 = newProjectTarget('demo\\', '/work');
+        $this->assertSame(['parent' => '/work', 'name' => 'demo'], $t2);
+    }
+
+    public function testNewTargetWindowsDriveIsAbsolute(): void
+    {
+        $t = newProjectTarget('C:\\Users\\me\\demo', '/work');
+        $this->assertSame(['parent' => 'C:/Users/me', 'name' => 'demo'], $t);
+    }
+
+    public function testNewTargetRejectsDegenerateNames(): void
+    {
+        $this->assertNull(newProjectTarget('', '/work'));
+        $this->assertNull(newProjectTarget('.', '/work'));
+        $this->assertNull(newProjectTarget('..', '/work'));
+        $this->assertNull(newProjectTarget('/', '/work'));
     }
 
     private static function removeTree(string $dir): void

@@ -25,16 +25,17 @@ Qt（Widgets）—— 只显示、只上报信号
 
 | 路径 | 内容 |
 |---|---|
-| `src/QtApp.php` | 应用/窗口生命周期、事件分发、对话框、剪贴板、webview 调用 |
+| `src/QtApp.php` | 应用/窗口生命周期、事件分发、对话框、剪贴板、webview、qml 调用 |
 | `src/WidgetTree.php` | 声明式控件树构造器（静态方法返回数组） |
 | `src/FakeBridge.php` | **测试替身**，用纯 PHP 镜像全部 `qt_*` 全局函数 |
-| `php-src/qt.stub.php` | PHP 可见的桥接契约（26 个函数，函数体必须为空） |
+| `php-src/qt.stub.php` | PHP 可见的桥接契约（函数体必须为空） |
 | `cpp-src/qt_common.h` | 共用工具、`QtWindowBox` 类声明、前向声明 |
 | `cpp-src/qt_loop.cc` | 应用/窗口生命周期、事件循环（自驱动分发） |
 | `cpp-src/qt_render.cc` | 渲染遍历与差异更新（render/forgetProps/patch） |
 | `cpp-src/qt_decor.cc` | 装饰（菜单/托盘/状态栏）与对话框、几何、a11y |
 | `cpp-src/qt_widgets.cc` | 控件工厂与属性应用 |
 | `cpp-src/qt_webview.cc` | webview 统一入口 + WebView2 / QTextBrowser |
+| `cpp-src/qt_qml.cc` | qml 统一入口 + QQuickWidget（QT_QML）/ 降级占位 |
 | `cpp-src/qt_webview_wk.mm` | WKWebView（仅 macOS，且仅在 `QT_WEBVIEW_WK` 下进 sources） |
 | `bin/qtphp` | CLI 入口：只留用法头 + `require_once lib/*.php` + `exit(main($argv))` |
 | `bin/lib/` | CLI 命令实现，按域一个文件（output / doctor / discovery / new / build / project / run / package / package-macos / fs / contract / cli）；**都是全局函数，没有命名空间** |
@@ -71,7 +72,7 @@ void php_qt_window_focus(const php::Box &window) { ... }
 ## 构建与验证
 
 ```bash
-# PHP 侧单测（不需要 Qt、不需要编译器）—— 基线 128 tests
+# PHP 侧单测（不需要 Qt、不需要编译器）
 php vendor/bin/phpunit --no-coverage
 
 # 桥接契约一致性（stub ⇄ C++）
@@ -107,6 +108,9 @@ build\hello.exe --shot out.png
 - 跨文件调用桥接函数要用 `\qt_xxx()` 全限定名
 - 同一个变量不能先绑 `ReflectionMethod` 再绑 `ReflectionFunction`（AOT 类型推断不认），
   见 `QtApp::arityOf()` 里用两个变量分开写
+- **闭包按引用捕获（`use (&$x)`）的写入，对「按引用传入的函数参数」不可见**：handler 写的
+  `$state`，在 `fn(array &$state)` 形参里读到的是旧值（普通 PHP 三方同一存储，F53 实测）。
+  跨函数读「事件处理器改过的状态」走控件树读回（`value()`），那同时也是 GUI 的真实语义
 
 ### 编译
 
@@ -143,10 +147,10 @@ build\hello.exe --shot out.png
 - 跟现有文件走：PHP 用 4 空格、`declare(strict_types=1)`、方法名 camelCase；
   C++ 用 4 空格、Qt 风格（`qtXxx` 自由函数、`xxx_` 成员后缀）
 - 注释写**为什么**，不写**是什么**。本仓库现有的长注释几乎都在解释踩过的坑，保持这个传统
-- 不要引入新依赖。Qt 只用 `Core` / `Gui` / `Widgets` / `Network` 四个模块；`Network` 是
-  **可选**的：只有调用 `qt_http_request()` 的应用才需要。不联网的应用在 `project.yml`
-  加 `QTPHP_NO_NETWORK` 并去掉 `Qt6Network` 的头/库，桥接会提供报错的同签名桩；
-  链了 `Network` 时打包**不能**跳过 `tls` / `networkinformation` 插件
+- 不要引入新依赖。Qt 只用 `Core` / `Gui` / `Widgets` / `Network` 四个模块（`Network` 供
+  `qt_http_request()` 使用，因此打包时**不能**再跳过 `tls` / `networkinformation` 插件）。
+  QML 支持例外：`QT_QML` 应用额外引入 `QtQml` / `QtQuick` / `QtQuickWidgets`
+  （`cpp-src/qt_qml.cc` 的编译期开关，QML-free 应用零影响，占位标签不静默白屏）。
 
 ## 提交
 

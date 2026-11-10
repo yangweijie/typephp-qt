@@ -50,7 +50,7 @@ The PHP/C++ boundary is declared by two files, and the compiler needs **both**:
 | `php-src/qt.stub.php` | PHP-visible signatures. **Bodies must be empty.** This is the only place the compiler learns the bridge's types. |
 | `cpp-src/*.cc` | The implementations. PHP `qt_foo()` maps to C++ `php_qt_foo()`. |
 
-There are 24 functions, all listed in the [bridge contract reference](/reference/api.md#bridge-contract).
+There are 41 functions, all listed in the [bridge contract reference](/reference/api.md#bridge-contract).
 
 `qtphp lint` verifies the two agree (every declared function has an implementation, every implementation has a declaration):
 

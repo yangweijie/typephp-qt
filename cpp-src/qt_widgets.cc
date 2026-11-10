@@ -476,6 +476,10 @@ QWidget *makeWebView(QtWindowBox *box, const QString &id, QObject *) {
     return qtCreateWebView(box, id);
 }
 
+QWidget *makeQml(QtWindowBox *box, const QString &id, QObject *) {
+    return qtCreateQml(box, id);
+}
+
 struct WidgetTypeEntry {
     const char *name;
     WidgetFactory factory;
@@ -516,6 +520,7 @@ const WidgetTypeEntry kWidgetTypes[] = {
     {"table", makeTable},
     {"tree", makeTree},
     {"webview", makeWebView},
+    {"qml", makeQml},
 };
 
 WidgetFactory widgetFactoryFor(const QString &type) {
@@ -704,7 +709,6 @@ void qtClearContent(QWidget *widget, const QString &type) {
 // ────────────────────────────── 属性应用 ──────────────────────────────
 
 void qtApplyProp(QtWindowBox *box, QWidget *widget, const QString &type, const QString &key, const Variant &value) {
-    Q_UNUSED(box);
     if (!widget) return;
 
     // ── 通用 ──
@@ -909,6 +913,15 @@ void qtApplyProp(QtWindowBox *box, QWidget *widget, const QString &type, const Q
     // 但都接受同一组属性）。
     if (key == QLatin1String("url") || key == QLatin1String("html") || key == QLatin1String("zoom")) {
         qtWebViewApplyProp(widget, key, value);
+        return;
+    }
+    // ── qml ──
+    // source / signals / props / read 交给 qt_qml.cc 的后端处理
+    // （QT_QML 未定义时是可诊断占位，strict 下打警告）。
+    // 按 type 分派而不是按 key 全表扫：非 qml 控件不会收到 qml 键，
+    // 反之 qml 控件的四个键在通用分支里全是未知键。
+    if (type == QLatin1String("qml")) {
+        qtQmlApplyProp(box, widget, key, value);
         return;
     }
     if (key == QLatin1String("scaled_size")) {
@@ -1121,8 +1134,10 @@ void qtApplyProp(QtWindowBox *box, QWidget *widget, const QString &type, const Q
 // ────────────────────────────── 取值 ──────────────────────────────
 
 Variant qtWidgetValue(QWidget *widget, const QString &type) {
-    Q_UNUSED(type);
     if (!widget) return {};
+    // qml 控件没有「当前值」的单语义：值就是 read 声明属性的当前快照，
+    // 直接转 qt_qml.cc 的读回（QT_QML 未定义时恒为空对象）。
+    if (type == QLatin1String("qml")) return qtQmlWidgetValue(widget);
     if (auto *edit = qobject_cast<QLineEdit *>(widget)) return toPhpString(edit->text());
     if (auto *text = qobject_cast<QTextEdit *>(widget)) return toPhpString(text->toPlainText());
     if (auto *check = qobject_cast<QCheckBox *>(widget)) return Variant(check->isChecked());

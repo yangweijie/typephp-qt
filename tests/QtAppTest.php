@@ -765,6 +765,99 @@ final class QtAppTest extends TestCase
         $this->assertSame([], \TypePHP\Qt\Fake\FakeState::$webViewCalls);
     }
 
+    // ── qml ──
+
+    /**
+     * 测试替身默认报「QML 未启用」—— 它跑在普通 PHP 上、没有 Qt，
+     * 报 true 会骗过应用侧的降级判断。
+     */
+    public function testQmlAvailableDefaultsToFalseInTests(): void
+    {
+        $this->assertFalse($this->app->qmlAvailable());
+    }
+
+    /** 覆盖能力位后，降级判断要跟着变（应用据此走不同分支）。 */
+    public function testQmlAvailableCanBeOverridden(): void
+    {
+        \test_set_qml_available(true);
+        $this->assertTrue($this->app->qmlAvailable());
+    }
+
+    /** qmlStatus 默认结构：没渲染过 qml 节点时是 []。 */
+    public function testQmlStatusEmptyForUnknownId(): void
+    {
+        $this->assertSame([], $this->app->qmlStatus('missing'));
+    }
+
+    /** qmlStatus 默认结构：渲染过 qml 节点但没预置状态时，从渲染树推导。 */
+    public function testQmlStatusDerivedFromRenderedTree(): void
+    {
+        $this->app->render(WidgetTree::vbox([
+            WidgetTree::qml('assets/clock.qml', ['id' => 'clock', 'signals' => ['tick']]),
+        ]));
+        $this->app->run(1);
+
+        $status = $this->app->qmlStatus('clock');
+        $this->assertSame('loading', $status['status']);
+        $this->assertSame([], $status['errors']);
+    }
+
+    /** qmlStatus 预置后返回预置值（覆盖 C++ 侧的组件状态读口）。 */
+    public function testQmlStatusPreseeded(): void
+    {
+        $this->app->render(WidgetTree::vbox([
+            WidgetTree::qml('a.qml', ['id' => 'c']),
+        ]));
+        $this->app->run(1);
+
+        \test_set_qml_status($this->app->handle(), 'c', [
+            'status' => 'error',
+            'errors' => [['line' => 3, 'message' => 'bad syntax']],
+        ]);
+        $status = $this->app->qmlStatus('c');
+        $this->assertSame('error', $status['status']);
+        $this->assertSame([['line' => 3, 'message' => 'bad syntax']], $status['errors']);
+    }
+
+    /** qmlReload 走 patch call 通道，记进 qmlCalls 轨迹。 */
+    public function testQmlReloadImperativeAction(): void
+    {
+        $this->app->render(WidgetTree::vbox([
+            WidgetTree::qml('a.qml', ['id' => 'c']),
+        ]));
+        $this->app->run(1);
+
+        $this->app->qmlReload('c');
+        $calls = \TypePHP\Qt\Fake\FakeState::$qmlCalls;
+        $this->assertSame([['window' => $this->app->handle(), 'id' => 'c', 'method' => 'reload']], $calls);
+    }
+
+    /** 对不存在的控件调 qmlReload 应静默跳过（与 webview 先例一致）。 */
+    public function testQmlReloadOnUnknownIdIsIgnored(): void
+    {
+        $this->app->qmlReload('nope');
+        $this->assertSame([], \TypePHP\Qt\Fake\FakeState::$qmlCalls);
+    }
+
+    /** qml 节点的 value() 只返回 read 清单 ∩ props 映射的子集（与真桥 qtQmlWidgetValueImpl 只迭代 readKeysList 同语义）。 */
+    public function testQmlValueReadsBackReadKeys(): void
+    {
+        // props 里故意多带一个 read 未声明的键（frame 是 QML 侧自管的属性）：
+        // 真桥只读 read 清单，这个键必须被滤掉 —— 修前 FakeBridge 返回全部 props，
+        // 旧断言因 props 恰好只含 read 键才通过，属巧合非真镜像。
+        $this->app->render(WidgetTree::vbox([
+            WidgetTree::qml('a.qml', [
+                'id' => 'c',
+                'props' => ['timeText' => '09:09:09', 'frame' => 3],
+                'read' => ['timeText'],
+            ]),
+        ]));
+        $this->app->run(1);
+
+        $value = $this->app->value('c');
+        $this->assertSame(['timeText' => '09:09:09'], $value);
+    }
+
     // ── 补丁 ──
 
     public function testPatchUpdatesProps(): void

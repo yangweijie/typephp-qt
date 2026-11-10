@@ -2567,3 +2567,543 @@ Build successful
 Fatal（PHP 8.5 收紧了 callable 校验）。规避：`COMPOSER_HOME` 指向无全局镜像配置的目录 + `packagist:false` 断网。**这是全局配置触发的网络栈不兼容，不是安装器本身不可用**。
 
 **仍未验**：Linux/macOS 的 `stream_isatty` 分支（用户明确「不测linux 不用wsl」）。
+
+## F49. macOS 回归（Session 34）：Windows 上永远发现不了的两处缺陷 —— AppData 的 Darwin 分支、脚手架模板漏跟桥接拆分
+
+**触发**：用户「最近 windows 上更新了很多 重新 mac 回归一下测试」。Session 33 的验收全在 Windows 本机做，
+`177/288` 这个数字在 mac 上复现不出来 —— 于是暴露出两处只有换平台/换路径才会现形的缺陷。
+
+**环境**：macOS 26.6.2 arm64 / Apple clang 21.0.0 / PHP 8.5.7 (Homebrew) / Qt 6.11.2 (brew, framework 布局) / tpc v0.9.5。
+
+### 49.1 `AppData` 在 macOS 上 config 与 data 是同一个目录
+
+**症状**：`phpunit` 在 mac 上 `177 tests / 286 assertions` 且 1 failure ——
+`AppDataTest::testCacheAndDataDirsDifferFromConfig` 断在 `assertNotSame($data->configDir(), $data->dataDir())`。
+断言数比 Windows 少 2，正是那两条被跳过断言的数目（失败在 80 行，81–83 行不再执行）—— 数字本身就是线索。
+
+**真因**：`baseDir()` 的 Darwin 分支把 `config` 与 `data` 都映射到 `~/Library/Application Support`：
+
+```php
+$root = $kind === 'cache' ? self::home().'/Library/Caches'
+                          : self::home().'/Library/Application Support';
+```
+
+后果不只是"测试挂了"：`configPath('x.json')` 与 `dataPath('x.json')` 指向**同一个文件**，
+配置与用户数据互相覆盖；Windows（APPDATA/LOCALAPPDATA）与 Linux（XDG_CONFIG_HOME/XDG_DATA_HOME）
+天然分开，所以这条路径在 Windows 上跑一万次也是绿的。
+
+**修法**：与 Qt 自己的 `QStandardPaths` 对齐（在本机编了个 5 行 Qt 程序实测，不是查文档）：
+
+| QStandardPaths | macOS 实际取值 |
+|---|---|
+| `AppConfigLocation` | `~/Library/Preferences` |
+| `AppDataLocation` | `~/Library/Application Support` |
+| `CacheLocation` | `~/Library/Caches` |
+
+改后三者在 Darwin 上互不相同，`phpunit` 回到 `177/288`（与 Windows 基线逐位一致）。
+taskboard 实测落盘从 `~/Library/Application Support/TypePHP/Taskboard/tasks.json` 变为
+`~/Library/Preferences/TypePHP/Taskboard/tasks.json`。
+
+### 49.2 `qtphp new` 生成的 `sources:` 里还写着已删除的 `qt_bridge.cc`
+
+**症状**：`qtphp new foo && qtphp build foo` ⇒
+
+```
+Fatal error: Source file not exists: `/Volumes/.../typephp-qt/cpp-src/qt_bridge.cc`
+```
+
+**真因**：Session 33 把 `qt_bridge.cc` 拆成 `qt_loop/qt_render/qt_decor/qt_widgets/qt_webview`，
+`examples/hello/project.yml`、AGENTS.md、CHANGELOG 都跟着改了，**只有 `bin/lib/new.php` 里的
+heredoc 模板没改**。示例能构建（它的 yml 是对的），脚手架不能 —— 而 `new` 是每个新用户的第一次 `build`。
+
+**为什么报错指向框架仓库**：模板里的路径是 `{$pkgDir}/cpp-src/...` 绝对路径，所以错误信息里出现的是
+框架安装位置而不是用户项目位置，第一眼极容易判成"包没装好"。
+
+**修法**：模板改成 5 个拆分后的源；同时补一条静态守卫
+`CliTest::testNewTemplateBridgeSourcesMatchCppSrc()` —— 模板引用的 `.cc` 集合必须与 `cpp-src/*.cc`
+磁盘集合**相等**（双向：既防"引用了不存在的文件"，也防"新增源忘了写进模板"）。
+正控制：拿 `git show HEAD:bin/lib/new.php` 的旧内容跑同一段逻辑 ⇒ 引用集 `qt_bridge/qt_webview/qt_widgets`
+vs 磁盘集 5 个，断言失败。守卫有效。
+
+### 49.3 顺带观察（不是本仓库的 bug）
+
+`qtphp build` 的输出被重定向到文件时，tpc 的编译进度条仍吐 `\033[36m...` 转义 —— 来源是
+`vendor/swoole/typephp/src/Build/NativeSourceProjectBuilder.php`，不是本仓库的 `color()`。
+本仓库那三档（`NO_COLOR` > `CLICOLOR_FORCE` > isatty）在 mac 上逐档验过，与 Windows 结论一致。
+
+**仍未验**：Linux（用户明确不测）。
+
+## F50. CI 自引入起就没绿过：Windows 作业的四个坑（Session 35）
+
+**触发**：用户「github 上 ci 运行失败了」。`gh run list` 显示 Session 33 引入的 CI **四次运行全红**，
+两条失败记录的报错完全相同 —— 说明这份 workflow 从提交起就没工作过，而 README/CHANGELOG 已写着「新增 CI」。
+
+### 50.1 tpc 在翻译任何 PHP 之前就要 PHP 导入库
+
+```
+Fatal error: Neither php8ts.lib nor php8.lib found
+#0 CompilerDiagnosticTrait->fatal() ← Translator.php:310 detectPlatform()
+```
+
+`Windows::detectPhpLibs()` 在 `$phpDir` 下依次找 `SDK\lib`、`lib`、`$phpDir` 里的
+`php8embed.lib` + `php8ts.lib`/`php8.lib`，缺任一直接 `error()`。`setup-php` 装的是运行时压缩包，
+**只有 `php8.dll`，没有 `.lib`**，所以这条路在 CI 上必死；而 `--nano` 也绕不过去（检测早于模式判定）。
+
+修法：用 tpc 官方发行包 `tpc_v0.9.5_windows_x64_php8.4.26-zts.zip`（56 MB），它同时提供
+`SDK/lib`（php8ts / php8embed / gmp / mpfr / libmpdec 导入库）、`SDK/include`（PHP 头文件）、
+`phpx/lib/phpx.lib`、`php.exe` 与运行期 DLL —— 等于一套完整 Windows AOT 环境。
+环境变量三件套：`PHP_HOME`（detectPhpLibs）、`PHPX_HOME`（PhpxLocator）、`TPC_RUNTIME_DIR`（qtphp 的 DLL 部署）。
+
+**版本要对齐**：发行包是 PHP 8.4.26 ZTS，`swoole/typephp` 是 `>=0.9`（当前 0.9.5）。升级 tpc 时两个常量同步改，
+错配的症状是链接期符号缺失，不会提示版本。
+
+### 50.2 非 nano 会现编 php-src
+
+`CompilerBase::isPhpBuilderBuild()` = `phpBuilderEnabled && !isNanoMode()` ⇒ CI 上必须 `--nano`，
+否则 tpc 下载 php-src 现编私有运行时（十几分钟起步，Windows 还要 bison/re2c 一类依赖）。
+发行包在 nano 模式下的作用只有两个：满足 detectPlatform 探测、提供 SDK 头文件。
+
+### 50.3 相对 `-I` 只在「qtphp 自己调 vcvars」那条分支成立（真缺陷）
+
+```
+cpp-src\qt_webview.cc(27): fatal error C1083: Cannot open include file: 'WebView2.h'
+```
+
+`examples/hello/project.yml` 里写的是 `-I"../../third_party/webview2/include"`，按**项目目录**解析才对。
+`cmdBuild()` 有两条分支：
+
+- 需要 qtphp 自己 `call vcvars64.bat`：临时 .bat 里有 `cd /d "<项目目录>"` ⇒ 相对路径正确；
+- `msvcEnvironmentReady()` 为真（VS 开发者命令行、CI 的 `ilammy/msvc-dev-cmd`）：直接 `passthru`，
+  **不 cd** ⇒ cl.exe 继承的 CWD 是仓库根，`../../third_party` 差一层。
+
+修法：else 分支补 `chdir(dirname($projectAbs))` + `finally` 还原。macOS/Linux 走的是同一条 else 分支，
+只是它们的 yml 用绝对路径（`/opt/homebrew/...`）所以从没暴露 —— 又一个「只有一条分支被日常走到」的例子。
+
+### 50.4 自测路径写错
+
+`build\hello.exe` 实际在 `examples\hello\build\hello.exe`（`output: build/hello` 相对项目目录）。
+PowerShell 报 `The module 'build' could not be loaded` —— 因为找不到同名文件时会尝试当模块导入，
+这个报错比「文件不存在」更难联想。
+
+### 验收
+
+`39693161951`：Windows 作业 3m22s 全绿（266 TU 编译 + selftest + difftest），PHP 作业 11s 全绿。
+`gh run list` 上 main 的最近一次运行结论为 `success`。
+
+## F51. QML 支持方案与摸底（Session 36，规划轮）
+
+**触发**：用户「/workflow 支持 qml」。目标：QQuickWidget 以新控件类型 `'qml'` 嵌入现有控件树，
+事件走既有 enqueue 队列；hello 保持 QML-free；新示例 `examples/qmlclock` 独立验收。
+本条提炼三份摸底报告（PHP 侧 / C++ 侧 / 构建环境），**其中全部 file:line 已在本会话亲手读过复核**；
+摸底报告给出而本会话未复核的，显式标注。方案决策见 §51.5，分解落在 task_plan.md Phase 41。
+
+### 51.0 本会话现测基线（自己跑的命令与读数）
+
+```
+php vendor/bin/phpunit --no-coverage   → OK (178 tests, 289 assertions)，rc=0
+php bin/qtphp lint                     → 「Stub 函数 (39 个) … [OK] 契约一致！」，rc=0
+grep -c '^function qt_' php-src/qt.stub.php → 39
+ls examples/                           → hello、taskboard（尚无 qmlclock）
+```
+
+ⓘ AGENTS.md:74 写「基线 128 tests」已过时（41.9 会同步）；环境备注：本会话 Bash 会话目录
+两度因根卷满 ENOSPC 失败后恢复，`df -h /` 现测仅剩 1.5Gi——实施轮编译前先清根卷。
+（评审轮更新：根卷现余 18Gi、qtdeclarative 已装 6.12.0_1、活动 qtbase 6.12.0_2——
+以 §51.7 的环境读数为准，本行保留为规划轮时点快照。）
+
+### 51.1 契约层（PHP 侧）
+
+- **stub 形态**：函数体必须空 `{}`；opaque 句柄一律 `mixed`、PHP 只持有不窥探
+  （qt.stub.php:6,12）；现有返回类型只用 mixed/void/bool/string/array；命名 `qt_<域>_<动作>`；
+  单句说明用单行 `/**/`（qt.stub.php:89）、键表用多行 docblock（qt.stub.php:40-45）。
+  webview 段先例：qt.stub.php:237-241（backend 名 + supports_js 两个查询函数）——
+  QML 照此给 `qt_qml_available()` / `qt_qml_status()`。
+- **stub 是 AOT 编译源**：examples/hello/project.yml:24 把它列进 sources，`qtphp new` 也拷进
+  新工程（bin/lib/new.php:39 模板）——stub⇄C++ 不配对要到**链接期**才炸，lint 只是文本近似。
+- **lint 边界**（bin/lib/contract.php）：stub 正则 :36、统一加 `php_` 前缀 :39、只 glob
+  cpp-src/*.cc :48、C++ 正则 :52 要求**行首**返回类型（Variant|void|Bool|String|Int|Array）；
+  missing→error、extra→warning、均 exit 1（:66-88）。实测认不出缩进/前缀变体、不扫 .mm/.h、
+  #ifdef 块内定义照常计数；**不查 stub⇄FakeBridge 签名**——qt_app_create 已漂移
+  （qt.stub.php:46 mixed vs FakeBridge.php:107 void），只靠 phpunit 兜底。
+- **FakeBridge 机制**：全局命名空间同签名镜像（FakeBridge.php:96 起）；FakeState 新字段必须
+  同步进 reset()（:75-91），否则每个测试 setUp 调的 `test_reset()` 清不干净、用例间泄漏；
+  webview 先例三件套：状态字段（:46,:49）、查询函数（:497-505）、覆盖助手
+  `test_set_webview_backend()`（:535）；patch call 轨迹先例（:168-177，type 门控记 `$webViewCalls`）；
+  渲染走通用 `qt_fake_walk()`（:554-568）+ 按类型推导默认值 `qt_fake_default_value()`（:570-579）——
+  'qml' 只需在这两处各加一个分支，不需要新的渲染逻辑。
+- **漏镜像后果**：tests/bootstrap.php 只 require FakeBridge，PHP 侧单测调未定义 `qt_` 函数
+  直接 Fatal——所以四件套顺序 stub→FakeBridge 必须紧挨着做、做完就跑 phpunit。
+- **QtApp 包装**：查询类直转发 `\qt_webview_backend()`（QtApp.php:295-309）；命令式动作走
+  patch call（webViewReload 等 :318-333）；桥接调用一律 `\qt_xxx()` 全限定。
+- **WidgetTree 模式**：静态方法把位置参数写进 $props 再 self::node()（:236-246）；
+  webView() 空 url 不写键防覆盖同节点 html（:219-225，测试注释 tests/WidgetTreeTest.php:325）。
+
+### 51.2 C++ 接线点（逐行核实）
+
+- **类型分发链**：buildNode（qt_render.cc:53-138）→ ensureWidget（:140-160）→
+  qtCreateWidget（qt_widgets.cc:530-541）→ widgetFactoryFor（:521-526）→ `kWidgetTypes[]`
+  静态表（:486-519，`{"webview", makeWebView}` 在 :518）。**新 'qml' 挂点 = 表加一行 +
+  `makeQml` 一行转调**（照 makeWebView qt_widgets.cc:475-477）。
+- **工厂签名**：`QWidget *(*)(QtWindowBox*, const QString &id, QObject *ctx)`（qt_widgets.cc:160），
+  调用时 ctx=box->window()（:533）；信号 connect 的 context 一律用它保生命周期
+  （QtWindowBox 不是 QObject，不能当 context——Decisions Log 有案）。
+- **属性转发**：webview 先例 qt_widgets.cc:907-913（url/html/zoom → qtWebViewApplyProp）——
+  qml 四键（source/signals/props/read）照抄转 `qtQmlApplyProp`。qtRender 的 patch call 通道：
+  webview 分支在 qt_render.cc:482-488——qml `reload` 照抄、改完 forgetProps(source)。
+- **取值**：`qtWidgetValue`（qt_widgets.cc:1123-1166）**没有 webview 分支**（返回空是既有先例）；
+  qml 需要读回（无头验收靠它），所以要加 `'qml'` 分支转 `qtQmlWidgetValue`。
+- **容器判定**：qtIsContainer（qt_widgets.cc:135-143）不含 qml ⇒ buildNode:104-105 不递归
+  children ⇒ **qml 默认叶子**，children 静默忽略。这符合「QML 内部结构 QML 自己管」的语义，
+  文档写清即可，不接容器语义。
+- **enqueue**：qt_loop.cc:202-209——`type` 恒有、`id`/`value` 非空才有、payload count>0 才有；
+  value 是 QString（签名 qt_common.h:441）；队列 `std::deque<Array>`（qt_common.h:518）。
+  事件动词全库实测：click…collapse（qt_widgets.cc）+ link/loaded/title/navigating（qt_webview.cc）+
+  timer。qml 用 `'type'=>'qml'`、value=信号名，不与既有动词冲突。
+- **qt_webview.cc 的开关模式（qml 要抄的）**：文件无条件进 sources；5 个对外符号全在
+  #ifdef 外（:42,:45,:400,:418,:454）；实现类与 include 关进 #ifdef QT_WEBVIEW2（:24-30）；
+  后端名/能力查询无条件返回（:34-51）。`qt_webview_wk.mm` 是另一种模式（文件内无 guard、
+  靠 yml `if:` 排除）——**qt_qml.cc 不要学它**。
+- **QtWindowBox 不必加成员**：WebView2Widget 把 root/连接/状态全收进 QWidget 子类
+  （qt_webview.cc:145-394）；id→控件映射已在 `widgets_`（qt_common.h:507-508）。
+  共享 QQmlEngine 照 WebView2 环境单例注释（qt_webview.cc:81-86）做 qt_qml.cc 函数局部 static；
+  cleanup 幂等要求（qt_loop.cc:101-102 注释「~QtWindowBox 与 php_qt_window_destroy 都会走到这里」）。
+- **php_ 入口风格**：`String php_qt_webview_backend()`（qt_loop.cc:230）、
+  `Bool php_qt_webview_supports_js()`（:232）、`Array php_qt_window_find(Variant box, String id)`
+  （qt_decor.cc:526）⇒ 定死 `Bool php_qt_qml_available()` / `Array php_qt_qml_status(Variant box, String id)`。
+
+### 51.3 构建环境 / CI / 打包
+
+- **hello 三份 yml**：project.yml 公共段+Windows 默认段，sources 逐文件列（:20-36，
+  qt_webview.cc :29、.mm 条件条目 :35-36）；include-paths 写死 D:/tools/Qt/6.9.3（:49-53）；
+  project.macos.yml include 后**只覆盖平台参数**（不写 sources/include-paths——tpc 的 list
+  合并是整体替换，写了会把 ../../cpp-src、../../php-src 两条仓库路径整段丢掉，
+  project.macos.yml:4-6 注释；Qt 头走 cxx-flags -F/-I :18-30、framework 链接 :32-45）；
+  project.linux.yml 同理（cxx-flags :18-41、精确 -l 链接 :45-51）。⇒ **QML 头目录必须走
+  cxx-flags 的 -I，绝不能写 include-paths**。
+- **新增 .cc 的硬性位置**（守卫只覆盖一处）：examples/hello/project.yml、bin/lib/new.php
+  模板（tests/CliTest.php:235-250 双向断言强制，只认 .cc）；docs 镜像 4 处**无守卫**
+  （docs/src/guide/project-structure.md:66 en/zh、docs/src/advanced/aot-notes.md:64 en/zh，
+  本会话 grep 复核）；目录树提及（project-structure.md:13 en/zh、README.md:170、AGENTS.md 目录表）。
+  composer `extra.bridge.sources=["cpp-src","php-src"]` 是**目录级**（composer.json:66-69），
+  vendor 消费方对新增 .cc 自动生效——两套机制不一致容易造成「消费方正常、仓库示例编译失败」的错觉。
+- **CI**（.github/workflows/ci.yml）：install-qt-action 不指定 modules（:108-115，注释明说）；
+  路径替换步骤**只改 hello 一份 yml**（:117-129，硬编码 `D:/tools/Qt/6.9.3/msvc2022_64` 于 :126）；
+  无头自测路径写全 examples\hello\build\hello.exe（:151，Session 35 坑 4）。qmlclock 进 CI
+  要动三处：modules 加 qtdeclarative、替换步骤覆盖两份 yml、加编译+selftest 步骤。
+- **打包/运行期 DLL**：deployRuntimeDlls 只拷 Qt6Core/Gui/Widgets/Network 四个 DLL
+  （bin/lib/build.php:401）+ platforms 三插件（:417-428）+ styles（:431-439）+ WebView2 loader
+  （:454-462）；deployAssets 拷 assets→build/assets（:480-488）。**没有 Qt6Qml/Qt6Quick/
+  Qt6QuickWidgets.dll**——Windows 开发期双击 exe 会 0xC0000135 且报错不说缺哪个。
+  windeployqt/macdeployqt 的 QML import 部署逻辑不存在（package.php 无 qml/quick 搬运逻辑）。
+- **doctor/findQt**（bin/lib/discovery.php:269-306，摸底报告核实项）：QT_ROOT→QT_DIR 优先；
+  本机 Qt 走 /opt/homebrew/opt/qtbase（brew 6.11.2）与 composer.json extra.qt-version=6.9.3
+  （composer.json:63）长期漂移——QML API 小版本差异的风险按已知漂移处理，不为它改锚点。
+
+### 51.4 Qt 运行期机制：已实测 / 未证实（摸底报告的离线实验 + 本机限制）
+
+**摸底已实测**（本机 clang++ -std=c++17 -framework QtCore，/tmp/qmeta-test）：
+- `connect(obj, "2sig()", ctx, "1slot()")` 字符串形态返回 1；1 参信号连 0 参槽可行；
+- `invokeMethod` 按名只找槽/信号/Q_INVOKABLE（QTimer::setInterval 实测 No such method）⇒
+  **QML 属性读写必须走 property()/setProperty()**（动态属性 int/QString 往返成功，qobject.h:339-341）；
+- **「按名信号→functor」没有直接重载**：connect(QMetaMethod, functor) 候选不存在、
+  connectImpl 是 private（qobject.h:398-403）⇒ 三段式：按 metaObject 找信号 QMetaMethod →
+  `connect(root, sigMethod, mapper, map() 的 QMetaMethod)`（QMetaMethod 配对重载存在，
+  qobject.h:215-217）→ QSignalMapper::mappedObject(PMF) 接 functor；setMapping 记 sender
+  ⇒ **每个信号名一个 mapper**，否则互相覆盖。QSignalMapper 5.15 起 deprecated、6.11.2 实测仍在。
+- 信号实参在 mapper 链路里被丢 ⇒ 事件 payload 改用 `read` 声明属性快照（决策 D4）。
+
+**未证实（本机没有 qtdeclarative，摸底实测 `brew list qtdeclarative` exit=1、qtbase 12 个
+framework 无任何 QML）**：QML 对象动态 metaobject 对上述 API 的暴露、QQuickWidget 在 offscreen
+平台下的 scene graph 行为、QtQuickWidgets 的链接名/插件依赖。⇒ Phase 41.12 是第一道实测，
+不预先拍死结论；41.5 的接线设计按「已实测的 QtCore 机制 + 文档行为」写，允许实现期微调。
+（评审轮更新：qtdeclarative 已装 6.12.0_1；metaobject 暴露与接线时机已由评审探针
+probe2 实测钉死——见 §51.7 结论 2/3；offscreen scene graph 在默认与 software backend
+下事件/读回均正常。QQuickWidgets 的**打包**依赖仍未测，属实施轮 41.14。）
+
+### 51.5 方案决策（为什么这么切）
+
+- **D1 两枚新桥接函数，不再多**：创建/属性/取值/事件全走既有通道（控件树 diff、qtApplyProp、
+  qtWidgetValue、enqueue），能力查询与错误状态是新语义、没有旧通道可骑 ⇒ 只有
+  `qt_qml_available()` / `qt_qml_status()` 值得进契约。stub 面 39→41。
+- **D2 hello 保持 QML-free 的方式 = qt_webview.cc 模式**：qt_qml.cc 无条件进 sources、
+  `QT_QML` 不定义时空实现（qml 控件退化为占位 + strict 告警，available()=false）——
+  与「不定义 QT_WEBVIEW2 时回落 QTextBrowser」完全同构。hello 的 flags/link-libs 零改动，
+  空 TU 对它只是多编一个文件。
+- **D3 错误通道显式化**：仓库既有约定「未知类型/属性静默忽略」（qt.stub.php:82-85），
+  但 QML **加载失败**不静默——白屏 + 零诊断是 F26 webview 路径教训的翻版；
+  qt_qml_status() 给程序化通道，QT_DEBUG_STRICT=1 给开发期通道。
+- **D4 信号实参不单独回传**：mapper 链路丢实参是已实测事实；为实参新写 QVariant→phpx
+  转换器要处理嵌套结构（enqueue 的 value 只有 QString，桥接 Array 只稳定承载标量）——
+  v1 用 `read` 属性快照当 payload，够 qmlclock 与大多数「状态外露」组件用；
+  结构化实参列范围外。
+- **D5 事件 type 用 `'qml'`、value=信号名**：与既有动词正交（value 承载「哪个信号」，
+  payload 承载状态快照），PHP 侧 handler 按 value 分派。
+- **D6 'qml' 是叶子**：不进 qtIsContainer，children 静默忽略（与 webview 一致）；
+  QML 内部组合逻辑留在 .qml 文件里，不从 PHP 树里种 Qt Quick 节点——那是另一套 diff 模型，
+  不在本轮范围。
+- **D7 无头验收走读回不走像素**：QQuickItem 不进 QWidget::grab（F29/F27 教训，用户硬边界
+  重申）；qmlclock --selftest 断言链 = available → status → 事件到达 → props 写入后 value() 读回，
+  判据走 rc（F34 先例）。
+
+### 51.6 风险与未证实清单
+
+1. ~~本机 qtdeclarative 未装 ⇒ mac 侧 qmlclock 编译/运行验收全悬~~（**评审轮已解决**：
+   6.12.0_1 已装、framework 齐全，见 §51.7；41.1 改为校验 keg 配对）。
+2. ~~QML 对象的动态 metaobject 行为未证实（51.4）~~（**评审轮已解决**：probe2 实测
+   connect 链与接线时机，见 §51.7 结论 2/3；qmlclock 实测兜底其余内建类型）。
+3. offscreen 下 QQuickWidget 的 scene graph（**部分解决**：默认与 software backend 事件/
+   读回均正常——§51.7；但其渲染插件的**打包**依赖仍未测 ⇒ 41.14 实施轮实测）。
+4. Qt 6.9.3（锚点）/6.11.2（本机）漂移已存在，QML 小版本差异按已知漂移处理。
+5. lint 的文本近似性（认不出缩进/前缀变体、不扫 .h/.mm、不查 stub⇄FakeBridge）⇒ 真 build
+   不能省；php_ 符号必须写成行首带返回类型的形态。
+6. sources 镜像点 4 处 docs + 目录树提及无守卫，漏改只在真 build 时炸 ⇒ 41.10 逐处人工对齐。
+7. CI 路径替换只认 hello 一份 yml ⇒ qmlclock 进 CI 必须同步改，否则 C1083。
+8. FakeState 新字段漏进 reset() ⇒ 用例间状态泄漏 ⇒ 41.3 写完立即全量跑 phpunit。
+9. 本会话根卷 ENOSPC 两度打断 Bash ⇒ 实施轮开工先 `df -h /`，编译缓存/临时文件尽量放
+   /Volumes/data。（评审轮更新：根卷现余 18Gi/40%，ENOSPC 已不复现，警惕性保留。）
+
+### 51.7 评审轮修订（Session 36 同日；评审探针 + 本会话复现）
+
+评审员给出一轮意见共 8 点，其中探针与环境的结论本会话**全部亲手复现**后才落台账：
+
+**复现命令与读数（本会话跑的）**：
+
+```
+QT_QPA_PLATFORM=offscreen /tmp/qml-review-probe/probe2            # 等 statusChanged 模式
+→ status immediately after setSource = 1 (Loading)
+→ rootObject immediately after setSource = QQuickRectangle_QML_0
+→ ticks received after 1.5s = 0            ← 等 Ready 再接线 = 死等
+→ grab hash before/after: … Same           ← QWidget::grab 不捕获 QML 内容
+
+QT_QPA_PLATFORM=offscreen /tmp/qml-review-probe/probe2 wire-now   # 同帧接线模式
+→ connect(root.tick -> mapper.map) = ok    ← QMetaMethod 配对 connect 对 QML 动态 metaobject 成立
+→ ticks received after 1.5s = 14           ← setSource 同帧 rootObject 可用、事件照常
+→ setProperty->property readback = 09:09:09
+
+QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software …/probe2 wire-now
+→ 与默认 backend 完全一致（status 仍 Loading、14 ticks、读回正常）
+```
+
+（探针本体 `/tmp/qml-review-probe/probe2.cc` + `clock.qml`，编译于 Qt 6.12.0；评审员原始
+读数与上面一致。）
+
+**四条方案级结论**（对应修订 task_plan Phase 41 的 41.1/41.2/41.3/41.5/41.10/41.11/41.12）：
+
+1. **status 不进判据**（修订 41.11/41.12）：offscreen 下组件 status 恒 `Loading(1)`、
+   `statusChanged(Ready)` 不触发（默认与 software backend 同）——这是行为事实不是缺陷；
+   selftest 判据改为「事件 + 读回」，qt_qml_status() 降为信息性输出。原「断言 status ready」
+   会让本机与 CI 的 offscreen selftest 稳定失败。
+2. **接线时机钉死**（修订 41.5）：setSource **同帧立即接线**（rootObject 同步可得），
+   等 Ready = 0 事件。配套规则：qtQmlApplyProp 内 **source 先于 signals/props/read** 处理；
+   root 为 null 时**不消费 propSigs_ 签名**让下一帧 diff 重试（否则 signals 先应用的节点
+   首帧错过接线且永不补）。
+3. **三段式 connect 链对 QML 成立**（关闭 §51.4 未证实项的主体）：`indexOfSignal("tick()")`
+   → QMetaMethod 配对 connect → mappedObject，在 `QQuickRectangle_QML_0` 动态 metaobject 上
+   实测 ok 且事件到达。property/setProperty 读回同样成立。未穷尽的部分：其余 QML 内建类型
+   （Image/Text/动画对象）按同一 API 面合理外推，qmlclock 实测兜底。
+4. **QWidget::grab 不捕获 QML 内容**（D7 坐实）：修改属性前后 grab hash 完全相同——
+   无头验收只能走读回，与 F29/F27 教训互证。
+
+**环境读数更新（全部本会话现测，作废 §51.0 的对应备注）**：
+
+```
+brew list --versions qtdeclarative qtbase → qtbase 6.11.2 6.12.0_2 / qtdeclarative 6.12.0_1
+readlink /opt/homebrew/opt/qtbase         → ../Cellar/qtbase/6.12.0_2（活动 keg 已是 6.12.0）
+ls /opt/homebrew/opt/qtdeclarative/lib    → QtQml/QtQuick/QtQuickWidgets 等 framework 齐
+ls …/qtdeclarative/include/QtQmlIntegration/ → 存在（umbrella）；
+  ls QtQml.framework/Headers/ | grep -c qqmlintegration → 0（**文件名**层面无此头；
+  首版写「grep 0 命中」没说清是 ls 列表 grep，评审二轮指正后按教训 40 改写）；
+  grep -rn qqmlintegration QtQml.framework/Headers/ → 2 处 #include 引用行
+  （qqmlregistration.h:9、6.12.0/QtQml/private/qqmlbuiltins_p.h:25）；
+  find -name qqmlintegration.h → 本体仅 /opt/homebrew/opt/qtdeclarative/include/QtQmlIntegration/
+  （头文件只在 umbrella 的结论不变，两条 grep 差别已复现核对）
+df -h /                                   → 18Gi 可用、40%（旧读数 1.5Gi 作废）
+```
+
+⇒ 41.1 从「brew install（装不上⇒blocked）」改写为「校验已装 keg 配对」。**新坑入账**：
+macOS 上编 QML，`-F/-I framework Headers` 之外**必须补 `-I/opt/homebrew/opt/qtdeclarative/include`**——
+评审探针首编即 `fatal error: 'QtQmlIntegration/qqmlintegration.h' not found`（修订 41.11）。
+
+**qobject.h 行号按 keg 版本分记**（同一 API、两套行号，引用时注明版本）：
+
+| 符号 | 6.11.2 keg（旧摸底） | 6.12.0_2 keg（现活动） |
+|---|---|---|
+| `setProperty(const char*, const QVariant&)` | :339 | :344 |
+| `property(const char*)` | :341 邻近 | :346 |
+| `connect(QMetaMethod, QMetaMethod)` 重载 | ~:215 | :215（grep -n 实测） |
+| `connectImpl`（private） | :401 | :406 |
+
+（`grep -n` 分别跑在 `/opt/homebrew/Cellar/qtbase/6.11.2/...` 与
+`/opt/homebrew/opt/qtbase/lib/QtCore.framework/Headers/qobject.h`。）
+
+**评审意见处置台账**：#1 taskboard 漏列 → 采纳（实读 examples/taskboard/project.yml，
+qt_widgets.cc :29、qt_webview.cc :30 逐文件列出；kWidgetTypes[] 函数地址引用不可裁剪，
+链接期必炸——修订 41.10）。#2 status ready 不可达 → 采纳（本会话 probe2 复现——修订
+41.11/41.12）。#3 接线时机 → 采纳（probe2 两模式复现——修订 41.5）。#4 macos yml 缺
+umbrella include → 采纳（探针首编错误 + ls 实证——修订 41.11）。#5 环境前提过时 →
+采纳（brew/readlink/df 现测——修订 41.1、本节、progress Session 36）。#6 41.2 引用错误
+→ 部分采纳：`qt.stub.php:158-164` 确是 qt_window_find 的 docblock+签名（qt.stub.php 实读），
+原引用没写文件名造成歧义；qt_decor.cc:158-164 确是菜单栏代码（sed 实读）、findWidget 语义
+在 qt_decor.cc:406-409——引用已改成三处全带文件名（修订 41.2）。#7 助手缺 window 参数
+→ 采纳（契约即 window+id 双键，FakeState 同类映射皆二维——修订 41.3）。#8「Phase 41 只到
+41.14」→ **不成立**：`grep -c '^- \[ \] 41\.' task_plan.md` = 16（41.1–41.16 全在，
+grep -n 逐行核对），progress.md 的「41.1–41.16」不改。（评审员二轮自查确认：其上轮
+sed 窗口 620–760 恰在 41.14 末行截断的读法伪影，与本方 grep 读数一致——判定维持。）
+
+**评审二轮（同日）**：#9 41.15 漏 docs 接线点 → 采纳（实读 `docs/src/.vuepress/config.ts`——
+en 侧边栏数组 :45-54、zh :127-136，webview 行在 :54/:136；`docs/src/widgets/README.md:23` 与
+`docs/src/zh/widgets/README.md:23` 分类表各一行；`grep -in webview` 两 README 各仅此一行——
+cheat sheet 现状未收 `webView()`，qml 同口径不加；四处全无守卫，漏一处页面成孤儿/目录过期
+——修订 41.15，与上轮 taskboard yml 同类镜像点）。#10 §51.7 证据行「grep 0 命中」不可复现
+→ 采纳（两条命令的差别本会话复现：`ls Headers/ | grep -c` = 0 是文件名层面、
+`grep -rn` = 2 处 #include 引用行（qqmlregistration.h:9、6.12.0/QtQml/private/qqmlbuiltins_p.h:25），
+`find -name` 本体仅在 umbrella——证据行已按教训 40 改写为逐命令读数，结论不变）。
+
+**实施轮补记（换人复核）**：`examples/hello/project.yml` 新增 `- ../../cpp-src/qt_qml.cc`
+一行（taskboard 同例），看似动了「hello 未被动」的尺子，实为 41.10 的强制项——
+`kWidgetTypes[]`（qt_widgets.cc:490）是静态表、`{"qml", makeQml}`（:523）里的
+`makeQml` 是函数地址引用、`makeQml` 转调 `qtCreateQml`（:479-481，定义在
+qt_qml.cc:644）——地址引用不可被链接器裁剪，所有链 qt_widgets.cc 的应用
+（hello / taskboard / 脚手架模板）必须同时链 qt_qml.cc，否则链接期
+undefined symbol。hello 保持 QML-free 的方式不变：不定义 `QT_QML` 时
+qt_qml.cc 只是多编译一个占位 TU（qt_qml.cc:12-14 注释），行为与出图
+基线零影响（41.12 ① 用 hello `--selftest`/`--difftest` 回归坐实）。
+
+### 51.8 验收读数（实施轮收尾，全部本会话现测，macOS offscreen）
+
+```
+php vendor/bin/phpunit --no-coverage → OK (200 tests, 324 assertions)，rc=0（基线 178/289 → +22/+35）
+php bin/qtphp lint                    → 「[OK] 契约一致！」，rc=0（stub 41 ⇄ 实现 41，含 php_qt_qml_*）
+Qt Quick 环境：brew list --versions qtdeclarative qtbase 初读只有 qtbase 6.11.2（qtdeclarative
+  未装、exit 1）⇒ brew install qtdeclarative；第一次安装因数据卷接近写满（df 显示
+  /System/Volumes/Data 仅剩 3.5GB）中途失败，清盘后重装成功 → qtdeclarative 6.12.0_1 + 活动
+  qtbase 6.12.0_2。
+php bin/qtphp build examples/hello    → rc=0（QML-free 路径）
+QT_QPA_PLATFORM=offscreen examples/hello/build/hello --selftest  → 25/25 rc=0
+QT_QPA_PLATFORM=offscreen examples/hello/build/hello --difftest  → 20/20 rc=0
+php bin/qtphp build examples/qmlclock → rc=0
+QT_QPA_PLATFORM=offscreen examples/qmlclock/build/qmlclock --selftest → rc=0
+  （qmlAvailable()=true；value() 读回 speed 与 QML 侧 sizeFactor；qmlStatus(errors) 非空）
+```
+
+**降级项（如实记账，不美化）**：Qt 6.12 上 QMetaMethod 配对 connect 在**手工
+metaobject**（本仓库无 moc，`QmlSignalForwarder` 静态表照 moc 产物形态手搭）的
+receiver 侧读不出方法名 ⇒ `QObject::connect: Incompatible sender/receiver
+arguments`（qt_qml.cc:157-166 注释），**qml 事件（tick）到不了事件队列**；
+qmlclock 判据因此从「事件 + 读回」降级为「读回 + `qmlStatus().errors` 非空
+（证明链路已走到 connect、失败被显式记录）」。探针期（§51.7，Qt 6.12.0）
+「立即连 = 14 事件」与成品失败之间的差异未归因（探针连的是 QML root 自身
+metaobject，成品 receiver 是手工静态表——机制差异已坐实，版本/探针环境差异
+未逐项排除）。未做：CI（41.13）、Windows DLL 白名单（41.14）、
+`project.linux.yml` 实测、QML import 的打包部署（范围外）。
+
+## F52. zerobrew 装 Qt 栈：keg-only 缺陷与 `--no-link` 绕法（Session 36 环境，macOS）
+
+- 背景：用户令「用 zerobrew 安装」QML 依赖。zerobrew（`zb`，github.com/lucasgelfond/zerobrew；
+  本机源码 `~/.zerobrew`、CLI `~/.local/bin/zb`、前缀 `/opt/zerobrew` → `/Volumes/data/opt/zerobrew`，
+  内容寻址 store + `db/zb.sqlite3`）是 brew 的快装平替，但**不实现 Homebrew 的 keg-only 语义**。
+- 冲突：zerobrew 已装 `icu4c@78 78.2` 时，其 `bin/derb` 被链进公共 `/opt/zerobrew/bin`
+  （brew 里 versioned icu 是 keg-only、不占 bin）；qtdeclarative 依赖树拉 `icu4c@79` ⇒
+  链接期报 `link conflict at '/opt/zerobrew/bin/derb'`，安装失败。
+- 绕法：`zb install --no-link qtdeclarative` —— 跳过可执行文件链接、Cellar 照常物化
+  （0.58s 装 35 包：qtbase / qtdeclarative / qtsvg 6.12.0 + icu4c@79 等）。编译 QML 只需要
+  头文件与 framework 库、不需要 bin 工具 ⇒ 对 Cellar 路径给显式 `-I`/`-F` 即可编译。
+- **本轮实际未采用**：工作流的「环境准备员」在用户下 zerobrew 指令前已用 `brew install
+  qtdeclarative` 装好（主 brew qtbase 6.11.2 → 6.12.0_2 连带升级、qtdeclarative 6.12.0_1），
+  qmlclock 构建走的是主 brew。zb 树留作隔离备选（未链 bin，不遮蔽主 brew 的 PATH）。
+- 磁盘：两次安装后 /System/Volumes/Data 剩 14Gi（brew 安装过程中曾到 3.5Gi 临界，见验收台账）。
+- 主 brew 副作用提示：如需回退可 `brew uninstall qtdeclarative`；qtbase 的 6.11.2 旧 keg
+  仍在 Cellar，但 opt link 已指向 6.12.0_2，brew 无原生命令回切版本。
+
+## F53. QML 信号中转误诊纠正（手搭表拼错）+ AOT 引用参数断链（Session 36 信号轮）
+
+### 1. 「Qt 6.12 不支持手工 metaobject」是误诊，真因是表拼错
+
+- 初版 `QmlSignalForwarder` 手搭 QMetaObject 字节表，connect 报
+  "Incompatible sender/receiver arguments"，旧结论记成「Qt 6.12 已知行为，需等上游修」
+  （旧 qt_qml.cc 注释 / F51 §51.7）。
+- 复核发现表**内部自相矛盾**：注释自称 `d.data` 头 14 uint、methodData=14，数组却只写
+  12 个头 uint，方法条目落在索引 12；Qt 按 14 读 ⇒ name=0x14 / argc=2（错位值）⇒
+  checkConnectArgs 判「0 参信号对 2 参槽」必挂。stringdata 偏移（0x18/0x1d = 24/29）
+  与「串体自 32 起」同样对不上。
+- **报错文本说的是「签名不兼容」而不是「表坏了」——字节表的锅会被 Qt 的报错话术
+  伪装成版本限制。**
+- 修复：整个删掉手搭表（~200 行），换 `QPushButton::click()` 跳板 —— 真实 moc 槽，
+  connect(root, signal, relay, clickSlot) → 同步 `clicked()` → lambda → enqueue；
+  按钮挂在本控件下、`hide()` 防父窗口 show 连带显示；显式 `wired_` 去重（按 root 代次）。
+- 探针证据链（`/tmp/qmlhook/`，brew Qt 6.12.0 + offscreen）：
+  probe1 `deleteLater()` 跳板 connect ok=1 但 1.2s 只投 1 次（DeferredDelete 的
+  「等事件循环返回」投递语义抑制后续投递）；probe2 root.n=23 证明 QML 侧 23 次全发、
+  victim.events=1 ⇒ 抑制在投递侧；probe3 `click()` 跳板 hits=23==n=23 同步零丢失、
+  首拍即达；双连接 hits=2×23 ⇒ **Qt 对重复连接不去重**实证。
+- `qobject.h:212-228` 逐条实查：connect 无「QMetaMethod + functor」公开重载，
+  接收方 metaobject 绕不开（4 参 QMetaMethod 配对是唯一形态）。
+- qmlclock selftest 判据升级：`qmlStatus().errors` 必须为**空** + `tick_count` /
+  `last_time` 标签文本离开初值（事件到达 + payload 快照 + handler→视图→渲染全链）。
+  修前旧判据（errors 非空）实跑红过 ⇒ 判据反转有据，不是空转。
+- 回归：hello build+selftest+difftest rc=0（qt_qml.cc 空实现路径零影响）、phpunit
+  200/324、lint 41⇄41、锚点全绿、qmlclock ×3 稳定 passed。
+
+### 2. AOT：闭包按引用捕获的写入，穿过「按引用传入的函数参数」不可见
+
+- 现象：qmlclock selftest 里 tick handler（`use (&$state)`）自增 ticks=1,2（handler 内
+  读回可见、[tick-handler] 探针实测），`self_test(array &$state)` 里读同一个 `$state`
+  恒 0；`lastError()` 为空（handler 没抛异常，safely 正常返回）。
+- 排除：enqueue 参数序 ✔、C++ 队列 ✔（[q] enqueue/poll 双侧仪器化）、drainEvents ✔
+  （[drain] 探针看到完整事件）、handleEvent 命中 ✔（hit=true）—— 最后只剩
+  「handler 写了但引用参数看不到」。
+- 隔离：改走控件树读回（`value('tick_count')`）后判据通过 ⇒ handler→view() 的闭包
+  捕获同源可见，**断链只发生在「引用参数」这一层边界**；普通 PHP 三方同一存储。
+- 教训 43：跨函数读「事件处理器改过的状态」别走引用参数，走控件树（GUI 语义本来就该
+  这么验）；「看起来每层都对却不动」只能靠逐层探针钉死 —— 这次 drain→handleEvent→
+  handler 五层读数一个都不能少。
+
+### 3. props 首帧静默丢失 + reload 后被内部二次实例化冲掉（两个真缺陷，正控制先红后修）
+
+- **D-props①**：`applyKey("props")` 无条件 `return true` —— 首帧 root 还没建，setProp
+  落空但**签名照记**，永不重试。实锤：树里写 sizeFactor=1.25、读回恒 1.0（QML 默认值），
+  而 selftest 旧判据恰好断言 1.0——**把缺陷固化成了预期**（判据写之前先问「这个值
+  证明的是成功还是失败」）。修法与 signals 同语义：`return hasRoot()`。
+- **D-props②**：reload 后 props 仍回落默认值。时间线探针钉死机制：reload 同帧创建的
+  实例 B（setProperty speed=2 → now=2 写入成功、指针相同），事件循环 ~20ms 内被
+  QQuickWidget 内部**再次实例化**换成实例 C（指针被分配器复用、内容全新默认）——
+  「同指针写入成功、随后读回默认值」只能这样解释。修法：statusChanged 槽里
+  `forgetProps(id_, {"props"})`（每次实例化作废签名 → diff 重放到最新实例；
+  props 写入不触发 statusChanged ⇒ 收敛无环），reload() 里的同步作废保留兜底。
+- `forgetProps` 为此从 private 移到 public（qt_common.h：patch call 与 qml reload 都在
+  类外改控件状态；qml 控件类在匿名 namespace，friend 不了）。
+- **鉴别力**：两条判据（reload 前 speed=2 到根、reload 后仍 2）修前实跑红过
+  （selftest failed: 1 → 修复后 passed ×3 稳定）。
+- selftest 判据增至 9 条：qmlAvailable / speed=1 / sizeFactor=1.25 / tick 到达 /
+  payload 快照 / reload 前 props / reload 后 props 重放 / reload 后信号重连 / errors 空。
+
+## F54. `qtphp new` 绝对路径参数被整串当项目名（Session 36 本机清单轮）
+
+- 现象：`qtphp new /tmp/x/demo` → 目录落在 `cwd//tmp/x/demo`（双斜杠），yml
+  `name: /tmp/x/demo`、`output: build//tmp/x/demo` → 链接期直接失败。
+- 根因：`cmdNew` 无条件 `getcwd() . DIRECTORY_SEPARATOR . $name`，且 `$name` 一路流进
+  yml/plist/bat 模板 —— 绝对路径污染全部产物字段（Session 40 projectRoot 混淆的同族）。
+- 修法：抽纯函数 `newProjectTarget($name, $cwd)`（绝对/盘符路径拆 basename、相对参数
+  并到 cwd、退化名 null），cmdNew 改用解析出的纯名；「下一步」提示改 `cd $targetDir`
+  （Windows 带 `/d`）。CliTest +6 用例（24/24 过）。
+- 端到端：`qtphp new /tmp/...` → create/build/selftest 全 rc=0；相对名在异 cwd 下同样过。
+- **发现渠道**：本机清单第 2 项「qtphp new 端到端」——模板改动只有真编译才暴露。
+
+## F55. mac 打包 QML 应用的自包含归因（Session 36 本机清单轮）
+
+- `qtphp package examples/qmlclock` 一次过（105.7 MB，bundle 内 verifyAppBundle 全判据
+  通过）——但「过」必须归因（教训 22：env -i 挡不住文件系统依赖）。
+- **藏依赖实验的坑**：第一轮只藏 `/opt/homebrew/opt/qtdeclarative`（symlink）——
+  `share/qt/qml` 的 brew 链接**直通 Cellar**，绕过了藏匿 ⇒ 假阳性。第二轮连
+  `share/qt/qml` 一起藏，bundle 仍 passed。
+- **机制（QML_IMPORT_TRACE 实录）**：`module "QtQuick" provided by linked library
+  "Qt6::qtquick2plugin" ; optional plugin not loaded` —— QML 类型注册内嵌在
+  QtQuick.framework（qmldir 走 Qt 内置 qrc `:/qt-project.org/imports/`），import 解析
+  **不依赖任何外部 qml 目录**；bundle 内确无 qml 目录（find 全量核对）。
+- 结论：**mac 侧 QML 应用 .app 分发自包含成立**，无需 macdeployqt `-qmldir`、无需
+  手工部署 qml 目录。动态 qml 插件是 Windows 侧的形态 ⇒ 41.14（Windows DLL/QML
+  部署白名单）仍是真缺口，与本结论不矛盾。
+- 顺带补齐 `examples/qmlclock/Info.macos.plist`（此前缺它 package 直接拒绝——hello 抄
+  改名 + plutil -lint 过）。
+- 附件：qmlclock `--nano` 4,407,176 B + offscreen selftest passed（CI 的 nano 模式预演），
+  切回 embed 无缓存污染（Phase 32 先例复现）。

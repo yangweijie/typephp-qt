@@ -47,6 +47,7 @@ AOT 编译后的闭包对实参个数做**精确校验**，多传一个就抛 `A
 | `cell` | table（单元格被编辑，需 `editable`） | 新文本 | `row`、`col` |
 | `expand` / `collapse` | tree | 节点 id | `expanded` |
 | `close` | tabs（关闭按钮，需 `closable`） | 索引 | `index` |
+| `qml` | qml（节点 `signals` 清单里的每个名字） | 信号名 | 节点 `read` 属性的快照 |
 
 事件对象是一个关联数组：
 

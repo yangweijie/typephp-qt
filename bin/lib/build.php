@@ -297,9 +297,22 @@ function cmdBuild(string $path, array $flags = []): int
             $cur = getenv('INCLUDE') ?: '';
             putenv('INCLUDE=' . $msvcStdalign . ($cur !== '' ? ';' . $cur : ''));
         }
+        // 与上面那条分支对齐：**必须站在项目目录里调 tpc**。
+        //
+        // cxx-flags 里的相对路径（示例的 `-I"../../third_party/webview2/include"`）是
+        // 按项目目录解析的，而 tpc 不会自己 chdir —— cl.exe 继承的是 tpc 的 CWD。
+        // 上面那条分支用批处理里的 `cd /d` 顺手解决了，这条没有；于是同一个项目
+        // 「qtphp 自己调 vcvars」时能编过，「MSVC 已就绪」（VS 开发者命令行、CI 的
+        // msvc-dev-cmd）时却报 `fatal error C1083: Cannot open include file: 'WebView2.h'`
+        // —— 相对路径被解析成相对仓库根，差一层目录。
+        $prevCwd = getcwd() ?: null;
+        @chdir(dirname($projectAbs));
         try {
             passthru($tpcCmd . ' 2>&1', $exitCode);
         } finally {
+            if ($prevCwd !== null) {
+                @chdir($prevCwd);
+            }
             if ($mergedYml !== null) {
                 @unlink($mergedYml);
             }

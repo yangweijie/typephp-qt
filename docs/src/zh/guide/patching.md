@@ -36,7 +36,7 @@ $app->patch([
 
 ## `call` —— 调方法
 
-`args` 是**位置参数**。已实现六个方法：
+`args` 是**位置参数**。已实现六个通用方法：
 
 | method | args | 作用域 |
 |---|---|---|
@@ -46,6 +46,10 @@ $app->patch([
 | `setValue` | `args[0]` = 值 | 进度条/滑块/数字框按数值，输入类按文本 |
 | `select` | `args[0]` = id 或索引 | 与该控件的 `current` 属性**完全同一套语义** |
 | `focus` | 无 | 把键盘焦点交给该控件 |
+
+另外两个专属于内嵌类控件：`reload`（webview 与 qml）与 `goBack` / `goForward`（仅 webview），
+见[网页视图](/zh/widgets/webview.md)与 [QML](/zh/widgets/qml.md)。
+它们走 `QtApp` 的便捷方法：`webViewReload()` / `qmlReload()`。
 
 ```php
 $app->patch([

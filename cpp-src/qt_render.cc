@@ -182,6 +182,18 @@ void QtWindowBox::applyNodeProps(QWidget *widget, const QString &type, const QSt
         const Variant value = it.value();
         const quint64 sig = qtSignature(value);
         if (sigs.value(key) == sig) continue;  // 没变，跳过
+
+        // qml 的键按 type 分派到 qtQmlApplyProp（属性已经生效）；
+        // 返回值决定**签名要不要记**：
+        //   false = root 尚未落地、别记（下一帧 diff 自动重试 signals/read）
+        //   true  = 已生效，记签名后走 qtApplyProp（通用键 visible/enabled/...）
+        // 其他类型恒 true，行为不变。
+        // 注意：这里第二次调 qtQmlApplyProp 会再次 applyKey（幂等），
+        // 返回 false 时不记签名，下一帧 diff 自动重试。
+        if (type == QLatin1String("qml") && !qtQmlApplyProp(this, widget, key, value)) {
+            sigs.remove(key);  // 明确不记：下一帧自动重试
+            continue;
+        }
         sigs.insert(key, sig);
         qtApplyProp(this, widget, type, key, value);
     }
@@ -486,6 +498,11 @@ void QtWindowBox::patch(const Array &ops) {
                 // webview 的三个命令式动作。它们不改属性，所以不必 forgetProps。
                 // QTextBrowser 后端没有导航栈，qtWebViewCall 内部静默忽略。
                 qtWebViewCall(widget, method);
+            } else if (type == QLatin1String("qml") && method == QLatin1String("reload")) {
+                // qml 的 reload：重新加载 source。改完必须 forgetProps(source)，
+                // 否则下一帧「签名说没变、控件其实换了组件」（命令式旁路的通用规则）。
+                qtQmlCall(widget, method);
+                forgetProps(id, {QStringLiteral("source")});
             } else if (qtStrictMode()) {
                 qWarning("[qt] patch: unknown method '%s' on '%s' (%s), ignored",
                          qPrintable(method), qPrintable(id), qPrintable(type));

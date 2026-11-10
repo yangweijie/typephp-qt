@@ -231,6 +231,35 @@ final class WidgetTree
         return self::node('webview', [], $props);
     }
 
+    /**
+     * QML 组件（QQuickWidget 嵌入现有控件树，叶子控件）。
+     *
+     * 叶子语义（F51 D6）：QML 内部结构由 .qml 文件自己组织，
+     * 节点上的 children 被静默忽略，不从 PHP 树里种 Qt Quick 节点。
+     *
+     * 四个专用键（其余键走通用控件树语义）：
+     *   `$props['source']`   .qml 文件路径（相对 exe 目录解析）或 file:// URL
+     *   `$props['signals']`  root 对象暴露的信号名列表（按名连进事件队列，
+     *                        事件 type='qml'、value=信号名、payload=read 快照）
+     *   `$props['props']`    关联数组，写 root 的动态属性
+     *                        （setProperty 通道，动态 metaobject 支持）
+     *   `$props['read']`     属性名列表，事件 payload 与 value() 读回都用它
+     *
+     * 空 source **不写键**防覆盖显式传入的 source（照 webView 的 guard，
+     * tests/WidgetTreeTest.php:325 的注释先例）。
+     *
+     * 能力查询：`QtApp::qmlAvailable()` 返回编译时是否启用了 QML；
+     * false 时控件退化成可诊断占位标签（strict 下打警告），信号/属性/读回
+     * 全部失效，应用走降级分支。
+     */
+    public static function qml(string $source = '', array $props = []): array
+    {
+        if ($source !== '') {
+            $props['source'] = $source;
+        }
+        return self::node('qml', [], $props);
+    }
+
     // ── 内部 ──
 
     private static function node(string $type, array $children, array $props): array

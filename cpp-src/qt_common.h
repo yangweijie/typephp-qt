@@ -7,6 +7,7 @@
 //   qt_decor.cc    装饰（菜单/托盘/状态栏）与对话框
 //   qt_widgets.cc  控件工厂与属性应用（控件目录）
 //   qt_webview.cc  webview 的统一入口 + WebView2/QTextBrowser 后端
+//   qt_qml.cc      qml 的统一入口 + QQuickWidget 后端（QT_QML）/ 降级占位
 //   qt_webview_wk.mm  WKWebView 后端（仅 macOS，且仅在 QT_WEBVIEW_WK 下进 sources）
 //
 // 设计约束（与 php-src/qt.stub.php 一一对应）：
@@ -343,6 +344,33 @@ QWidget *qtCreateWebViewWK(QtWindowBox *box, const QString &id);
 void qtWebViewApplyPropWK(QWidget *widget, const QString &key, const Variant &value);
 void qtWebViewCallWK(QWidget *widget, const QString &method);
 
+// ── qml（编译期开关 QT_QML；未定义时降级为可诊断占位，全符号仍存在）──
+
+/** 创建 qml 控件（QT_QML 下是 QQuickWidget，否则是可诊断占位标签）。 */
+QWidget *qtCreateQml(QtWindowBox *box, const QString &id);
+
+/**
+ * 把 source / signals / props / read 应用到 qml 控件（type='qml' 专用）。
+ *
+ * 返回 true = 已生效（调用方记 diff 签名）；
+ * 返回 false = **别记签名**（signals/read 在 root 未落地时应用，
+ * 下一帧 diff 自动重试，否则首帧错过接线且永不补 —— F51 §51.7 探针结论 2）。
+ * 键的应用顺序 source → signals → props → read 由调用方保证（root 先落地）。
+ */
+bool qtQmlApplyProp(QtWindowBox *box, QWidget *widget, const QString &key, const Variant &value);
+
+/** qml 控件的读回值：read 声明属性的当前快照（无 read 声明时为空对象）。 */
+Variant qtQmlWidgetValue(QWidget *widget);
+
+/** qml 的命令式动作（目前只有 reload：重设 source）。 */
+void qtQmlCall(QWidget *widget, const QString &method);
+
+/** 读组件状态（'none'|'loading'|'ready'|'error' + errors 列表）；非 qml 控件返回 {}。 */
+Array qtQmlStatus(QWidget *widget);
+
+/** 按窗口 + 控件 id 读 qml 状态（控件不存在或非 qml 类型时返回 {}）。 */
+Array qtQmlStatusByBox(QtWindowBox *box, const QString &id);
+
 /** 读取控件当前值，供 qt_window_widget_value() 使用。 */
 Variant qtWidgetValue(QWidget *widget, const QString &type);
 
@@ -450,6 +478,12 @@ class QtWindowBox : public Box {
     QVBoxLayout *rootLayout() const { return rootLayout_; }
     QString typeById(const QString &id) const { return types_.value(id); }
 
+    /**
+     * 按 id 取控件指针（qt_qml.cc 的状态查询要用；findWidget 只给 Array）。
+     * 找不到返回 nullptr。
+     */
+    QWidget *widgetById(const QString &id) const { return widgets_.value(id); }
+
     /** 创建时分配的稳定窗口 id（win_N），跨帧不变。 */
     QString windowId() const { return id_; }
 
@@ -498,11 +532,20 @@ class QtWindowBox : public Box {
     void applyDeferredCurrent(QWidget *widget, const QString &type, const QString &id, const Variant &node);
     /** 表格/树的结构字段是否变了（变了才整表/整树重建）。 */
     bool structuralChanged(const QString &id, const Variant &node, const QString &type);
-    /** 摘掉这些键的签名，让下一次 render 必然重新应用（命令式 call 改过控件后用）。 */
-    void forgetProps(const QString &id, const QStringList &keys);
     void syncChildren(QWidget *container, const QString &type, const QList<ChildSlot> &desired);
     void forgetSubtree(QWidget *root);
     void removeStale();
+
+  public:
+    /**
+     * 摘掉这些键的签名，让下一次 render 必然重新应用（命令式 call 改过控件后用）。
+     *
+     * patch 的 call 实现与 qml 的 reload 都在类外改控件状态：qml reload 重建
+     * root 后 props 的签名若不作废，新 root 会静默回落 QML 默认值（F53 §3），
+     * 所以这条必须对外可见——放 public，别走 friend（qml 控件类在匿名
+     * namespace 里，friend 不了）。
+     */
+    void forgetProps(const QString &id, const QStringList &keys);
 
     QMainWindow *window_ = nullptr;
     QWidget *central_ = nullptr;

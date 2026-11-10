@@ -36,7 +36,7 @@ $app->patch([
 
 ## `call` — invoke a method
 
-`args` are **positional**. Six methods are implemented:
+`args` are **positional**. Six generic methods are implemented:
 
 | method | args | Scope |
 |---|---|---|
@@ -46,6 +46,10 @@ $app->patch([
 | `setValue` | `args[0]` = value | Numeric for progress/slider/spin, text for input controls |
 | `select` | `args[0]` = id or index | **Exactly the same semantics** as that control's `current` property |
 | `focus` | none | Give keyboard focus to the control |
+
+Two more are specific to the embed controls: `reload` (webview and qml) and `goBack` /
+`goForward` (webview only) — see [WebView](/widgets/webview.md) and [QML](/widgets/qml.md).
+These go through the `QtApp` convenience methods: `webViewReload()` / `qmlReload()`.
 
 ```php
 $app->patch([

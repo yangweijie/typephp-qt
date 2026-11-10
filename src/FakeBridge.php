@@ -48,6 +48,15 @@ namespace TypePHP\Qt\Fake {
         /** @var array<int, array{window: mixed, id: string, method: string}> webview 命令式动作的调用轨迹 */
         public static array $webViewCalls = [];
 
+        /** 测试替身报的 QML 能力；默认 false（与「未定义 QT_QML 的构建」一致）。 */
+        public static bool $qmlAvailable = false;
+
+        /** @var array<string, array<string, array>> 窗口 id -> 控件 id -> 组件状态（与 $props/$values 同形态，双键防跨窗口串状态） */
+        public static array $qmlStatus = [];
+
+        /** @var array<int, array{window: mixed, id: string, method: string}> qml 命令式动作的调用轨迹 */
+        public static array $qmlCalls = [];
+
         public static int $seq = 0;
 
         /** @var string[] snapshot() 收到的路径 */
@@ -82,6 +91,9 @@ namespace TypePHP\Qt\Fake {
             self::$clipboard = '';
             self::$webViewBackend = 'textbrowser';
             self::$webViewCalls = [];
+            self::$qmlAvailable = false;
+            self::$qmlStatus = [];
+            self::$qmlCalls = [];
             self::$seq = 0;
             self::$snapshots = [];
             self::$renders = [];
@@ -172,8 +184,13 @@ namespace {
                     // webview 的三个命令式动作：真实桥接只转给 WebView2 后端，
                     // 且没有可断言的返回值。这里记一笔调用轨迹，供测试断言
                     // 「动作确实发出去了」，而不是断言某个属性变了。
-                    if ($type !== 'webview') break;
-                    FakeState::$webViewCalls[] = ['window' => $window, 'id' => $id, 'method' => $method];
+                    if ($type === 'webview') {
+                        FakeState::$webViewCalls[] = ['window' => $window, 'id' => $id, 'method' => $method];
+                    } elseif ($type === 'qml' && $method === 'reload') {
+                        // qml 的命令式动作只有 reload（重新加载 source）。
+                        // 与 webview 轨迹先例同构：动作不改属性，只记一笔。
+                        FakeState::$qmlCalls[] = ['window' => $window, 'id' => $id, 'method' => $method];
+                    }
                     break;
                 case 'appendRows':
                     if ($type !== 'table') break;
@@ -505,6 +522,54 @@ namespace {
         return in_array(FakeState::$webViewBackend, ['webview2', 'wkwebview'], true);
     }
 
+    /**
+     * 测试替身默认报「QML 未启用」—— 与未定义 QT_QML 的构建同口径。
+     *
+     * 报 true 会骗过应用侧的降级判断（以为信号/属性/读回可用）。
+     * 想模拟 QML 可用，用 test_set_qml_available(true) 覆盖。
+     */
+    function qt_qml_available(): bool
+    {
+        return FakeState::$qmlAvailable;
+    }
+
+    /**
+     * 假桥的组件状态：未预置时从渲染树推导（与真桥同语义）。
+     *
+     * 真桥 setSource 后组件状态起步是 loading；假桥没有真正的加载过程，
+     * 节点上写过 source 就报 loading、errors 为空。控件不存在返回 []，
+     * 与 qt_window_find 的「找不到返回 []」同形态。
+     */
+    function qt_qml_status(mixed $window, string $id): array
+    {
+        if (isset(FakeState::$qmlStatus[$window][$id])) {
+            return FakeState::$qmlStatus[$window][$id];
+        }
+        $props = FakeState::$props[$window][$id] ?? null;
+        if (!is_array($props) || ($props['type'] ?? '') !== 'qml') {
+            return [];
+        }
+        return ['status' => array_key_exists('source', $props) ? 'loading' : 'none', 'errors' => []];
+    }
+
+    /** 覆盖 QML 能力位，用于测「降级」与「全功能」两条分支。 */
+    function test_set_qml_available(bool $available): void
+    {
+        FakeState::$qmlAvailable = $available;
+    }
+
+    /** 预置一个 qml 控件的组件状态（window+id 双键，与 $props/$values 同形态）。 */
+    function test_set_qml_status(mixed $window, string $id, array $status): void
+    {
+        FakeState::$qmlStatus[$window][$id] = $status;
+    }
+
+    /** 读取 qml 命令式动作的调用轨迹。 */
+    function test_qml_calls(): array
+    {
+        return FakeState::$qmlCalls;
+    }
+
     // ── 测试辅助（真实桥接没有这些） ──
 
     /** 注入一个事件到队列。 */
@@ -567,6 +632,14 @@ namespace {
         }
     }
 
+    /**
+     * 真桥 qml 的 value() 返回「read 清单 ∩ 组件属性」的快照（qtQmlWidgetValueImpl
+     * 只迭代 readKeysList）；假桥没有真正的 QML 引擎，从渲染树推导：
+     * read 声明的属性取 props 映射里的当前值，read 没声明的键一律不带
+     * （哪怕 props 里写了）——与真桥「value() 只读 read」的语义同构。
+     * read 未声明 / props 缺对应键时键也省略（真桥按 QML 侧实际值读回，
+     * 假桥无此能力，键缺省比塞默认值更接近「没读」）。
+     */
     function qt_fake_default_value(string $type, array $node): mixed
     {
         return match ($type) {
@@ -574,8 +647,22 @@ namespace {
             'spin', 'doublespin', 'slider', 'progress' => $node['value'] ?? 0,
             'checkbox', 'radio' => (bool) ($node['checked'] ?? false),
             'label', 'button' => $node['text'] ?? '',
+            'qml' => qt_fake_qml_value($node),
             default => null,
         };
+    }
+
+    /** qml 节点初始值：read 清单 ∩ props 映射的子集（键序取 read 的）。 */
+    function qt_fake_qml_value(array $node): array
+    {
+        $props = (array) ($node['props'] ?? []);
+        $result = [];
+        foreach ((array) ($node['read'] ?? []) as $key) {
+            if (is_string($key) && array_key_exists($key, $props)) {
+                $result[$key] = $props[$key];
+            }
+        }
+        return $result;
     }
 
     /**

@@ -103,9 +103,17 @@ final class AppData
                 ? (self::env('APPDATA') ?? self::home() . '/AppData/Roaming')
                 : (self::env('LOCALAPPDATA') ?? self::home() . '/AppData/Local');
         } elseif ($family === 'Darwin') {
-            $root = $kind === 'cache'
-                ? self::home() . '/Library/Caches'
-                : self::home() . '/Library/Application Support';
+            // 三者必须落在不同的根上。曾经 config 与 data 都指向 Application Support，
+            // 于是 configPath('x.json') 和 dataPath('x.json') 是同一个文件 —— Windows
+            // 的 APPDATA/LOCALAPPDATA 天然分开，Linux 的 XDG 也天然分开，只有 macOS
+            // 这一支写歪了，且单测在 Windows 上永远发现不了。
+            // 取值与 Qt 的 QStandardPaths 对齐：AppConfigLocation = ~/Library/Preferences，
+            // AppDataLocation = ~/Library/Application Support，CacheLocation = ~/Library/Caches。
+            $root = match ($kind) {
+                'config' => self::home() . '/Library/Preferences',
+                'cache' => self::home() . '/Library/Caches',
+                default => self::home() . '/Library/Application Support',
+            };
         } else {
             // XDG Base Directory：变量为空或相对路径时按规范回落到默认值。
             [$var, $fallback] = [

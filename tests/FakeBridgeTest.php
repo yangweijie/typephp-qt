@@ -11,12 +11,15 @@ use function qt_app_create;
 use function qt_bridge_version;
 use function qt_clipboard_read;
 use function qt_clipboard_write;
+use function qt_qml_available;
+use function qt_qml_status;
 use function qt_window_close;
 use function qt_window_create;
 use function qt_window_destroy;
 use function qt_window_is_open;
 use function qt_window_message;
 use function qt_window_notify;
+use function qt_window_patch;
 use function qt_window_poll_event;
 use function qt_window_render;
 use function qt_window_set_status;
@@ -27,7 +30,10 @@ use function qt_window_snapshot;
 use function qt_window_widget_value;
 use function test_inject_event;
 use function test_props;
+use function test_qml_calls;
 use function test_reset;
+use function test_set_qml_available;
+use function test_set_qml_status;
 use function test_window;
 
 /**
@@ -199,5 +205,134 @@ final class FakeBridgeTest extends TestCase
         ]);
         $props = test_props($this->window, 'lbl');
         $this->assertSame('color:red', $props['style']);
+    }
+
+    // ── qml ──
+
+    /** qmlAvailable 默认 false（与未定义 QT_QML 的构建同口径）。 */
+    public function testQmlAvailableDefaultsToFalse(): void
+    {
+        $this->assertFalse(qt_qml_available());
+    }
+
+    /** 覆盖能力位后翻转。 */
+    public function testQmlAvailableCanBeOverridden(): void
+    {
+        test_set_qml_available(true);
+        $this->assertTrue(qt_qml_available());
+    }
+
+    /** qmlStatus 默认结构：没渲染过 qml 节点时是 []。 */
+    public function testQmlStatusEmptyForUnknownControl(): void
+    {
+        $this->assertSame([], qt_qml_status($this->window, 'missing'));
+    }
+
+    /** qmlStatus 默认结构：渲染过 qml 节点但没预置状态时，从渲染树推导。 */
+    public function testQmlStatusDerivedFromRenderedNode(): void
+    {
+        qt_window_render($this->window, [
+            'type' => 'vbox',
+            'children' => [
+                ['type' => 'qml', 'id' => 'clock', 'source' => 'assets/clock.qml', 'signals' => ['tick']],
+            ],
+        ]);
+        $status = qt_qml_status($this->window, 'clock');
+        $this->assertSame('loading', $status['status']);
+        $this->assertSame([], $status['errors']);
+    }
+
+    /** qmlStatus 预置后返回预置值（window+id 双键，跨窗口不串状态）。 */
+    public function testQmlStatusPreseeded(): void
+    {
+        qt_window_render($this->window, ['type' => 'vbox', 'children' => [['type' => 'qml', 'id' => 'c']]]);
+        $other = qt_window_create('Other');
+        test_set_qml_status($this->window, 'c', ['status' => 'error', 'errors' => [['line' => 1, 'message' => 'bad']]]);
+        $this->assertSame('error', qt_qml_status($this->window, 'c')['status']);
+        $this->assertSame([], qt_qml_status($other, 'c'));
+    }
+
+    /** qml 节点的 value() 返回 read 清单 ∩ props 映射的子集（与真桥 qtQmlWidgetValueImpl 只迭代 readKeysList 同语义）。 */
+    public function testQmlValueReadsBackReadKeys(): void
+    {
+        // props 里**故意多带一个 read 未声明的键**（frame 是 QML 侧自管的属性）：
+        // 真桥只读 read 清单，这个键必须被滤掉 —— 修前 FakeBridge 返回全部 props，
+        // 旧断言因 props 恰好只含 read 键才通过，属巧合非真镜像。
+        qt_window_render($this->window, [
+            'type' => 'vbox',
+            'children' => [
+                ['type' => 'qml', 'id' => 'c',
+                 'props' => ['timeText' => '09:09:09', 'frame' => 3],
+                 'read' => ['timeText']],
+            ],
+        ]);
+        $value = qt_window_widget_value($this->window, 'c');
+        $this->assertSame(['timeText' => '09:09:09'], $value);
+    }
+
+    /** qml 节点没声明 read 时 value() 是空数组（真桥 readKeysList 为空 → 快照为空对象）。 */
+    public function testQmlValueWithoutReadIsEmpty(): void
+    {
+        qt_window_render($this->window, [
+            'type' => 'vbox',
+            'children' => [
+                ['type' => 'qml', 'id' => 'c', 'props' => ['timeText' => '09:09:09']],
+            ],
+        ]);
+        $this->assertSame([], qt_window_widget_value($this->window, 'c'));
+    }
+
+    /** qml 的 reload 动作记进 qmlCalls 轨迹（与 webviewCalls 同构）。 */
+    public function testQmlReloadRecordsCall(): void
+    {
+        qt_window_render($this->window, [
+            'type' => 'vbox',
+            'children' => [['type' => 'qml', 'id' => 'c', 'source' => 'a.qml']],
+        ]);
+        qt_window_patch($this->window, [['op' => 'call', 'id' => 'c', 'method' => 'reload']]);
+        $calls = test_qml_calls();
+        $this->assertSame([['window' => $this->window, 'id' => 'c', 'method' => 'reload']], $calls);
+    }
+
+    /**
+     * qml 的 value() 快照按「当前已记录的 props 映射」推导（read ∩ props，
+     * 与真桥 setProperty 后读回同语义）：下一帧重新渲染时 props 被刷新，读回跟着变。
+     * patch set 不走 qml 的 props 键（真桥 qtQmlApplyProp 是 qml 四键专用通道，
+     * patch 通道只有 reload）——这是假桥的诚实边界，不做模拟。
+     */
+    public function testQmlValueReflectsRenderedProps(): void
+    {
+        qt_window_render($this->window, [
+            'type' => 'vbox',
+            'children' => [
+                ['type' => 'qml', 'id' => 'c', 'props' => ['timeText' => '09:09:09'], 'read' => ['timeText']],
+            ],
+        ]);
+        qt_window_render($this->window, [
+            'type' => 'vbox',
+            'children' => [
+                ['type' => 'qml', 'id' => 'c', 'props' => ['timeText' => '10:00:00'], 'read' => ['timeText']],
+            ],
+        ]);
+        $this->assertSame(['timeText' => '10:00:00'], qt_window_widget_value($this->window, 'c'));
+    }
+
+    /** reset() 清掉新字段（不泄漏到下一个用例）。 */
+    public function testResetClearsQmlState(): void
+    {
+        test_set_qml_available(true);
+        qt_window_render($this->window, [
+            'type' => 'vbox',
+            'children' => [['type' => 'qml', 'id' => 'c', 'source' => 'a.qml']],
+        ]);
+        test_set_qml_status($this->window, 'c', ['status' => 'ready', 'errors' => []]);
+        qt_window_patch($this->window, [['op' => 'call', 'id' => 'c', 'method' => 'reload']]);
+
+        test_reset();
+
+        $this->assertFalse(qt_qml_available());
+        $this->assertSame([], FakeState::$qmlStatus);
+        $this->assertSame([], FakeState::$qmlCalls);
+        $this->assertSame([], qt_qml_status($this->window, 'c'));
     }
 }

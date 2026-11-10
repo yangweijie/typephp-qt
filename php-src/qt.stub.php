@@ -30,6 +30,7 @@
  *   window  vbox hbox grid form group scroll tabs tab stack page split spacer separator
  *   label button lineedit textedit spin doublespin slider progress checkbox radio
  *   combo list table tree image link
+ *   qml（叶子：QML 内容在 .qml 文件里自己组织，节点上的 children 被忽略）
  */
 
 /** 桥接契约版本，`qtphp lint` 用它交叉校验 stub 与 C++ 是否同源。 */
@@ -239,6 +240,31 @@ function qt_webview_backend(): string {}
 
 /** 该后端是否支持 JavaScript —— 只有 QTextBrowser 不支持，应用可据此降级提示。 */
 function qt_webview_supports_js(): bool {}
+
+/**
+ * 编译时是否启用了 QML 支持（yml 里定义了 QT_QML 宏）。
+ *
+ * false 时 `'qml'` 类型节点渲染成带诊断文字的占位标签（QT_DEBUG_STRICT=1 下打警告），
+ * 信号/属性/读回全部失效 —— 应用可用它决定降级提示，而不是让用户看到一块占位。
+ */
+function qt_qml_available(): bool {}
+
+/**
+ * 读一个 `'qml'` 控件的组件状态（错误显式通道，不静默）。
+ *
+ * 返回
+ *   ['status'=> 'none'|'loading'|'ready'|'error',
+ *    'errors'=> [['line'=>int, 'message'=>string], ...]]
+ *
+ * status 语义：none = 控件尚未设置 source；loading = source 已设置（offscreen 平台下
+ * 组件就绪状态可能永远停在 loading，这是平台行为，不代表出错）；ready = 组件确认加载
+ * 完成；error = 组件加载失败（编译错误 / 文件不存在），errors 里是逐条诊断。
+ * 控件不存在时返回 []。
+ *
+ * QML 加载失败**不会静默**（白屏 + 零诊断是最难查的一类缺陷），这个函数是程序化
+ * 读取错误的通道；开发期也可以用 QT_DEBUG_STRICT=1 让它往 stderr 打 qWarning。
+ */
+function qt_qml_status(mixed $window, string $id): array {}
 
 /* ────────────────────────────── 网络原语 ────────────────────────────── */
 
