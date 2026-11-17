@@ -464,8 +464,14 @@ final class Decoder
     /** 找 identifier 打开所在的 lane（跨 lane 续接判定）；未打开返回 null。 */
     private function findOpenLane(string $family, string $identifier): ?string
     {
+        // R8：父 lane（''）恒为 openItems 的首键（构造函数插入）；打开项绝大多数在
+        // 父 lane，先直探免掉每 chunk 事件的全 lane foreach。结果与原循环等价
+        // （原循环也从 '' 键开始、按键序取第一个命中，而 '' 就是首键）。
+        if ($this->openItems[''][$family] === $identifier) {
+            return '';
+        }
         foreach ($this->openItems as $key => $items) {
-            if ($items[$family] === $identifier) {
+            if ($key !== '' && $items[$family] === $identifier) {
                 return $key;
             }
         }

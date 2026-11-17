@@ -183,15 +183,20 @@ agui-demo 缺 .gitignore / 文档落点勘误），收口轮无新增。
 | R3 | in_array 对清单仍 O(n) 线性（KNOWN 每事件全扫 31 项）→ 7 张 type=>true const 哈希表 + isset O(1) | 622292（+10.8%） | 580e79a |
 | R4 | closeLane 每事件付 3 族字面量 + 3×closeOne + 3×array_merge（常见情况 lane 无打开项）→ 空 lane 快返 [] | 832549（+33.8%） | bf816ea |
 | R5 | feed 每事件「expandOne 返回临时数组 + 二次遍历逐条追加」→ expandOne/expandChunk 按引用写 $out | 892375（+7.2%，累计 **2.0×**） | 2f563d5 |
+| R6 | expandOne 每事件 6 张 type=>true 表各探一次 → 合并单张位掩码表 CLASS_OF（一次 ?? 取回 + 位运算判 7 类属性） | 919931（+3.1%） | ff89928 |
+| R7 | expandOne 对 $event['type'] 的 4-5 次同键哈希探测 → 收敛到局部 $type（legacy 映射后同步） | 928821（+1.0%，累计 **2.07×**） | 3487b88 |
 
 每轮 checks（phpunit + lint）全绿；bench ×3 波动 0.66–3% 内（R1 基线读数 447974，
-R5 读数 892375，各 repeat:3 取中位）。
+R7 读数 928821，各 repeat:3 取中位）。
 
 **教训**：
 
-- 单轮收益 25% → 11% → 34% → 7% 递减，已近协议层平台；剩余热点在 bench harness
-  本身（每批 array_slice / new Decoder+Session），属计时口径不动 —— 优化循环到
-  R5 收手，若继续看 Session::consume 的 switch 或 expandChunk 的 chunk 路径。
+- 单轮收益 25 → 11 → 34 → 7 → 3 → 1%，R7 后已进噪声带，loop 收手（7/20）：
+  剩余热点在 bench harness 本身（每批 array_slice / new Decoder+Session），属计时口径不动。
+- **AOT 地板高于纯 PHP**：纯 PHP 探针（20000 事件口径，/tmp/agiuprobe/probe.php）
+  full 管线 8.1ms，AOT 二进制 21.4ms——AOT 比原生 PHP **慢 2.7×**。每事件 ~1.1µs
+  的地板由 AOT 运行时的哈希/数组开销决定，PHP 侧代码再压无意义；协议层优化收益
+  主要来自「减少每事件的哈希探测次数」（R2–R7 全属此类）。
 - 按引用参数（`array &$out`）在 AOT 下行为正常（AGENTS.md 的 F53 警告只针对
   闭包捕获写入，普通形参传引用不受影响）——R5 若 AOT 不认会 build 炸，实测过。
 - 冻结顺序坑：先 init_experiment 再创建 measure.sh 会被写钩子以「循环已冻结」拒绝

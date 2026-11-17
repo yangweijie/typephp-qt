@@ -3515,6 +3515,9 @@ hello+qmlclock，见 ci.yml:129/151/167）；`.auto/**`（主会话管理）。
 
 - 明细读数（各命令 rc、断言数、bench ×3 波动 0.66%）已如实落在 progress.md
   Session 38「实施轮 + 本机验收」42.10①–⑥ 表（§58.6 验收判据 1–7 条全执行）；
+- 优化轮（autoresearch「agui-support」段 R1–R7，447974 → 928821 events/s，2.07×，
+  全部 keep、checks 全绿）与「AOT 地板高于纯 PHP 2.7×」探针读数落在
+  progress.md Session 38「优化轮（autoresearch「agui-support」段，同日主会话执行）」；
 - 未验项如实留档（不美化）：`examples/agui-demo/project.linux.yml` 未实测
   （本机 macOS、无 Linux Qt 环境）；agui-demo 未进 CI（ci.yml:129/151/167 显式
   枚举 hello+qmlclock，§58.5 范围外）；未 commit。
