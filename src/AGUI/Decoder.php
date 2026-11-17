@@ -271,14 +271,17 @@ final class Decoder
         // legacy THINKING_* 容错映射（1.0 已退役，记 mapping warning 后按映射名走管线）
         if (($cls & self::CLS_LEGACY) !== 0) {
             // 映射表名：THINKING_TEXT_MESSAGE_X → REASONING_MESSAGE_X（表内没有 THINKING_MESSAGE_*）
-            $event['type'] = str_replace('THINKING_TEXT_MESSAGE_', 'REASONING_MESSAGE_', $type);
-            $this->warnings[] = 'legacy 事件 ' . $type . ' 已映射为 ' . $event['type'] . '（1.0 退役）';
+            $legacyName = $type;
+            $type = $event['type'] = str_replace('THINKING_TEXT_MESSAGE_', 'REASONING_MESSAGE_', $type);
+            $this->warnings[] = 'legacy 事件 ' . $legacyName . ' 已映射为 ' . $type . '（1.0 退役）';
             // 映射后按映射名的类走（REASONING_MESSAGE_* 只带 KNOWN 位；THINKING_* 无
             // 其他分类位）⇒ 丢 LEGACY 位、其余不变
             $cls &= ~self::CLS_LEGACY;
         }
 
-        switch ($event['type']) {
+        // R7：后续判定全部走 $type 局部变量（legacy 映射后已同步）——每事件省掉
+        // 对 $event 的 4-5 次同键哈希探测（AOT 里每次都是字符串键查表）。
+        switch ($type) {
             case self::TEXT_MESSAGE_CHUNK:
                 $this->expandChunk($event, 'text', $out);
                 return;
@@ -317,7 +320,7 @@ final class Decoder
                 $out[] = $item;
             }
         }
-        if ($event['type'] === self::SUBAGENT_STARTED) {
+        if ($type === self::SUBAGENT_STARTED) {
             $this->ensureLane($this->subagentKeyOf($event));
         }
 
