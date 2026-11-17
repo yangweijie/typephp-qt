@@ -28,6 +28,7 @@ const enSidebar = {
         '/guide/project-structure.md',
         '/guide/architecture.md',
         '/guide/state-and-view.md',
+        '/guide/agui.md',
       ],
     },
     {
@@ -111,6 +112,7 @@ const zhSidebar = {
         '/zh/guide/project-structure.md',
         '/zh/guide/architecture.md',
         '/zh/guide/state-and-view.md',
+        '/zh/guide/agui.md',
       ],
     },
     {

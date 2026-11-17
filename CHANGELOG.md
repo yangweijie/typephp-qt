@@ -36,6 +36,13 @@
   能力查询与显式错误通道。配套示例 `examples/qmlclock`。
   信号经真实 moc 槽（`QPushButton::click()` 跳板）同步投递；mac 打包经藏依赖归因
   验证自包含（QML 类型注册内嵌 framework，F55）。
+- **AG-UI 支持**：新增 SSE 流式桥接原语 `cpp-src/qt_sse.cc`（`qt_sse_open/read/status/
+  close`，全局流注册表 + `QNetworkAccessManager`、无 moc）与纯 PHP 协议层
+  `TypePHP\Qt\AGUI`（`JsonPatch` / `Decoder` / `Session` / `SseClient`，不依赖网络
+  即可单测）；`QtApp` 补 `sseOpen/sseRead/sseStatus/sseClose` 四个无窗口转发方法。
+  `QTPHP_NO_NETWORK` 构建下原语退化为报错桩（符号恒在、不链 `Qt6Network`）。
+  离线回放示例 `examples/agui-demo`（内置 fixture → 解码 → 渲染 → 读回断言，
+  无头可验收；`--bench N` 输出 `METRIC` 行供 autoresearch 计时）。
 - **CI**：新增 `.github/workflows/ci.yml`（PHPUnit + `qtphp lint` + Windows 构建）。
 - **文档**：新增 `docs/src/advanced/performance.md` 与 `pitfalls.md`；
   `CHANGELOG.md`、`AGENTS.md`。

@@ -28,6 +28,7 @@ Qt（Widgets）—— 只显示、只上报信号
 | `src/QtApp.php` | 应用/窗口生命周期、事件分发、对话框、剪贴板、webview、qml 调用 |
 | `src/WidgetTree.php` | 声明式控件树构造器（静态方法返回数组） |
 | `src/FakeBridge.php` | **测试替身**，用纯 PHP 镜像全部 `qt_*` 全局函数 |
+| `src/AGUI/` | AG-UI 协议层纯 PHP 类（`JsonPatch` / `Decoder` / `Session` / `SseClient`，无网络依赖可单测）。**配对规则**：`QtApp.php` 的 `sse*` 方法引用 `\qt_sse_*`，所以**凡是 sources 里编了 `src/QtApp.php` 的应用，`project.yml` 就必须列 `cpp-src/qt_sse.cc`**（不只列 `SseClient.php` 才要 —— 例：hello/qmlclock/taskboard 不用 SseClient 也缺了这行，链接期 undefined symbol）；`QTPHP_NO_NETWORK` 构建下该 TU 编成报错桩、符号无条件存在，不链 Qt6Network 也能过。与 `qt_qml.cc` 静态表强制全应用链接的教训同族 |
 | `php-src/qt.stub.php` | PHP 可见的桥接契约（函数体必须为空） |
 | `cpp-src/qt_common.h` | 共用工具、`QtWindowBox` 类声明、前向声明 |
 | `cpp-src/qt_loop.cc` | 应用/窗口生命周期、事件循环（自驱动分发） |
@@ -36,6 +37,7 @@ Qt（Widgets）—— 只显示、只上报信号
 | `cpp-src/qt_widgets.cc` | 控件工厂与属性应用 |
 | `cpp-src/qt_webview.cc` | webview 统一入口 + WebView2 / QTextBrowser |
 | `cpp-src/qt_qml.cc` | qml 统一入口 + QQuickWidget（QT_QML）/ 降级占位 |
+| `cpp-src/qt_sse.cc` | SSE 流式原语（`qt_sse_open/read/status/close`，全局流注册表 + QNetworkAccessManager；`QTPHP_NO_NETWORK` 下为报错桩、符号无条件存在保 lint） |
 | `cpp-src/qt_webview_wk.mm` | WKWebView（仅 macOS，且仅在 `QT_WEBVIEW_WK` 下进 sources） |
 | `bin/qtphp` | CLI 入口：只留用法头 + `require_once lib/*.php` + `exit(main($argv))` |
 | `bin/lib/` | CLI 命令实现，按域一个文件（output / doctor / discovery / new / build / project / run / package / package-macos / fs / contract / cli）；**都是全局函数，没有命名空间** |

@@ -12,7 +12,7 @@
 | `QtCore` | `QString`、容器、事件循环、定时器、`QFileInfo`、`QDir` |
 | `QtGui` | `QIcon`、`QPixmap`、`QFont`、`QClipboard`、`QScreen`、`QAction` |
 | `QtWidgets` | 全部控件：`QMainWindow`、`QPushButton`、`QTableWidget` … |
-| `QtNetwork`（可选） | `qt_http_request()` —— `QNetworkAccessManager`（含 HTTPS）。不调用它的应用可以用 `QTPHP_NO_NETWORK` 跳过这个模块 |
+| `QtNetwork`（可选） | `qt_http_request()` 与 SSE 流式的 `qt_sse_*()` —— `QNetworkAccessManager`（含 HTTPS）。两个都不调用的应用可以用 `QTPHP_NO_NETWORK` 跳过这个模块 |
 
 没有 QML/Quick，没有 Sql —— 这是对着 `cpp-src/` 里每一个 `#include` 核过的 ——
 **一个显式例外**：定义 `QT_QML` 编译的应用（即用了 [`qml` 控件](/zh/widgets/qml.md)）

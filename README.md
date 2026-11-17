@@ -13,6 +13,7 @@
 - **一键打包** — `qtphp package` 组装自包含产物并自检：Windows 出 `dist/` 目录（windeployqt + PHP/PHPX 运行时 + 平台插件），macOS 出 `dist/<Name>.app`（macdeployqt + ad-hoc 签名，PHP 侧全静态无需搬运行时），Linux 出 `dist/<name>/`（`ldd` 传递闭包搬进 `lib/` + `patchelf` 把 DT_RPATH 改成 `$ORIGIN/lib` + `qt.conf` 指插件目录）
 - **无头测试** — 纯 PHP 桥接替身，不需要 Qt 或编译器；三个内置开关做自动化验收：`--shot` 出 PNG、`--selftest` 逐个触发事件、`--difftest` 验表格/树的 diff 边界
 - **内嵌网页** — `WidgetTree::webView()`；Windows 上是 WebView2（完整 Chromium、支持 JS），其余平台自动退回 QTextBrowser（HTML 子集），同一份 PHP 代码两边都能跑
+- **AG-UI 流式支持** — `src/AGUI/` 协议层（纯 PHP：SSE 帧解码 / 紧凑 chunk 展开 / 事件归约，`qtphp test` 可单测）+ 4 个 `qt_sse_*` SSE 流式原语（异步、每流独立轮询缓冲）；`SseClient` 串起「开流 → 拉帧 → 展开 → 归约 → `viewModel()`」，渲染用现有控件树，不新增控件类型
 
 ## 平台支持
 
@@ -23,7 +24,7 @@
 | Linux (Debian/Ubuntu) | ✅ | ✅ `dist/<name>/`（ldd 依赖闭包 + patchelf 改 DT_RPATH + `qt.conf`） | 见下 |
 
 **只用到 Qt 的 `Core` / `Gui` / `Widgets` / `Network` 四个模块**（没有 Sql；
-`Network` 给 `qt_http_request()` 用），
+`Network` 给 `qt_http_request()` 与 SSE 流式的 `qt_sse_*()` 用），
 所以最小安装就够。QML 是**编译期例外**：只有 `QT_QML` 应用额外引入
 `QtQml` / `QtQuick` / `QtQuickWidgets`（`WidgetTree::qml()`，见
 [docs 的 QML 页](docs/src/widgets/qml.md)），未开启的应用零影响、控件退化成可诊断占位。
@@ -172,11 +173,13 @@ typephp-qt/
 │   ├── qt_decor.cc        # 装饰（菜单/托盘/状态栏）/对话框/几何/a11y
 │   ├── qt_widgets.cc      # 控件工厂/属性应用/取值
 │   ├── qt_webview.cc      # webview 统一入口（WebView2 / WKWebView / QTextBrowser）
-│   └── qt_qml.cc          # qml 统一入口（QQuickWidget，QT_QML）/ 降级占位
+│   ├── qt_qml.cc          # qml 统一入口（QQuickWidget，QT_QML）/ 降级占位
+│   └── qt_sse.cc          # SSE 流式原语（AG-UI 桥接；QTPHP_NO_NETWORK 下为报错桩）
 ├── php-src/qt.stub.php    # 桥接契约（PHP 签名，函数体必须为空）
 ├── src/                   # PHP 框架层
 │   ├── QtApp.php          # 应用框架（事件循环/错误兜底）
 │   ├── WidgetTree.php     # 声明式控件树构建器
+│   ├── AGUI/              # AG-UI 协议层（纯 PHP：JsonPatch / Decoder / Session / SseClient）
 │   ├── AppData.php        # 配置/缓存/数据目录
 │   ├── JsonStore.php      # 原子写入的 JSON 键值存储
 │   └── FakeBridge.php     # 纯 PHP 桥接替身（测试用）
@@ -186,10 +189,11 @@ typephp-qt/
     │   ├── project.yml        # 公共段 + Windows 段，sources 只写在这里
     │   ├── project.macos.yml  # macOS 入口：include 公共段，只覆盖 Qt 编译/链接参数
     │   └── project.linux.yml  # Linux 入口：同上，走 Debian 多架构的 -I/-lQt6Xxx（无 framework）
-    └── taskboard/         # 综合示例：表格 + 过滤 + 表单 + 菜单 + 状态栏 + 几何持久化
+    ├── taskboard/         # 综合示例：表格 + 过滤 + 表单 + 菜单 + 状态栏 + 几何持久化
+    └── agui-demo/         # AG-UI 离线回放示例（--selftest 三段自检 / --bench 吞吐，零外部网络）
 ```
 
-桥接 C++ 的编译验证就是 `qtphp build examples/hello` —— 三个 `.cc` 是示例 `sources` 的一部分，
+桥接 C++ 的编译验证就是 `qtphp build examples/hello` —— 桥接的 `.cc` 是示例 `sources` 的一部分，
 Windows / macOS / Linux 各自走自己的入口 yml；仓库根另有一份 `mode: lib` 的 `project.yml`
 供下游作为库引用。契约（stub ↔ C++ 实现）层面用 `qtphp lint`，它直接读
 `php-src/qt.stub.php` 与 `cpp-src/*.cc`。

@@ -18,6 +18,9 @@ declare(strict_types=1);
  *   * 事件由 test_inject_event() 手动注入。
  *   * 消息框返回 spec['default']，文件对话框返回空。
  *   * snapshot() 只记录调用，不产生真实 PNG。
+ *   * SSE 流不发真实网络：行为由 test_set_sse_stream() 预置决定（未预置 = 合成
+ *     空流 state=done）；close() 把流从流表摘除，之后 status 报 unknown（与真桥
+ *     「关流 = 流不存在」同口径，error 只留给「流存在但请求失败」）。
  */
 
 namespace TypePHP\Qt\Fake {
@@ -81,6 +84,26 @@ namespace TypePHP\Qt\Fake {
          */
         public static array $httpResponses = [];
 
+        /**
+         * 预置的 SSE 流队列：test_set_sse_stream() 按序喂给下一个 qt_sse_open()。
+         *
+         * @var array<int, array{frames: array<int, array<string, string>>, status: int, error: string}>
+         */
+        public static array $ssePending = [];
+
+        /**
+         * SSE 流表：id → ['frames'=>…, 'cursor'=>int, 'state'=>…, 'status'=>…, 'error'=>…]。
+         *
+         * @var array<int, array<string, mixed>>
+         */
+        public static array $sseStreams = [];
+
+        /** @var array<int, array> qt_sse_open() 收到的 spec 轨迹 */
+        public static array $sseRequests = [];
+
+        /** SSE 流 id 的独立递增序（与窗口 $seq 分离，避免两个计数器互相扰动） */
+        public static int $sseSeq = 0;
+
         public static function reset(): void
         {
             self::$windows = [];
@@ -100,6 +123,11 @@ namespace TypePHP\Qt\Fake {
             self::$trees = [];
             self::$httpRequests = [];
             self::$httpResponses = [];
+            // sse 三字段 + 计数器全进 reset（漏一个就跨用例串状态，testResetClearsQmlState 先例）
+            self::$ssePending = [];
+            self::$sseStreams = [];
+            self::$sseRequests = [];
+            self::$sseSeq = 0;
         }
     }
 
@@ -570,6 +598,87 @@ namespace {
         return FakeState::$qmlCalls;
     }
 
+    // ── SSE 流式（同签名镜像；假桥不发真实网络，行为由 test_set_sse_stream 预置决定） ──
+
+    /**
+     * 假桥的 -1 口径：无 QApplication / Network 概念，仅 url 空（与真桥口径表的
+     * FakeBridge 行一致）。未预置时合成一条空流（state=done）保证 open 总能拿到 id。
+     */
+    function qt_sse_open(array $spec): int
+    {
+        FakeState::$sseRequests[] = $spec;
+        if ((string) ($spec['url'] ?? '') === '') {
+            return -1;
+        }
+        $id = ++FakeState::$sseSeq;
+        if (FakeState::$ssePending !== []) {
+            $preset = array_shift(FakeState::$ssePending);
+            // 预置 = 模拟「还在传」的流：无 error 起步 open，close() 后落 done；
+            // 带 error 的直接落 error（假桥没有异步时间，失败态一步到位）。
+            FakeState::$sseStreams[$id] = [
+                'frames' => $preset['frames'],
+                'cursor' => 0,
+                'state' => $preset['error'] !== '' ? 'error' : 'open',
+                'status' => $preset['status'],
+                'error' => $preset['error'],
+            ];
+        } else {
+            FakeState::$sseStreams[$id] = [
+                'frames' => [],
+                'cursor' => 0,
+                'state' => 'done',
+                'status' => 200,
+                'error' => '',
+            ];
+        }
+        return $id;
+    }
+
+    /** 取走至多 $max 个预置帧（游标前进，重复 read 不重发）；未知流返回空数组。 */
+    function qt_sse_read(int $stream, int $max = 64): array
+    {
+        if (!isset(FakeState::$sseStreams[$stream]) || $max <= 0) {
+            return [];
+        }
+        $entry = FakeState::$sseStreams[$stream];
+        $frames = $entry['frames'];
+        $end = min($entry['cursor'] + $max, count($frames));
+        $take = [];
+        for ($i = $entry['cursor']; $i < $end; $i++) {
+            $frame = $frames[$i];
+            $out = ['data' => (string) ($frame['data'] ?? '')];
+            if (isset($frame['event'])) {
+                $out['event'] = (string) $frame['event'];
+            }
+            if (isset($frame['id'])) {
+                $out['id'] = (string) $frame['id'];
+            }
+            $take[] = $out;
+        }
+        $entry['cursor'] = $end;
+        FakeState::$sseStreams[$stream] = $entry;
+        return $take;
+    }
+
+    /**
+     * unknown 口径与真桥一致：id 不存在**或已关闭**都报 unknown（真桥 close 会
+     * 从注册表摘除流），error 只留给「流存在但请求失败」。
+     */
+    function qt_sse_status(int $stream): array
+    {
+        if (!isset(FakeState::$sseStreams[$stream])) {
+            return ['state' => 'unknown', 'status' => 0, 'error' => ''];
+        }
+        $entry = FakeState::$sseStreams[$stream];
+        return ['state' => $entry['state'], 'status' => (int) $entry['status'], 'error' => (string) $entry['error']];
+    }
+
+    /** 幂等：关流 = 从流表摘除（与真桥一致，之后 status 报 unknown）；未知 id 无副作用。 */
+    function qt_sse_close(int $stream): void
+    {
+        unset(FakeState::$sseStreams[$stream]);
+    }
+
     // ── 测试辅助（真实桥接没有这些） ──
 
     /** 注入一个事件到队列。 */
@@ -612,6 +721,28 @@ namespace {
     function test_http_requests(): array
     {
         return FakeState::$httpRequests;
+    }
+
+    /**
+     * 预置一条 SSE 流：frames 是帧列表（每帧 ['data'=>…, 'event'=>?, 'id'=>?]，
+     * 与 qt_sse_read 的返回同形），按序喂给下一个 qt_sse_open。
+     * 带 $error 时流直接落 error 态（见 qt_sse_open 的假桥语义）。
+     */
+    function test_set_sse_stream(array $frames, int $status = 200, string $error = ''): void
+    {
+        FakeState::$ssePending[] = ['frames' => $frames, 'status' => $status, 'error' => $error];
+    }
+
+    /** 读取 qt_sse_open 的 spec 轨迹（断言应用侧参数原样透传）。 */
+    function test_sse_requests(): array
+    {
+        return FakeState::$sseRequests;
+    }
+
+    /** 读一条流的原始状态（frames/cursor/state/status/error）；未知 id 返回 []。 */
+    function test_sse_stream(int $id): array
+    {
+        return FakeState::$sseStreams[$id] ?? [];
     }
 
     // ── 内部 ──

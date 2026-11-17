@@ -12,11 +12,13 @@ typephp-qt/
 │   ├── qt_decor.cc        # 菜单/托盘/状态栏、对话框、几何、a11y
 │   ├── qt_widgets.cc      # 控件工厂 / 属性应用 / 取值
 │   ├── qt_webview.cc      # webview 统一入口（WebView2 / WKWebView / QTextBrowser）
-│   └── qt_qml.cc          # qml 统一入口（QQuickWidget，QT_QML）/ 降级占位
+│   ├── qt_qml.cc          # qml 统一入口（QQuickWidget，QT_QML）/ 降级占位
+│   └── qt_sse.cc          # SSE 流式原语（AG-UI 桥接；QTPHP_NO_NETWORK 下为报错桩）
 ├── php-src/qt.stub.php    # 桥接契约（PHP 签名，函数体必须为空）
 ├── src/                   # PHP 框架层
 │   ├── QtApp.php          # 应用框架（事件循环 / 错误兜底）
 │   ├── WidgetTree.php     # 声明式控件树构建器
+│   ├── AGUI/              # AG-UI 协议层（纯 PHP：JsonPatch / Decoder / Session / SseClient）
 │   └── FakeBridge.php     # 纯 PHP 桥接替身（测试用）
 ├── tests/                 # 单元测试
 └── examples/hello/        # 示例应用
@@ -67,6 +69,7 @@ sources:
   - ../../cpp-src/qt_widgets.cc
   - ../../cpp-src/qt_webview.cc
   - ../../cpp-src/qt_qml.cc
+  - ../../cpp-src/qt_sse.cc
 ```
 
 tpc 按 `project.yml` **所在目录**解析相对路径，所以同一份相对路径在三个平台都成立。

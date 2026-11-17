@@ -64,6 +64,7 @@ sources:
   - ../../cpp-src/qt_widgets.cc
   - ../../cpp-src/qt_webview.cc
   - ../../cpp-src/qt_qml.cc
+  - ../../cpp-src/qt_sse.cc
 ```
 
 This surprises people arriving from Composer autoloading. The `sources:` list `qtphp new` generates is correct.

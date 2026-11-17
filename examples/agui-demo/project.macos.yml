@@ -1,0 +1,55 @@
+# macOS 入口。只覆盖平台相关的链接/编译参数，别的全部继承 project.yml：
+#   - 不写 sources：本示例没有 .mm 条件条目（不启用 WKWebView 后端），
+#     全部 TU 都由 project.yml 直接列出
+#   - 不写 include-paths：tpc 合并时 list 是整体替换。这里一旦写 include-paths，
+#     project.yml 的 ../../cpp-src 和 ../../php-src 就没了。Qt 头文件目录改用
+#     cxx-flags 的 -I 传，include-paths 保持继承。
+#
+# Homebrew 的 qtbase 是 framework 布局：头文件在
+#   <prefix>/lib/Qt<Module>.framework/Headers/
+# 代码里写的是裸名 `#include <QNetworkAccessManager>`，所以要 -I 指向 Headers
+# 目录；同时 -F 指向 framework 根，供限定名 include 用。
+#
+# AG-UI 示例与 qmlclock 的差别：不需要 QML 三件套（QtQml/QtQuick/QtQuickWidgets
+# 的 -F/-I/-framework），也不需要 WKWebView 的 WebKit/Foundation/AppKit 与
+# -fobjc-arc（qt_webview.cc 退化成 QTextBrowser 后端，本示例不用 webview 控件）。
+# 必须保留 QtNetwork：qt_sse.cc 的真实实现（QNetworkAccessManager）依赖它，
+# 不定义 QTPHP_NO_NETWORK，打包时也不能跳过 network 插件（AGENTS.md 硬约束）。
+#
+# 宏用 yml 的 `defines:`（tpc 把它并进 user_defines 传给编译器；cxx-flags 里
+# 塞 /D 在 mac clang 下不可靠，qmlclock yml 头注先例）。
+#
+# 前缀按 Apple Silicon 写死（/opt/homebrew）；Intel Mac 上是 /usr/local。
+include: project.yml
+
+link-libs: []
+link-paths: []
+
+defines:
+  - QT_CORE_LIB
+  - QT_GUI_LIB
+  - QT_WIDGETS_LIB
+  - QT_NETWORK_LIB
+
+cxx-flags:
+  - -F/opt/homebrew/opt/qtbase/lib
+  - -I/opt/homebrew/opt/qtbase/lib/QtCore.framework/Headers
+  - -I/opt/homebrew/opt/qtbase/lib/QtGui.framework/Headers
+  - -I/opt/homebrew/opt/qtbase/lib/QtWidgets.framework/Headers
+  - -I/opt/homebrew/opt/qtbase/lib/QtNetwork.framework/Headers
+
+ld-flags:
+  - -F/opt/homebrew/opt/qtbase/lib
+  - -Wl,-framework,QtWidgets
+  - -Wl,-framework,QtGui
+  - -Wl,-framework,QtCore
+  - -Wl,-framework,QtNetwork
+  # Qt 依赖 libiconv，Homebrew 的 keg-only，得显式给路径 + rpath
+  - -L/opt/homebrew/opt/libiconv/lib
+  - -liconv
+  - -Wl,-rpath,/opt/homebrew/opt/libiconv/lib
+  - -Wl,-rpath,/opt/homebrew/opt/qtbase/lib
+
+php-builder:
+  extensions: []
+  zts: false

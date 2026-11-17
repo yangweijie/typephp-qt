@@ -12,11 +12,13 @@ typephp-qt/
 │   ├── qt_decor.cc        # menus/tray/status bar, dialogs, geometry, a11y
 │   ├── qt_widgets.cc      # widget factory / property application / value reads
 │   ├── qt_webview.cc      # webview entry point (WebView2 / WKWebView / QTextBrowser)
-│   └── qt_qml.cc          # qml entry point (QQuickWidget, QT_QML) / diagnostic placeholder
+│   ├── qt_qml.cc          # qml entry point (QQuickWidget, QT_QML) / diagnostic placeholder
+│   └── qt_sse.cc          # SSE streaming primitives (AG-UI bridge; stub under QTPHP_NO_NETWORK)
 ├── php-src/qt.stub.php    # the bridge contract (PHP signatures, empty bodies)
 ├── src/                   # the PHP framework layer
 │   ├── QtApp.php          # application framework (event loop / error fallback)
 │   ├── WidgetTree.php     # declarative widget-tree builder
+│   ├── AGUI/              # AG-UI protocol layer (pure PHP: JsonPatch / Decoder / Session / SseClient)
 │   └── FakeBridge.php     # pure-PHP bridge double (for tests)
 ├── tests/                 # unit tests
 └── examples/hello/        # example app
@@ -67,6 +69,7 @@ sources:
   - ../../cpp-src/qt_widgets.cc
   - ../../cpp-src/qt_webview.cc
   - ../../cpp-src/qt_qml.cc
+  - ../../cpp-src/qt_sse.cc
 ```
 
 tpc resolves relative paths against the **directory containing `project.yml`**, so the same relative paths hold on all three platforms.

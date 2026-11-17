@@ -13,7 +13,7 @@ The bridge uses **four Qt modules and nothing else**:
 | `QtCore` | `QString`, containers, event loop, timers, `QFileInfo`, `QDir` |
 | `QtGui` | `QIcon`, `QPixmap`, `QFont`, `QClipboard`, `QScreen`, `QAction` |
 | `QtWidgets` | every control: `QMainWindow`, `QPushButton`, `QTableWidget`, … |
-| `QtNetwork` (optional) | `qt_http_request()` — `QNetworkAccessManager` (HTTPS included). Apps that never call it can skip this module with `QTPHP_NO_NETWORK` |
+| `QtNetwork` (optional) | `qt_http_request()` and the `qt_sse_*()` SSE primitives — `QNetworkAccessManager` (HTTPS included). Apps that never call either can skip this module with `QTPHP_NO_NETWORK` |
 
 No QML/Quick, no Sql — verified against every `#include` in `cpp-src/` — **with one opt-in
 exception**: an app that builds with `QT_QML` (the [`qml` widget](/widgets/qml.md)) adds

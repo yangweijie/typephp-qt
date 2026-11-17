@@ -13,6 +13,10 @@ use function qt_clipboard_read;
 use function qt_clipboard_write;
 use function qt_qml_available;
 use function qt_qml_status;
+use function qt_sse_close;
+use function qt_sse_open;
+use function qt_sse_read;
+use function qt_sse_status;
 use function qt_window_close;
 use function qt_window_create;
 use function qt_window_destroy;
@@ -34,6 +38,9 @@ use function test_qml_calls;
 use function test_reset;
 use function test_set_qml_available;
 use function test_set_qml_status;
+use function test_set_sse_stream;
+use function test_sse_requests;
+use function test_sse_stream;
 use function test_window;
 
 /**
@@ -334,5 +341,111 @@ final class FakeBridgeTest extends TestCase
         $this->assertSame([], FakeState::$qmlStatus);
         $this->assertSame([], FakeState::$qmlCalls);
         $this->assertSame([], qt_qml_status($this->window, 'c'));
+    }
+
+    // ── sse ──
+
+    /** open 取预置队列：按序喂给下一个 open，id 从 1 起独立递增。 */
+    public function testSseOpenTakesPresetQueueWithIncrementingIds(): void
+    {
+        test_set_sse_stream([['data' => 'first']], 200, '');
+        test_set_sse_stream([['data' => 'second']], 200, '');
+
+        $this->assertSame(1, qt_sse_open(['url' => 'http://a']));
+        $this->assertSame(2, qt_sse_open(['url' => 'http://b']));
+        $this->assertSame('first', test_sse_stream(1)['frames'][0]['data']);
+        $this->assertSame('second', test_sse_stream(2)['frames'][0]['data']);
+    }
+
+    /** 未预置时合成空流（state=done）：open 总能拿到 id，行为由预置决定。 */
+    public function testSseOpenWithoutPresetSynthesizesDoneStream(): void
+    {
+        $id = qt_sse_open(['url' => 'http://c']);
+        $this->assertSame(1, $id);
+        $this->assertSame('done', qt_sse_status($id)['state']);
+        $this->assertSame([], qt_sse_read($id, 64));
+    }
+
+    /** url 空 = -1（FakeBridge 唯一 -1 条件，无 QApplication 概念）。 */
+    public function testSseOpenEmptyUrlIsMinusOne(): void
+    {
+        $this->assertSame(-1, qt_sse_open([]));
+        $this->assertSame([], FakeState::$sseStreams, '失败不分配流');
+    }
+
+    /** read 按 $max 截断 + 游标前进（重复 read 不重发）。 */
+    public function testSseReadTruncatesAndAdvancesCursor(): void
+    {
+        test_set_sse_stream([['data' => 'a'], ['data' => 'b'], ['data' => 'c']], 200, '');
+        $id = qt_sse_open(['url' => 'http://a']);
+
+        $this->assertSame([['data' => 'a'], ['data' => 'b']], qt_sse_read($id, 2));
+        $this->assertSame([['data' => 'c']], qt_sse_read($id, 2));
+        $this->assertSame([], qt_sse_read($id, 2), '读完后恒 []');
+        $this->assertSame([], qt_sse_read(999, 2), '未知流 = 空数组');
+    }
+
+    /** 帧的 event/id 键仅当预置出现才带出（与真桥 stub 契约同形）。 */
+    public function testSseFramesCarryEventAndIdOnlyWhenPresent(): void
+    {
+        test_set_sse_stream([['data' => 'x', 'event' => 'message', 'id' => '42'], ['data' => 'y']], 200, '');
+        $frames = qt_sse_read(qt_sse_open(['url' => 'http://a']), 64);
+        $this->assertSame(['data' => 'x', 'event' => 'message', 'id' => '42'], $frames[0]);
+        $this->assertSame(['data' => 'y'], $frames[1]);
+    }
+
+    /** status 四态：open（预置未关）/ done（合成流）/ error（预置带 error）/ unknown（不存在或已关）。 */
+    public function testSseStatusFourStates(): void
+    {
+        test_set_sse_stream([['data' => 'a']], 200, '');
+        $open = qt_sse_open(['url' => 'http://a']);
+        $this->assertSame('open', qt_sse_status($open)['state']);
+
+        $done = qt_sse_open(['url' => 'http://b']);  // 未预置 → 合成 done
+        $this->assertSame('done', qt_sse_status($done)['state']);
+
+        test_set_sse_stream([], 500, 'Internal Server Error');
+        $error = qt_sse_open(['url' => 'http://c']);
+        $this->assertSame('error', qt_sse_status($error)['state']);
+        $this->assertSame(500, qt_sse_status($error)['status']);
+        $this->assertSame('Internal Server Error', qt_sse_status($error)['error']);
+
+        qt_sse_close($open);
+        $this->assertSame('unknown', qt_sse_status($open)['state'], '关流 = 流不存在');
+        $this->assertSame('unknown', qt_sse_status(999)['state'], '未知 id（含 -1 的情形）');
+    }
+
+    /** close 幂等：重复调用 / 未知 id 无副作用。 */
+    public function testSseCloseIsIdempotent(): void
+    {
+        $id = qt_sse_open(['url' => 'http://a']);
+        qt_sse_close($id);
+        qt_sse_close($id);
+        qt_sse_close(12345);
+        $this->assertSame([], FakeState::$sseStreams);
+    }
+
+    /** open 的 spec 原样记轨迹（供 QtApp 转发测试断言透传）。 */
+    public function testSseOpenRecordsSpecTrail(): void
+    {
+        qt_sse_open(['url' => 'http://a', 'method' => 'POST', 'headers' => ['Content-Type' => 'application/json'], 'body' => '{}']);
+        $this->assertCount(1, test_sse_requests());
+        $this->assertSame('POST', test_sse_requests()[0]['method']);
+        $this->assertSame([], test_sse_stream(1)['frames']);
+    }
+
+    /** reset() 清掉 sse 三个新字段 + 计数器（不泄漏到下一个用例）。 */
+    public function testResetClearsSseState(): void
+    {
+        test_set_sse_stream([['data' => 'a']], 200, '');
+        qt_sse_open(['url' => 'http://a']);
+
+        test_reset();
+
+        $this->assertSame([], FakeState::$ssePending);
+        $this->assertSame([], FakeState::$sseStreams);
+        $this->assertSame([], FakeState::$sseRequests);
+        $this->assertSame(0, FakeState::$sseSeq);
+        $this->assertSame('unknown', qt_sse_status(1)['state']);
     }
 }

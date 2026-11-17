@@ -29,6 +29,10 @@ sources:
   - ../../cpp-src/qt_widgets.cc
   - ../../cpp-src/qt_webview.cc
   - ../../cpp-src/qt_qml.cc
+  # SSE 流式原语（AG-UI 桥）：QtApp.php 的 sse* 方法引用 `\qt_sse_*`，
+  # 本 TU 被强制进每个编译 QtApp.php 的应用。本示例不定义 QTPHP_NO_NETWORK
+  # ⇒ 编进真实实现（QNetworkAccessManager），Qt6Network 三平台均已链上。
+  - ../../cpp-src/qt_sse.cc
   # Windows nano：php-nano 缺 crc32 SIMD / Fiber CE / MSVC inline seed256 的目标文件
   - path: ../../compat/msvc/php_nano_win_stubs.c
     if: PHP_OS_FAMILY == "Windows"

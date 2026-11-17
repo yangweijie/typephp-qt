@@ -1,5 +1,174 @@
 # Progress Log — typephp-qt
 
+## Session 38 — 2026-11-17（AG-UI 支持：规划轮 —— 三层方案定稿 + Phase 42 分解）
+
+### 任务来源
+
+用户「/workflow 支持 agui」——给 TypePHP\Qt 加 AG-UI（Agent User Interaction
+Protocol）支持。workflow 带三份摸底材料（AG-UI 协议 / PHP 契约 / 网络与流式）；
+本轮是**规划轮**（定稿方案 + 更新规划台账三件套），实施按 Phase 42 的 42.1–42.12
+由后续轮执行。**不 commit；不创建/修改 `.auto/` 下任何文件**（autoresearch 由主
+会话管理，含 measure.sh 的冻结）。
+
+编号勘误：任务来源写「核实最新 F55 / Session 36，新的从 F56 / Session 37 起」，
+实读台账 F56（findings.md:3111，CI qtdeclarative 死结）/ F57（:3144，nano 零部署）
+与 Session 37（progress.md:69，Windows 收尾；首轮记 :3，本条插入置顶后行号漂移，
+二轮评审④经 `grep -n '^## Session'` 重核）均已占用 ⇒ 按任务来源「以你读到的为准」
+顺延 **F58 / Session 38 / Phase 42**。
+
+### 基线读数（本会话现测）
+
+| 项 | 结果 |
+|---|---|
+| `php vendor/bin/phpunit --no-coverage` | ✅ OK (206 tests, 334 assertions) |
+| `php bin/qtphp lint` | ✅ [OK] 契约一致（41 ⇄ 41） |
+| doctor（网络摸底材料读数） | ✅ 全绿：PHP 8.4.19、tpc、php-runtime 8.5.11 builder、Qt /opt/homebrew/opt/qtbase、clang++ |
+
+### 方案定稿（详情见 F58）
+
+- **三层**：协议层 `src/AGUI/`（JsonPatch / Decoder / Session / SseClient 四个 final
+  类，纯 PHP、不依赖网络即可单测）／桥接层 `cpp-src/qt_sse.cc` + stub 4 个
+  `qt_sse_*` 函数（41→45）+ QtApp 4 个无窗口转发方法（sseOpen/sseRead/sseStatus/
+  sseClose）／渲染层 = 示例本地控件树组合（**不新增控件类型**，硬边界）。
+- **缓冲决策**：SSE 事件进**独立轮询缓冲**（全局流注册表 + int 句柄，
+  `qt_sse_read($stream, $max)`），不进窗口事件队列——六条依据见 F58 §58.3
+  （生命周期 / 语义 / 背压 / 多流 / 无窗使用 / 控件本地状态先例；代价 = 消费方每帧
+  泵一下，与 qml tick 同节奏）。
+- **示例 `examples/agui-demo`**：离线回放为主线（内置 fixture → 解码 → 渲染 →
+  读回断言，零外部网络、无头、失败 exit(1)；桥接 smoke 走 QNetworkAccessManager
+  原生 `file://` scheme，预案 `data:` URL）；`--bench N` 纯 PHP 回放计时、stdout
+  打印 `METRIC agui_replay_events_per_s=<…>` 等三行供 autoresearch（主会话冻结
+  measure.sh）。
+- **范围外**：live LLM 端点示例、WebSocket/Protobuf 传输、可复用 AguiRenderer、
+  新控件类型、META_EVENT、agui-demo 的 CI 接线（ci.yml 显式枚举 hello+qmlclock，
+  ci.yml:129/151/167）、`.auto/` 文件、commit。
+
+### 评审轮修订（同日，7 条意见逐条处置，详情 F58 §58.7）
+
+- **接受 6 条并改台账**：①/②② chunk 展开改**流域有状态 Decoder 实例**（spec chunk
+  条款「新 ID / 流结束自动发 END」，原静态设计跨 poll 丢状态）+ SseClient 在 done/error
+  自动 finish() flush 挂起 END；② fixture/测试 THINKING 名 → `THINKING_TEXT_MESSAGE_CONTENT`
+  （spec 映射表名）；② Session 钉死 MESSAGES_SNAPSHOT = 全量替换（消息数断言按 snapshot
+  长度）；① open() 的 -1 补「QApplication 未创建」守卫 + 真桥/FakeBridge 口径表；① 注册表
+  改 `std::unique_ptr<SseStream>`（QObject 不可移）；① 示例 pump 设 150 帧上限（防死循环）。
+- **部分接受 1 条**：「TOOL_CALL_CHUNK 冲突 = fatal」经 spec tool-calls 页原文核实**成立
+  保留**（continuation 重复冲突值即 fatal；评审「会拒绝合规范流」不成立），补「换不同
+  toolCallId = 隐式结束上一调用」边界；v1 宽容落地 = 终止该调用 + warning。
+- **抽查不采纳 1 条**：评审称 qt_common.h 的 `#ifndef QTPHP_NO_NETWORK` 块「实为
+  :47-51」——本轮 `sed -n '44,56p' | cat -n` 复核为 **:49-53**（include :50-52），
+  台账原引用正确、评审自身偏两行；维持不改。
+- task_plan.md Phase 42 已按上述修订更新（42.1/42.3/42.6/42.7/42.9 + 评审轮修订段）。
+
+#### 二轮评审修订（同日，7 条，详情 F58 §58.7 二轮）
+
+- **接受 4 条并改台账**：② SseClientTest（并入 DecoderTest）须 use function——42.7 头
+  拆句 + 42.8「两个测试类」改「三个测试文件」；② Decoder 补关闭触发——本轮抓 spec
+  streaming.md「Closing a chunk stream」原文钉全**五触发**（同 lane 换 item / lane 内族
+  事件到达（stand-aside 例外 RAW、ACTIVITY_*、REASONING_ENCRYPTED_VALUE）/ run 级事件
+  含 MESSAGES_SNAPSHOT 关所有 lane / subagent 终止 / 流结束），42.7 补两正例 + 两负向
+  守卫；④ `qt_sse_status(-1)` → **unknown**（42.1 口径表 + 42.3 NO_NETWORK 桩文案同改，
+  error 只留「流存在但请求失败」）；① SseClient docblock 写明**泵限制**（现行唯一泵
+  入口在窗口 qt_loop.cc:83-88，末窗 cleanup 后存活流数据永不到；v1 示例恒有窗，无窗
+  CLI 式用法划范围外）。
+- **半接受 1 条**：评审所引「empty delta 即关闭」措辞**原文未找到**（streaming.md「Chunk
+  metadata」反明言 metadata-only 续接合法且不关闭）——不采纳该规则，42.7 配负向守卫
+  防实现者写错；其「next non-reasoning event 隐式关闭」半句经原文证实并推广为全族
+  lane 规则（已并入五触发）。
+- **勘误 1 条**：「Session 37（progress.md:3）」行号漂移 → **:69**（`grep -n '^##
+  Session'` 重核：:3 = Session 38 头；本条插入置顶所致；F56:3111 / F57:3144 未动）。
+- **抽查通过维持**：tool-calls continuation 冲突 fatal 原文（streaming.md「Continuation
+  chunks」同文互证）、END 自动条款、qt_common.h:49-53、qmlclock main.php:159、
+  qt_loop.cc:300-309 两级守卫、ci.yml:129/151/167 —— 全部复核/重抓属实，引用不改。
+
+### 实施轮 + 本机验收（同日收口，2026-11-17 修复轮实跑读数）
+
+42.1–42.11 已在实施轮落地（四件套 stub 41→45、FakeBridge sse 区、`cpp-src/qt_sse.cc`
+299 行、QtApp sse* 4 方法、`src/AGUI/` 四类、`tests/AGUI/` 三件、`examples/agui-demo`
+离线回放 + 中英文档 + AGENTS/CHANGELOG 接线），42.10 本机验收读数（下述命令全部为
+修复轮当日实跑）：
+
+| 42.10 项 | 命令 | 结果 |
+|---|---|---|
+| ① agui-demo 构建 | `php bin/qtphp build examples/agui-demo` | rc=0，「Build successful」 |
+| ② selftest | `QT_QPA_PLATFORM=offscreen examples/agui-demo/build/agui-demo --selftest` | rc=0，20 条 `ok` + 「selftest passed」 |
+| ③ bench | `examples/agui-demo/build/agui-demo --bench 20000` | rc=0，三行 METRIC 齐全 |
+| ④ bench ×3 波动 | 同上连跑 3 次 | `agui_replay_events_per_s` = 493337 / 490093 / 491341（波动 0.66% < 10%）；`agui_replay_total_ms` ≈ 40.5–40.8 |
+| ⑤ hello 回归 | `php bin/qtphp build examples/hello` + offscreen `--selftest` | **首轮构建失败**：4 个 `php_qt_sse_*` undefined symbol；三份 yml 加 `qt_sse.cc` 行后 build rc=0 + selftest rc=0「selftest passed」 |
+| ⑥ 无回归 | `php vendor/bin/phpunit --no-coverage` + `php bin/qtphp lint` | OK (261 tests, 503 assertions)；[OK] 契约一致（45 ⇄ 45） |
+
+**教训（记 F58 追记）**：
+
+- **42.10⑤ 假设错**：「不列 qt_sse.cc 不受新符号影响」不成立 —— `QtApp.php` 的
+  sse* 方法体引用 `\qt_sse_*`，AOT 把类的**全部**方法编进每个应用二进制，链接需求
+  与应用是否调用无关（与 `qt_qml.cc` 静态表强制全应用链接同族）。`QtApp.php` 是
+  每个应用 sources 的固定成员 ⇒ `cpp-src/qt_sse.cc` 对所有应用都是**必列 TU**
+  （`QTPHP_NO_NETWORK` 构建走报错桩、零额外链接依赖）。首轮真机验收 hello 链接
+  即证。修法：`examples/{hello,qmlclock,taskboard}/project.yml` 各加一行 sources。
+- **new.php 偏离**：§58.4 原计划「不动 `bin/lib/new.php`」，实施轮把 `qt_sse.cc`
+  行加进模板 sources（`bin/lib/new.php:79`）—— 同根因：模板无条件编译
+  `QtApp.php`，不列 TU 则 `qtphp new` 生成的每个工程链接即炸。AGUI 类本身仍
+  保持 opt-in（模板不列 `src/AGUI/*.php`），CliTest 双向断言随 phpunit 全绿。
+- **agui-demo 缺 .gitignore**：示例目录只有构建产物 `build/` 而无 `.gitignore`
+  （兄弟示例各有），直接 `git add examples/agui-demo/` 会把二进制提交；补
+  `examples/agui-demo/.gitignore`（`/build/`、`/rebuild.log`，照 hello）。
+- **文档路径**：42.11 规格行写 `docs/src/advanced/agui.md`，实际落在
+  `docs/src/{,zh/}guide/agui.md`（config.ts 侧边栏 en :31 / zh :115 按 guide 接线）；
+  42.11 原路径系规划笔误，以实际落点为准。
+
+### 改动清单（最终收口，2026-11-17 对 git status + ls 逐项核对）
+
+任务来源给定改动清单 38 项，去 2 处重复路径（`docs/src/guide/project-structure.md`、
+`docs/src/zh/guide/project-structure.md` 各出现两次）后 **36 个唯一文件**，全部有落盘
+证据（M = 已跟踪修改、新 = 未跟踪）：
+
+- **协议层（新，4 类）**：`src/AGUI/JsonPatch.php`、`src/AGUI/Decoder.php`、
+  `src/AGUI/Session.php`、`src/AGUI/SseClient.php`
+- **桥接四件套 + 共用头**：`php-src/qt.stub.php`（+4 `qt_sse_*`，41→45，M）、
+  `src/FakeBridge.php`（镜像 + sse 区，M）、`cpp-src/qt_sse.cc`（新，299 行）、
+  `cpp-src/qt_common.h`（M）、`src/QtApp.php`（+sseOpen/sseRead/sseStatus/sseClose
+  4 方法，M）
+- **示例（新目录 `examples/agui-demo/`）**：`project.yml`、`project.macos.yml`、
+  `project.linux.yml`、`Info.macos.plist`、`src/main.php`、`README.md`
+- **测试（新 + 扩）**：`tests/AGUI/JsonPatchTest.php`、`tests/AGUI/DecoderTest.php`、
+  `tests/AGUI/SessionTest.php`（新）、`tests/FakeBridgeTest.php`（sse 区，M）、
+  `tests/QtAppTest.php`（M）
+- **文档（中英镜像 + 接线）**：`docs/src/guide/agui.md`、`docs/src/zh/guide/agui.md`
+  （新页）；`docs/src/reference/api.md`、`docs/src/guide/project-structure.md`、
+  `docs/src/advanced/aot-notes.md`、`docs/src/guide/architecture.md`、
+  `docs/src/guide/qt-setup.md` 各 + `zh/` 镜像（共 10 份，M）；
+  `docs/src/.vuepress/config.ts`（侧边栏，M）
+- **脚手架**：`bin/lib/new.php`（模板 sources 加 `qt_sse.cc` 行，new.php:79，
+  偏离已记 F58 §58.4，M）
+- **台账 / 顶层**：`AGENTS.md`（目录表 + qt_sse.cc 配对规则行，M）、`README.md`（M）
+
+**补记（如实记账：不在给定清单内、但磁盘确有改动的 5 个文件，均已被 F58 §58.4
+偏离记录覆盖）**：`CHANGELOG.md`（Unreleased/Added AG-UI 条目）、
+`examples/hello/project.yml`、`examples/qmlclock/project.yml`、
+`examples/taskboard/project.yml`（三份各加一行 `qt_sse.cc`，首轮真机验收
+42.10⑤ 逼出）、`examples/agui-demo/.gitignore`（`/build/`、`/rebuild.log`，修复轮补）。
+
+### 验收（最终收口读数，以任务来源给定三行为准）
+
+| 检查 | 结果 | 说明 |
+|---|---|---|
+| phpunit | 通过 | 全绿 |
+| qtphp lint | 通过 | 契约一致 |
+| 真机验收 | 通过 | hello 回归 + AGUI 示例 build/selftest/bench 全过 |
+
+明细读数（各命令 rc、断言数、bench ×3 波动）已如实落在上文「实施轮 + 本机验收」
+的 42.10①–⑥ 表；本表为最终验收收口口径。
+
+**本轮教训**：见上文「教训（记 F58 追记）」4 条（42.10⑤ 假设错 / new.php 偏离 /
+agui-demo 缺 .gitignore / 文档落点勘误），收口轮无新增。
+
+### 未做项 / 待办
+
+- 42.1–42.12 全部完成（上节收口；42.12 = 本条目 + task_plan 勾选，均已做）。
+- `examples/agui-demo/project.linux.yml` 未实测（本机 macOS、无 Linux Qt 环境，
+  与 qmlclock 先例同口径，41.x 同族未验项）。
+- CI 不含 agui-demo（ci.yml 显式枚举 hello+qmlclock，后续轮或用户令）。
+- 未 commit（用户未令）。
+
 ## Session 37 — 2026-11-11（Windows 收尾：CI qtdeclarative 死结 + 41.14 QML 运行库白名单）
 
 ### 任务来源

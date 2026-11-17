@@ -86,6 +86,17 @@ A handler may declare 0 or 1 parameters (`array $event`) — the framework probe
 | `qmlStatus(string $id): array` | The component's status and errors: `['status'=>…,'errors'=>…]`; `[]` when the control does not exist or is not a qml type |
 | `qmlReload(string $id): void` | Reload the component's `source` (no-op when `QT_QML` is not defined) |
 
+### SSE streaming
+
+| Method | Description |
+|---|---|
+| `sseOpen(array $spec): int` | Open an SSE stream asynchronously, returns a stream id starting at 1. `$spec`: `url` / `method` (default GET; an AG-UI run POSTs) / `headers` / `body` / `timeout_ms` (default 0 = no transport timeout). -1 = empty `url` / `QApplication` not yet created / `QTPHP_NO_NETWORK` build |
+| `sseRead(int $stream, int $max = 64): array` | Take up to `$max` complete frames; `[]` = no new frames this round |
+| `sseStatus(int $stream): array` | `['state' => 'open' \| 'done' \| 'error' \| 'unknown', 'status' => int, 'error' => string]`; `unknown` covers a missing or closed stream (incl. -1) |
+| `sseClose(int $stream): void` | Abort and release; idempotent |
+
+Streams are process-level resources, not attached to the window — see [AG-UI](/guide/agui.md).
+
 ### Verification and diagnostics
 
 | Method | Description |
@@ -176,7 +187,7 @@ The event object:
 
 ## Bridge contract
 
-The 41 functions declared in `php-src/qt.stub.php` (whose agreement with the C++ implementation `qtphp lint` verifies):
+The 45 functions declared in `php-src/qt.stub.php` (whose agreement with the C++ implementation `qtphp lint` verifies):
 
 | Function | Description |
 |---|---|
@@ -192,6 +203,17 @@ The 41 functions declared in `php-src/qt.stub.php` (whose agreement with the C++
 | `qt_window_destroy(mixed $window): void` | Destroy |
 | `qt_window_snapshot(mixed $window, string $path): bool` | Save a PNG |
 | `qt_window_widget_value(mixed $window, string $id): mixed` | Read a widget value |
+| `qt_window_list(): array` | The ids of all live windows, in creation order |
+| `qt_window_id(mixed $window): string` | The window's stable id |
+| `qt_window_focus(mixed $window): void` | Activate: un-minimize, raise, give it keyboard focus |
+| `qt_window_center(mixed $window): void` | Centre on the screen the window is on |
+| `qt_window_set_parent(mixed $window, mixed $parent): void` | Transient parent (child follows minimising/closing); `null` detaches |
+| `qt_window_geometry(mixed $window): array` | Read `['x','y','width','height']` (client area) |
+| `qt_window_set_geometry(mixed $window, array $rect): void` | Set geometry; missing keys are left untouched |
+| `qt_window_send_event(mixed $window, array $event): void` | Inject one event into the queue (headless acceptance / tests; does not go through Qt) |
+| `qt_window_find(mixed $window, string $id): array` | A control's state by id (`type` `value` `visible` `enabled` `geometry`); `[]` when absent |
+| `qt_window_a11y_tree(mixed $window, int $maxDepth = 6): array` | Accessibility snapshot of the control tree (role/text/value/geometry/children) |
+| `qt_window_poll_events(mixed $window, int $max = 64): array` | Take up to `$max` pending events at once |
 | `qt_window_set_title(mixed $window, string $title): void` | Window title |
 | `qt_window_set_menu(mixed $window, array $items): void` | Menu bar |
 | `qt_window_set_status(mixed $window, array $segments): void` | Status bar |
@@ -200,6 +222,7 @@ The 41 functions declared in `php-src/qt.stub.php` (whose agreement with the C++
 | `qt_window_file_dialog(mixed $window, array $spec): array` | File dialog |
 | `qt_window_directory_dialog(mixed $window, array $spec): string` | Directory dialog |
 | `qt_window_notify(mixed $window, string $title, string $message): void` | System notification |
+| `qt_window_toast(mixed $window, string $message, int $durationMs = 3000): void` | In-window overlay toast (non-blocking; the tray-less fallback of `notify`) |
 | `qt_window_set_tray(mixed $window, array $spec): void` | System tray |
 | `qt_window_set_timer(mixed $window, string $id, int $intervalMs): void` | Timer |
 | `qt_clipboard_read(): string` | Read the clipboard |
@@ -209,6 +232,10 @@ The 41 functions declared in `php-src/qt.stub.php` (whose agreement with the C++
 | `qt_qml_available(): bool` | Whether `QT_QML` was defined at build time |
 | `qt_qml_status(mixed $window, string $id): array` | A qml component's status and errors; `{}` when the control does not exist or is not a qml type |
 | `qt_http_request(array $spec): array` | Synchronous HTTP request (blocks the event loop until it returns or times out) |
+| `qt_sse_open(array $spec): int` | Open an SSE stream asynchronously, returns a stream id starting at 1; -1 = empty `url` / `QApplication` not yet created / `QTPHP_NO_NETWORK` build |
+| `qt_sse_read(int $stream, int $max = 64): array` | Take up to `$max` complete SSE frames at once; `[]` = no new frames this round |
+| `qt_sse_status(int $stream): array` | `['state' => 'open' \| 'done' \| 'error' \| 'unknown', 'status' => int, 'error' => string]`; `unknown` covers a missing/closed stream (incl. `-1`) |
+| `qt_sse_close(int $stream): void` | Abort and release; idempotent |
 
 ::: tip These are internal interfaces
 Application code uses `QtApp`'s methods; do not call `qt_*` directly. This section is for people extending the bridge.

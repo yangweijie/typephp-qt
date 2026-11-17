@@ -86,6 +86,17 @@
 | `qmlStatus(string $id): array` | 组件状态与错误：`['status'=>…,'errors'=>…]`；控件不存在或不是 qml 类型时是 `[]` |
 | `qmlReload(string $id): void` | 重新加载组件的 `source`（未定义 `QT_QML` 时是空操作） |
 
+### SSE 流式
+
+| 方法 | 说明 |
+|---|---|
+| `sseOpen(array $spec): int` | 异步开一条 SSE 流，返回从 1 起的流 id。`$spec`：`url` / `method`（缺省 GET；AG-UI run 用 POST）/ `headers` / `body` / `timeout_ms`（缺省 0 = 不设传输超时）。-1 = `url` 空 / `QApplication` 未建 / `QTPHP_NO_NETWORK` 构建 |
+| `sseRead(int $stream, int $max = 64): array` | 一次取至多 $max 个完整帧；`[]` = 本轮没有新帧 |
+| `sseStatus(int $stream): array` | `['state' => 'open' \| 'done' \| 'error' \| 'unknown', 'status' => int, 'error' => string]`；`unknown` 覆盖不存在的 / 已关闭的流（含 -1） |
+| `sseClose(int $stream): void` | abort + 释放，幂等 |
+
+流是**进程级资源**、不挂窗口句柄 —— 见 [AG-UI](/zh/guide/agui.md)。
+
 ### 验收与诊断
 
 | 方法 | 说明 |
@@ -176,7 +187,7 @@ WidgetTree::qml(string $source = '', array $props = [])
 
 ## 桥接契约
 
-`php-src/qt.stub.php` 声明的 41 个函数（`qtphp lint` 校验其与 C++ 实现一致）：
+`php-src/qt.stub.php` 声明的 45 个函数（`qtphp lint` 校验其与 C++ 实现一致）：
 
 | 函数 | 说明 |
 |---|---|
@@ -192,6 +203,17 @@ WidgetTree::qml(string $source = '', array $props = [])
 | `qt_window_destroy(mixed $window): void` | 销毁 |
 | `qt_window_snapshot(mixed $window, string $path): bool` | 存 PNG |
 | `qt_window_widget_value(mixed $window, string $id): mixed` | 读控件值 |
+| `qt_window_list(): array` | 当前所有存活窗口的 id（按创建顺序） |
+| `qt_window_id(mixed $window): string` | 该窗口的稳定 id |
+| `qt_window_focus(mixed $window): void` | 激活：取消最小化、置前、给键盘焦点 |
+| `qt_window_center(mixed $window): void` | 居中到当前所在屏幕 |
+| `qt_window_set_parent(mixed $window, mixed $parent): void` | Qt transient 父窗口（子窗随之最小化/关闭）；`null` 解除 |
+| `qt_window_geometry(mixed $window): array` | 读 `['x','y','width','height']`（客户区） |
+| `qt_window_set_geometry(mixed $window, array $rect): void` | 设置几何；缺省键不动 |
+| `qt_window_send_event(mixed $window, array $event): void` | 向窗口事件队列注一个事件（无头验收 / 单测；不经过 Qt） |
+| `qt_window_find(mixed $window, string $id): array` | 按 id 查控件状态（`type` `value` `visible` `enabled` `geometry`）；找不到返回 `[]` |
+| `qt_window_a11y_tree(mixed $window, int $maxDepth = 6): array` | 导出控件树无障碍快照（role/text/value/geometry/children） |
+| `qt_window_poll_events(mixed $window, int $max = 64): array` | 一次取走至多 $max 个待处理事件 |
 | `qt_window_set_title(mixed $window, string $title): void` | 窗口标题 |
 | `qt_window_set_menu(mixed $window, array $items): void` | 菜单栏 |
 | `qt_window_set_status(mixed $window, array $segments): void` | 状态栏 |
@@ -200,6 +222,7 @@ WidgetTree::qml(string $source = '', array $props = [])
 | `qt_window_file_dialog(mixed $window, array $spec): array` | 文件对话框 |
 | `qt_window_directory_dialog(mixed $window, array $spec): string` | 目录对话框 |
 | `qt_window_notify(mixed $window, string $title, string $message): void` | 系统通知 |
+| `qt_window_toast(mixed $window, string $message, int $durationMs = 3000): void` | 窗口内浮层提示（非阻塞，$durationMs 后自动消失；无托盘时的降级方案） |
 | `qt_window_set_tray(mixed $window, array $spec): void` | 系统托盘 |
 | `qt_window_set_timer(mixed $window, string $id, int $intervalMs): void` | 定时器 |
 | `qt_clipboard_read(): string` | 读剪贴板 |
@@ -209,6 +232,10 @@ WidgetTree::qml(string $source = '', array $props = [])
 | `qt_qml_available(): bool` | 构建时是否定义了 `QT_QML` |
 | `qt_qml_status(mixed $window, string $id): array` | 一个 qml 组件的状态与错误；控件不存在或不是 qml 类型时返回 `{}` |
 | `qt_http_request(array $spec): array` | 同步 HTTP 请求（阻塞事件循环直到返回或超时） |
+| `qt_sse_open(array $spec): int` | 异步开一条 SSE 流，返回从 1 起的流 id；-1 = `url` 空 / `QApplication` 未建 / `QTPHP_NO_NETWORK` 构建 |
+| `qt_sse_read(int $stream, int $max = 64): array` | 一次取至多 $max 个完整 SSE 帧；`[]` = 本轮没有新帧 |
+| `qt_sse_status(int $stream): array` | `['state' => 'open' \| 'done' \| 'error' \| 'unknown', 'status' => int, 'error' => string]`；`unknown` 覆盖不存在的 / 已关闭的流（含 -1） |
+| `qt_sse_close(int $stream): void` | abort + 释放，幂等 |
 
 ::: tip 这些是内部接口
 应用代码用 `QtApp` 的方法，不要直接调 `qt_*`。这一节是给扩展桥接的人看的。

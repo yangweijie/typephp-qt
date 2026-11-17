@@ -3169,3 +3169,352 @@ metaobject，成品 receiver 是手工静态表——机制差异已坐实，版
 - **教训 48**：embed/nano 两条产线的「部署面」必须一起验收——assets 部署藏在 embed
   路径的函数尾部，nano 分支整段跳过就把它一起丢了；而「CI 能跑」可能是 PATH 侥幸。
   产物级判据要站在「自足」上：**最小 PATH 跑 selftest** 才是部署面的真验收。
+
+## F58. AGUI 支持方案与摸底（Session 38，规划轮）
+
+任务来源「用户 /workflow 支持 agui」。编号勘误：任务来源写「新的是 F56 / Session 37 起」，
+实读台账 F56（本文件 :3111，CI qtdeclarative 死结）/ F57（:3144，nano 零部署）与
+Session 37（progress.md:69，Windows 收尾；首轮记 :3，插入 Session 38 置顶后行号漂移，
+二轮评审④经 `grep -n '^## Session'` 重核）均已占用 ⇒ 按任务来源「以你读到的为准」顺延
+**F58 / Session 38 / Phase 42**。分解见 task_plan.md 的 Phase 42 段。
+
+### §58.1 协议事实（来自协议研究员带回的 AG-UI 1.0 摸底材料，docs.ag-ui.com）
+
+- **事件集**：1.0 共 31 个事件类型、8 族（Lifecycle / Text / Tool / Reasoning / State /
+  Activity / Subagents / Passthrough）（spec/1.0/events）。解码器只实现文档明确的
+  标准事件；META_EVENT 是 draft（drafts/meta-events）⇒ 按「未知 type 透传/忽略」处理，
+  不硬依赖；THINKING_* 族在 1.0 退役（changelog），由 REASONING_* 替代 ⇒ 解码器至少
+  保留 THINKING_* 的容错识别（映射成 REASONING_* 并记 warning）。
+- **流式族**：TEXT_MESSAGE_START/CONTENT/END（delta 按序拼接；同一 messageId 允许之后
+  重开继续追加 —— 协议摸底材料）、TOOL_CALL_START/ARGS/END（ARGS 拼接后为参数文本；END
+  只声明参数完整、非校验合法）、REASONING_MESSAGE_*。
+- **chunk 展开是有状态流变换（评审轮修订①/②②，二轮②钉全关闭触发）**：**END 由消费方
+  合成、生产方从不发送**（spec streaming.md「Closing a chunk stream」，二轮抓原文核实；
+  其文首句即 “END is automatically emitted when the stream switches to a new message ID
+  or when the stream completes”，Text/Tool/Reasoning 三族同）⇒ 展开状态（打开的
+  messageId / toolCallId / reasoning 段、挂起的隐式 END）属于**流**：Decoder 做成流域
+  实例 + SseClient 在 done/error 时 finish() flush（§58.3）。**隐式 END 五触发**：
+  ① 同 lane 换 item（新 messageId/toolCallId）先补发旧者 END；② lane 内到达 message /
+  tool-call / step / state / custom / reasoning 族事件即关闭该 lane 打开项——
+  **stand-aside 例外（不关闭任何项）：RAW / ACTIVITY_SNAPSHOT / ACTIVITY_DELTA /
+  REASONING_ENCRYPTED_VALUE**（SUBAGENT_STARTED 开新 lane、不动本 lane）；③ run 级事件
+  RUN_STARTED / RUN_FINISHED / RUN_ERROR / **MESSAGES_SNAPSHOT** 关**所有 lane**；
+  ④ 归属 subagent 终止（SUBAGENT_FINISHED/ERROR）关其 lane；⑤ 流结束。活流中 STATE
+  事件先于 ReasoningMessageEnd 进 Session 的情形由触发②堵住（二轮评审②原提法）。
+  **metadata-only 续接（无 delta 内容、报 usage/finish reason）合法且不关闭**（spec
+  「Chunk metadata」）——二轮评审所引「empty delta 即关闭」措辞原文未找到、**不采纳**，
+  42.7 配负向守卫防实现者写错。subagent lane 归属 / 歧义续接（无 id/tag 解析「父 lane
+  的同类 open 流，否则唯一 open 流」；多 lane 同类 open 且非父 lane = 歧义 MUST 拒绝）：
+  v1 单流父 lane + subagent 各一 lane，歧义续接 = warning + 跳过该 chunk。
+- **TOOL_CALL_CHUNK 规则（本轮对 spec tool-calls 页原文核实）**：首个 chunk MUST 带
+  toolCallId + toolCallName；continuation 可重复（“Optional on later chunks”）；**重复且值
+  冲突 = fatal**（原文 “a continuation repeating `toolCallName`… with a conflicting value is
+  fatal”；二轮经 streaming.md「Continuation chunks」同文互证：continuation 只允许同值
+  重复字段，冲突 = 协议违规）；换不同 toolCallId = 隐式结束上一调用（“a chunk that names
+  a different identifier opens a new item, and the previous one closes first”）。v1 宽容
+  落地：冲突 → 终止**该调用**展开 + warning，不中断整条流（仓库兼容默认同族，
+  QT_DEBUG_STRICT=1 可见）。
+- **宽容 vs fatal 判罚（v1 定案）**：spec 显式事件节把重复 START / 已关消息再 CONTENT 判
+  malformed（fatal to the run）；v1 走宽容路径（重复 START = 自动 END-再开、已关消息
+  CONTENT = 重开追加，均记 warning）——依据 = 仓库硬约束「未知默认静默忽略（兼容性）」
+  （AGENTS.md 渲染节）+ 协议摸底材料 TEXT_MESSAGE_CONTENT 行「允许之后重开」的同向证据。
+- **THINKING 遗留映射（评审轮修订②）**：映射表名是 **THINKING_TEXT_MESSAGE_START/
+  CONTENT/END → REASONING_MESSAGE_***（表内无 THINKING_MESSAGE_* 这类名字）；fixture /
+  测试一律用 THINKING_TEXT_MESSAGE_*，解码器做容错识别 + 映射 warning。
+- **状态族**：STATE_SNAPSHOT 整体替换（MUST NOT 合并）；STATE_DELTA = RFC 6902 JSON Patch
+  操作数组，「格式合法但应用失败」= warning + 跳过、不中断流；漂移后消费方请求新
+  snapshot 重新同步。MESSAGES_SNAPSHOT = **全量历史替换、不是追加**（spec：生产方拥有的
+  全部消息、有序；42.6 的 Session 钉死此语义，42.9 的「消息数」断言按 snapshot 长度 ——
+  评审轮修订②）。
+- **生命周期**：RUN_STARTED（threadId/runId 必填）→ … → RUN_FINISHED（outcome 可选
+  completed/interrupted/cancelled；**缺省 = legacy 成功**，旧 0.x 实现不产生该字段，
+  解码器必须容忍）/ RUN_ERROR（message 必填，code 可选）。STEP_STARTED/FINISHED 配对；
+  生产方 MUST NOT 重开同名已打开 step（消费方重开 = 记 warning）。
+- **工具结果**：TOOL_CALL_RESULT 的 content 是字符串或有序 ContentPart 列表，messageId
+  新建一条 role="tool" 消息。
+- **不可信输入**：RAW（外部事件透传）与 CUSTOM（应用扩展；未知 name MUST 忽略；自建
+  name SHOULD 厂商前缀）——解码器原样透传并打不可信标记；MUST NOT 由 RAW 推导协议
+  行为、MUST NOT 渲染为标记或执行。
+- **传输**：HTTP POST RunAgentInput（threadId/runId/messages 必填；tools/context/state/
+  forwardedProps/resume/parentRunId/protocolVersion 可选；state 缺省 = 空对象「什么都
+  没约定」）→ 响应 Content-Type: text/event-stream（SSE）；帧是 `data: <json>` 行（事件
+  类型在 JSON 的 `type` 字段里，**不用 SSE 的 `event:` 字段**；`event:` / `id:` / `retry:`
+  行被忽略），空行分帧；终态事件（RUN_FINISHED/RUN_ERROR）后生产方关闭响应体，无单独
+  结束标记帧。版本协商 MAJOR.MINOR 数值比较，未知版本按「对方即当前版本」。二进制
+  传输（HTTP+Protobuf，4 字节长度前缀）是 1.0 新增可选绑定，**非必需**。
+- **键名陷阱**：`subagents`（不是 `subAgents`）。公共信封字段 timestamp/rawEvent/
+  metadata（metadata 合并语义 = 逐键 last-write-wins）。
+
+### §58.2 仓库事实（Session 38 亲手读/跑核实）
+
+- **契约四件套先例（qml 对）**：stub 共 41 函数（`grep -c '^function qt_' php-src/qt.stub.php`
+  = 41，本轮 `php bin/qtphp lint` 现读 41⇄41 [OK]）；qml 对 = qt_qml_available
+  （qt.stub.php:250 ⇄ qt_qml.cc:566 `Bool`）/ qt_qml_status（:267 ⇄ :578 `Array`）；
+  注释风格 = 分区横幅 `/* ─── 名 ─── */` + docblock 逐字段说明。
+- **SSE 实现层（照 qt_http_request，cpp-src/qt_loop.cc:295-375）**：QNetworkAccessManager +
+  QNetworkReply；http 版是**同步阻塞**（栈上 manager :314 + 嵌套 QEventLoop+QTimer
+  :347-353 + reply 末尾 deleteLater :373）⇒ SSE 必须让 manager/reply **活过单次调用**，
+  每连接状态用全局流注册表（int id → 结构体），形态先例 = 控件本地状态类
+  WebView2Widget（qt_webview.cc:145，alive_ 生命周期旗标 :385）、cleanup 幂等
+  （qt_loop.cc:101-134）；信号连接：指针版先例 qt_loop.cc:350、lambda 版先例
+  qt_widgets.cc:190-467（三十余处，context 挂 window_）——Qt6 静态信号
+  readyRead/finished 自带 functor 重载、无需 moc；**Qt 对重复连接不去重**（qt_qml.cc:138
+  实测）⇒ wired_ 式挡（qt_qml.cc:254-261）。
+- **窗口事件队列（不进它的原因 = §58.3 决策）**：每窗口 `std::deque<Array> events_`
+  （qt_common.h:566）；enqueue 压 {type,id,value,payload} 且把 value 压成 QString
+  （qt_loop.cc:202-209）；pollEvent 单取 / drainEvents 批取（:90-95 / :216-224）；
+  cleanup 时 `events_.clear()`（:133）；PHP 侧每帧 drainEvents 清空到空
+  （QtApp.php:568-569 → :632-641），高吞吐走 pollEvents(max=64)（QtApp.php:493-496、
+  qt.stub.php:182）；队列契约「信号只入队不改状态」（qt_common.h:16）。
+- **lint 配对规则（bin/lib/contract.php:36-40 / :52-56 / :58-59 / :69-91）**：stub 侧按名
+  配对（参数类型不读）；C++ 侧正则 `^(?:Variant|void|Bool|String|Int|Array)\s+(php_\w+)
+  \s*\(`（行首锚 + 六种返回类型），`glob(cpp-src/*.cc)` 自动覆盖新文件；array_unique
+  容互斥预处理分支（QTPHP_NO_NETWORK 桩先例 :377-392）；缺失 = error、多余 = warning、
+  任一非空 return 1 ⇒ **新 C++ 内部辅助函数若行首以 `php_qt_*` 命名且返回六种类型之一
+  会被判「多余实现」直接 fail**（照 qt_qml.cc:555 `qtQmlStatusByBox` 驼峰命名）。
+  另注：lint 只按名配对，stub 改参数类型不触发失败——四件套必须人肉同步，别信 lint 兜底。
+- **测试缝**：FakeState 新字段必须进 reset()（FakeBridge.php:84-103；先例
+  testResetClearsQmlState FakeBridgeTest.php:321-337）；http 响应预置缝 =
+  $httpResponses + test_set_http_response / test_http_requests（FakeBridge.php:421-444 /
+  :605-613）——sse 照同形；测试类在 strict 命名空间下必须 `use function` 导入全局
+  qt_*/test_*（FakeBridgeTest.php:10-37 先例，漏一个 = undefined function）；
+  phpunit.xml:10 递归扫 tests/ 目录（tests/AGUI/ 子目录自动进套件）；
+  autoload-dev 的 `TypePHP\Qt\Tests\` → tests/（composer.json:35-38）。
+- **构建注入**：示例逐文件列 sources（examples/qmlclock/project.yml:21-38）；composer
+  `extra.bridge.sources` 是**目录级** `["cpp-src","php-src"]`（composer.json:64-70）⇒
+  vendor 消费方自动注入整个 cpp-src 目录（含新文件，零改动）；bin/lib/new.php:65-79
+  模板逐文件列（含 qt_qml.cc、已链 Qt6Network.lib :108）——**本轮不改 new.php**
+  （AGUI 是 opt-in；CliTest.php:235-250 的双向断言护模板，不动即不红）。
+  **偏离追记**：实施轮最终改了 new.php（模板加 qt_sse.cc 行）——理由与
+  examples/hello 同根因，见 §58.4 偏离记录。
+- **示例与 CI 先例**：selftest 判据走 rc + 读回（qmlclock/src/main.php:102-210，F34）；
+  examples/hello/project.yml:75 定义 `/DQTPHP_NO_NETWORK`（不链 Qt6Network），
+  qmlclock/taskboard 默认链 Qt6Network.lib；CI **显式**构建 hello + qmlclock
+  （.github/workflows/ci.yml:129/151/167），新示例不会自动进 CI。
+- **AOT / PHP 风格**：仓库零 enum / 纯 PHP 类先例 = AppData.php（176 行）/
+  JsonStore.php（195 行）（final、无 #[Native]、构造注入）；src/ 与 tests/ 无
+  interface / readonly（grep 核实，readonly 对 #[Native] 类官方明拒）；本机 PHP 8.4.19
+  （composer 要求 >=8.1）；闭包实参个数精确匹配 + 按引用传参断链（AGENTS.md 硬约束、
+  QtApp.php:126-142 arityOf 先例）⇒ 协议层不用闭包注入。
+- **基线现测（本轮执行）**：`php vendor/bin/phpunit --no-coverage` → OK (206 tests,
+  334 assertions)；`php bin/qtphp lint` → [OK] 契约一致（41 ⇄ 41）；doctor 全绿
+  （网络摸底材料：PHP 8.4.19、tpc、php-runtime 8.5.11 builder、Qt
+  /opt/homebrew/opt/qtbase、clang++、phpunit）。
+
+### §58.3 分层与 API 面定稿（含缓冲决策）
+
+- **第一层 协议层（纯 PHP，无网络依赖）** `src/AGUI/` 四个 final 类：
+  `JsonPatch`（RFC 6902，应用失败 = warning + 跳过、不中断；`apply(mixed $doc, mixed
+  $patch): ['doc'=>…, 'warnings'=>…]`）/ `Decoder`（**流域有状态实例，评审轮修订
+  ①/②②，二轮②钉全**：`feed(array $events)` 分批解码 + 紧凑展开——展开状态（打开的
+  messageId / toolCallId / reasoning 段、挂起隐式 END）在实例上，跨 poll 分批调用不重发
+  START；隐式 END 按**五触发**补发（同 lane 换 item / lane 内族事件到达（stand-aside
+  例外 RAW、ACTIVITY_*、REASONING_ENCRYPTED_VALUE）/ run 级事件含 MESSAGES_SNAPSHOT
+  关所有 lane / 归属 subagent 终止 / 流结束，spec streaming.md「Closing a chunk
+  stream」，§58.1）；`finish()` 在流结束时 flush 挂起隐式 END；`decodeSse(string)`
+  静态一次性便捷入口（离线回放/单测）；THINKING_TEXT_MESSAGE_* 容错映射 + 未知 type
+  透传 + RAW/CUSTOM 不可信标记；TOOL_CALL_CHUNK continuation 同名冲突 = 终止该调用 +
+  warning（spec fatal，v1 宽容））/
+  `Session`（事件 reducer → `viewModel()`，**吃展开后的规范事件**——chunk 展开状态不
+  放 Session：它属于传输层流变换，Session 若持有，跨 run 复用（resume）会泄漏状态；
+  STATE_SNAPSHOT 整体替换、STATE_DELTA 走 JsonPatch、**MESSAGES_SNAPSHOT 全量替换
+  （评审轮修订②）**、文本 delta 按 messageId 拼接、工具调用 args 拼接 + result 落位、
+  steps 配对、run 生命周期、SUBAGENT_* 记账）/ `SseClient`（传输薄缝，**持一个
+  Decoder 实例（`run()` 创建）+ 一个 Session**：`run(url, input)` 经 `\qt_sse_open`
+  POST RunAgentInput（**-1 → 记结构化错误、不抛异常**，评审轮修订①）、`poll(max)`
+  拉帧 → `decoder->feed()` → Session、**done/error 时自动 `decoder->finish()` flush
+  挂起 END**、`status()` / `close()` / `viewModel()`；测试与真实桥接用同一个类，不引入
+  闭包注入；**docblock 写明泵限制（二轮评审①）：帧到达依赖 Qt 事件泵，现行唯一泵
+  入口在窗口（QtWindowBox::processEvents，qt_loop.cc:83-88）；末窗 cleanup
+  （qt_loop.cc:101-134）后存活流的 readyRead 永不再触发、数据永不到——v1 示例恒有
+  窗口（无头示例 runFrames 泵帧），无窗口 CLI 式用法 = v1 范围外、记后续**）。
+- **第二层 桥接层（C++）**：新文件 `cpp-src/qt_sse.cc` + stub 4 函数（41 → 45）+
+  QtApp 4 个无窗口转发方法：
+  * `qt_sse_open(array $spec): int` —— spec{url, method(缺省 GET), headers, body,
+    timeout_ms(缺省 0 = 不设传输超时)}；异步开流返回流 id（1 起）；**-1 = url 空 |
+    QApplication 尚未创建（照 qt_http_request 两级守卫 qt_loop.cc:300-309，评审轮
+    修订①）| 无 Network 构建；FakeBridge 口径：fake 无 QApplication 概念，-1 仅
+    url 空（口径表写进 docblock，真桥/fake 测试各自对齐；二轮评审④补
+    `qt_sse_status(-1)` → **state=unknown**（无流存在，不报 error）钉入口径表）**。
+  * `qt_sse_read(int $stream, int $max = 64): array` —— 取至多 $max 个完整 SSE 帧，
+    每帧 `['data'=>string, 'event'=>?string, 'id'=>?string]`（data 多行按 \n 拼接；
+    event/id 仅当帧出现才带键）；空数组 = 本轮无新帧。
+  * `qt_sse_status(int $stream): array` —— `['state'=>'open'|'done'|'error'|'unknown',
+    'status'=>int, 'error'=>string]`。
+  * `qt_sse_close(int $stream): void` —— abort + 释放，幂等。
+  实现：**全局流注册表 `std::map<int, std::unique_ptr<SseStream>>`（评审轮修订①：
+  QNetworkAccessManager 是 QObject，拷贝构造已删、不可移 ⇒ SseStream 不可移 ⇒
+  std::map 按值存储要 MoveInsertable、编不过；unique_ptr 原地构造）** +
+  QNetworkAccessManager/QNetworkReply 常驻 + readyRead/finished
+  lambda 连接（无 moc）+ 字节攒帧（多字节 UTF-8 不被切块）+ wired_ 去重 +
+  QTPHP_NO_NETWORK 报错桩（符号无条件存在保 lint；**桩行为二轮评审④钉死：open →
+  -1；read → 空数组；status → state=unknown（无流存在，不是 error）；close → no-op
+  —— 与 42.1 状态词表一致**）。
+- **第三层 渲染层**：v1 **不新增控件类型**——示例本地用现有控件树组合
+  （scroll + vbox 消息 label，动态孩子显式 id；工具调用 table，行 id = toolCallId；
+  状态栏 setStatus + step label）；可复用 AguiRenderer 划出范围。
+- **缓冲决策 = 独立轮询缓冲（每流一个 `qt_sse_read`），不进窗口事件队列。依据六条**：
+  ① 生命周期：流是进程级资源、不属任何窗口——QtWindowBox::cleanup() 会
+  `events_.clear()`（qt_loop.cc:133），窗口一关，队列里的未交付帧静默丢失；
+  ② 语义：窗口队列契约是「信号只入队、不改状态」（qt_common.h:16），且 enqueue
+  把 value 压成 QString（qt_loop.cc:202-209），SSE 多字段帧塞进 payload 后与控制
+  信号混在一处、无来源流标识；
+  ③ 背压与批取：按流 `qt_sse_read($stream, $max)` 镜像 pollEvents(max) 模式
+  （QtApp.php:493-496 / qt_common.h:508），窗口队列每帧被清空（QtApp.php:632-641）
+  表达不了「从这条流取至多 64 帧」；
+  ④ 多流并发：一个 run 可有多个流（子代理/重连），窗口队列没有流身份；
+  ⑤ 无窗使用：bench / CLI 形态没有窗口；
+  ⑥ C++ 先例：每连接状态本就是控件本地类（WebView2Widget，qt_webview.cc:145），
+  不挂控件的连接的自然形态 = 全局注册表 + int 句柄。
+  代价（写明）：readyRead 只在 Qt 事件泵期间触发（processEvents 的 16ms 嵌套循环，
+  qt_loop.cc:83-88）⇒ 流消费方必须每帧泵一下（主循环/timer），节奏与 qml tick /
+  webview loaded 事件路径相同；无头验收时 runFrames 即泵帧。
+
+### §58.4 文件清单（计划）
+
+**新增**：`cpp-src/qt_sse.cc`；`src/AGUI/JsonPatch.php`、`src/AGUI/Decoder.php`、
+`src/AGUI/Session.php`、`src/AGUI/SseClient.php`；`tests/AGUI/JsonPatchTest.php`、
+`tests/AGUI/DecoderTest.php`、`tests/AGUI/SessionTest.php`；
+`examples/agui-demo/project.yml`、`examples/agui-demo/project.macos.yml`、
+`examples/agui-demo/src/main.php`、`examples/agui-demo/README.md`。
+**修改**：`php-src/qt.stub.php`（+4 函数，41→45）；`src/FakeBridge.php`（4 镜像 +
+FakeState 3 字段进 reset() + 3 个 test_ 辅助）；`src/QtApp.php`（+4 方法）；
+`cpp-src/qt_common.h`（头部文件清单注释 +1 行，不加 QtWindowBox 成员）；
+`AGENTS.md`（目录表 +2 行 + 配对规则）；`CHANGELOG.md`（Unreleased/Added）；
+`docs/src/advanced/agui.md` + `zh/`（含 config.ts 侧边栏两处接线，41.15 先例）。
+**不动**：`.github/**`（CI 接线 = 后续，ci.yml 显式枚举
+hello+qmlclock，见 ci.yml:129/151/167）；`.auto/**`（主会话管理）。
+**偏离记录（实施轮发生，2026-11-17 修复轮补账；原「不动」两条均不成立，
+教训全文见 progress.md Session 38「实施轮 + 本机验收」）**：
+- `bin/lib/new.php`：模板 sources 加了 `{$pkgDir}/cpp-src/qt_sse.cc` 一行
+  （new.php:79）——根因同 hello：模板**无条件**编译 `QtApp.php`，而 QtApp 的
+  sse* 方法体引用 `\qt_sse_*`（AOT 全方法入编），缺 TU 则 `qtphp new` 生成的
+  每个工程链接即炸 4 个 undefined symbol。AGUI 类本身仍 opt-in（模板**不**加
+  `src/AGUI/*.php`），「不动 new.php」原依据（CliTest 双向断言护模板）随
+  phpunit 全绿继续成立。
+- `examples/hello/project.yml`：sources 加 `../../cpp-src/qt_sse.cc` 一行
+  （QTPHP_NO_NETWORK ⇒ 编成报错桩、零链接依赖；行为与像素基线不变）。
+  首轮真机验收 hello 构建报 4 个 `php_qt_sse_*` undefined symbol 逼出此改动；
+  「基线不动」边界收窄为「行为/基线不动」，文件不再字节不变。qmlclock /
+  taskboard 同根因各加一行（真实实现 + 既有 Qt6Network 链接）。
+- 文档落点勘误：42.11 规划写 `docs/src/advanced/agui.md`，实际落在
+  `docs/src/{,zh/}guide/agui.md`（config.ts 侧边栏 en :31 / zh :115）。
+  `CHANGELOG.md`（Unreleased/Added AG-UI 条目）与 `examples/agui-demo/.gitignore`
+  （`/build/`，补 42.11 计划交付物 + 防产物误提交）均为修复轮补齐。
+
+### §58.5 范围外（out of scope）
+
+- live LLM 端点示例（外部网络依赖，无头/CI 不可验）；
+- WebSocket 与二进制（Protobuf）传输（AG-UI 1.0 可选绑定，非必需）；
+- 可复用 AguiRenderer（viewModel → 控件树；v1 示例本地组合）；
+- 新控件类型（硬边界）；
+- META_EVENT（draft）与保留 part 类型（ReasoningPart/ToolCallPart/AssistantPart，
+  1.0 未定义载荷）；
+- agui-demo 的 CI 接线；.auto/measure.sh 冻结（主会话职责，本 workflow 不碰）；
+- `qtphp new` 脚手架默认带 AGUI；
+- commit（用户未令）。
+
+### §58.6 验收判据（实施轮执行，命令见 Phase 42）
+
+1. `php vendor/bin/phpunit --no-coverage` 全绿（基线 206 用例无回归 + 新增全过）。
+2. `php bin/qtphp lint` → [OK] 契约一致（45 ⇄ 45）。
+3. `php bin/qtphp build examples/agui-demo` rc=0（macOS 入口走 project.macos.yml）。
+4. `QT_QPA_PLATFORM=offscreen examples/agui-demo/build/agui-demo --selftest` rc=0
+   （纯 PHP 回放断言 + 控件读回 + file:// 桥接 smoke 三段全 passed；桥接 smoke 段有
+   150 帧泵帧上限、超时 FAIL，不死循环——评审轮修订①；file:// 不通时按 42.9 预案切
+   data: URL 并记追记）。
+5. `examples/agui-demo/build/agui-demo --bench 20000` rc=0 且 stdout 含
+   `METRIC agui_replay_events_per_s=`（主会话据此冻结 measure.sh；×3 波动 < 10%）。
+6. hello 回归：`php bin/qtphp build examples/hello` + offscreen `--selftest` rc=0。
+7. git 检查：`.auto/` 无新增文件、无 commit（不 commit 是硬边界）。
+
+### §58.7 评审轮修订（同日，评审意见 7 条逐条处置）
+
+- **①/②② 接受**：chunk 展开是有状态流变换（spec chunk 条款 “END is automatically
+  emitted when the stream switches to a new message ID or when the stream completes”，
+  三族同）——原方案静态 Decoder 随 SseClient::poll 逐批调用会跨 poll 丢状态（重发
+  START、done 时挂起 END 无人 flush）。处置：展开状态放 **Decoder 实例**（流域），
+  SseClient 每个 run() 持一个；Session 保持无状态、只吃展开后事件；done/error 时
+  `finish()` flush。不选 Session 的理由：展开是传输层流变换，Session 跨 run 复用
+  （resume）时展开状态会泄漏。
+- **② 半接受**：「TOOL_CALL_CHUNK 后续 chunk toolCallName 与首个不同 = fatal」经本轮
+  抓取 spec tool-calls 页原文核实（“a continuation repeating `toolCallName`… with a
+  conflicting value is fatal”）——规则本身**成立保留**；评审「该规则会拒绝合规范流」
+  的担忧不成立（合规范流不会在 continuation 重复冲突值；continuation 重复本身是可选
+  的，“Optional on later chunks”）。措辞已澄清 + 补「换不同 toolCallId = 隐式结束
+  上一调用」边界；v1 宽容落地 = 终止该调用 + warning，不 abort 整条流。42.7 的冲突
+  用例保留回归守卫作用（固化 spec 规则）。
+- **② 接受**：fixture / 测试的 THINKING 事件名 → `THINKING_TEXT_MESSAGE_CONTENT`
+  （spec 映射表无 THINKING_MESSAGE_*；用错名字会被解码器当未知透传，映射断言打
+  不到映射路径）。
+- **② 接受**：Session 钉死 MESSAGES_SNAPSHOT = 全量替换（不是追加），42.9 的「消息数」
+  断言按 snapshot 长度（原方案替换/追加无定论，断言可过可错）。
+- **① 接受**：open() 的 -1 条件补「QApplication 尚未创建」守卫（qt_http_request 两级
+  守卫 qt_loop.cc:300-309），真桥 / FakeBridge 口径写进 docblock（fake -1 仅 url 空、
+  测试先建窗）。
+- **① 接受**：注册表改 `std::map<int, std::unique_ptr<SseStream>>`（QNetworkAccessManager
+  拷贝构造已删、不可移 ⇒ 按值存储 MoveInsertable 编译不过；评审正确）。
+- **① 接受**：42.9③ 泵帧设 150 帧上限（≈2.4s，qmlclock main.php:159 先例），超时
+  FAIL exit(1)，防无头 selftest 死循环。
+- **④ 抽查不采纳一条**：「qt_common.h:49-53 偏两行（实为 :47-51）」经本轮
+  `sed -n '44,56p' | cat -n` 复核 —— `#ifndef QTPHP_NO_NETWORK` 块在 **:49-53**
+  （三个 include 在 :50-52、#endif 在 :53），原引用正确；评审所给 :47-51/:48-50 本身
+  偏两行（与本轮警告的行号漂移同类错误），维持原引用。④ 其余抽查点（qt_loop.cc:
+  295-375/:377-392、qt_common.h:16/:566、FakeBridge.php:84-103、QtApp.php:493-496/
+  :568-569/:632-641、FakeBridgeTest.php:321、qt.stub.php:271-284 + 41 函数、
+  hello:75、ci.yml:129/151/167、composer.json:35-38、phpunit.xml:10）均与原记录
+  一致，不改。
+- **③/⑤ 通过**：AOT 考量（无闭包注入、无反射探测、final + 构造注入、\qt_* 全限定、
+  aguiFixture 函数形态）与缓冲决策自洽性（lambda 连 Qt 库已 moc 的静态信号；cleanup
+  清 events_ 佐证 qt_loop.cc:133）经评审确认，不变。
+
+#### §58.7 二轮（同日，评审意见 7 条，处置逐条）
+
+- **② 接受**：42.7 的 SseClientTest（并入 DecoderTest）在 strict 命名空间
+  `TypePHP\Qt\Tests\AGUI` 下调 qt_sse_*/test_set_sse_stream 须 use function——42.7 头
+  「不依赖桥接函数」拆句（JsonPatch/Decoder/Session 数据内联；SseClientTest 段依赖
+  FakeBridge 全局函数）、42.8「两个测试类」改「三个测试文件」（漏补 = phpunit
+  undefined-function Fatal）。
+- **② 接受并钉全**：Decoder 漏 reasoning 的关闭触发。本轮抓 spec streaming.md
+  （spec/1.0/basic/patterns/streaming.md）原文核实「Closing a chunk stream」：
+  **隐式 END 五触发**（§58.1 已钉全：同 lane 换 item / lane 内族事件到达（stand-aside
+  例外 RAW、ACTIVITY_SNAPSHOT、ACTIVITY_DELTA、REASONING_ENCRYPTED_VALUE）/ run 级
+  事件含 MESSAGES_SNAPSHOT 关所有 lane / subagent 终止 / 流结束）——评审提的「活流中
+  STATE 事件先于 ReasoningMessageEnd 进 Session」由触发②堵住；42.6/42.7 已同步，
+  42.7 补两例 + 两条负向守卫（stand-aside 不关闭 / metadata-only 续接不关闭）。
+  **评审所引 “An empty delta or the next non-reasoning event implicitly closes the
+  message”（events.md:693-700）：「next non-reasoning event」半句经 streaming.md
+  原文证实（并推广为全族 lane 规则）；「empty delta 即关闭」半句**在抓到的原文中
+  未找到，反有「Chunk metadata」节明言 metadata-only 续接合法且不关闭** ⇒ 不采纳
+  empty-delta 规则，42.7 配负向守卫防实现者写错。
+- **④ 接受**：42.3/§58.3 桩文案「-1 + state=error」与 42.1 状态词表冲突——
+  `qt_sse_status(-1)` 钉为 **unknown**（无流存在）；NO_NETWORK 桩行为改
+  open→-1 / read→空数组 / status→unknown / close→no-op；docblock 口径表、42.3、
+  42.8 测试口径三处一致。
+- **① 接受**：泵入口全在窗口盒（QtWindowBox::processEvents qt_loop.cc:83-88；末窗
+  cleanup qt_loop.cc:101-134 后存活流无泵、数据永不到）——v1 示例恒有窗，SseClient
+  docblock 写明此限制；无窗口 CLI 式用法划 v1 范围外（已进 outOfScope 的「无窗口
+  CLI 式用法」条目，实施轮在 AGENTS.md 一行带出）。
+- **④ 接受（勘误）**：「Session 37（progress.md:3）」行号漂移——本轮
+  `grep -n '^## Session' progress.md` 重核：:3 = Session 38 头、:69 = Session 37；
+  三份台账引用已改 :69（F56:3111 / F57:3144 未动、仍属实，维持）。
+- **②④ 抽查通过维持**：tool-calls 页 continuation 冲突 fatal（上轮抓取原文 + 本轮
+  streaming.md「Continuation chunks」同文互证）；END 自动条款（streaming.md「Closing
+  a chunk stream」文首句与方案引用一致）；qt_common.h:49-53（#ifndef 在 :49，上轮
+  评审 :47-51 系笔误，维持原引用）；qmlclock main.php:159 = `$app->runFrames(150)`；
+  qt_loop.cc:300-309 两级守卫（:301-304 QApplication 拒 / :305-309 url 空）；
+  ci.yml:129/151/167 重跑属实。
+
+### 验收读数（实施轮最终收口，2026-11-17，以收口轮给定三行为准）
+
+| 检查 | 结果 | 说明 |
+|---|---|---|
+| phpunit | 通过 | 全绿 |
+| qtphp lint | 通过 | 契约一致 |
+| 真机验收 | 通过 | hello 回归 + AGUI 示例 build/selftest/bench 全过 |
+
+- 明细读数（各命令 rc、断言数、bench ×3 波动 0.66%）已如实落在 progress.md
+  Session 38「实施轮 + 本机验收」42.10①–⑥ 表（§58.6 验收判据 1–7 条全执行）；
+- 未验项如实留档（不美化）：`examples/agui-demo/project.linux.yml` 未实测
+  （本机 macOS、无 Linux Qt 环境）；agui-demo 未进 CI（ci.yml:129/151/167 显式
+  枚举 hello+qmlclock，§58.5 范围外）；未 commit。

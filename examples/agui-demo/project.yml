@@ -1,0 +1,69 @@
+name: agui-demo
+mode: bin
+output: build/agui-demo
+
+# 桥接 C++ 源码直接参与本应用编译（源码内联方案，与 examples/hello 同一份 yml 结构）。
+#
+# 三份配置的分工（tpc 的 include 语义：map 递归合并、**list 整体替换**）：
+#   - 本文件 = 公共段 + Windows 默认段。
+#   - project.macos.yml / project.linux.yml = include 本文件，只覆盖平台相关的
+#     link-libs / link-paths / cxx-flags / ld-flags。
+#
+# AG-UI 配对规则（AGENTS.md）：本 yml 列了 src/AGUI/SseClient.php，就**必须**同时列
+# cpp-src/qt_sse.cc —— SseClient 类体引用 \qt_sse_* 全限定桥接函数，缺 TU 则链接期
+# undefined symbol（与 41.10 的 qt_qml.cc 静态表教训同族、方向相反：那次是 C++ 表
+# 引用强制所有应用链接 qt_qml.cc，这次是 PHP 类引用强制应用列 qt_sse.cc）。
+# 本示例**不定义 QTPHP_NO_NETWORK**：qt_sse.cc 编进真实实现（QNetworkAccessManager），
+# 离线回放与 file:// smoke 都靠它（hello 的 QTPHP_NO_NETWORK 定义是反例，qmlclock
+# 链 QtNetwork 是正例）。
+sources:
+  - src/main.php
+  - ../../src/QtApp.php
+  - ../../src/WidgetTree.php
+  - ../../src/AGUI/JsonPatch.php
+  - ../../src/AGUI/Decoder.php
+  - ../../src/AGUI/Session.php
+  - ../../src/AGUI/SseClient.php
+  - ../../php-src/qt.stub.php
+  - ../../cpp-src/qt_loop.cc
+  - ../../cpp-src/qt_render.cc
+  - ../../cpp-src/qt_decor.cc
+  - ../../cpp-src/qt_widgets.cc
+  - ../../cpp-src/qt_webview.cc
+  - ../../cpp-src/qt_qml.cc
+  - ../../cpp-src/qt_sse.cc
+  # Windows nano：php-nano 缺 crc32 SIMD / Fiber CE / MSVC inline seed256 的目标文件
+  - path: ../../compat/msvc/php_nano_win_stubs.c
+    if: PHP_OS_FAMILY == "Windows"
+
+build-dir: build
+
+# cxx-std 必须是 c++17（nano 严格校验，c++20 会被拒）；optimize: 2 即命令行 -O2。
+cxx-std: c++17
+optimize: 2
+
+# QtNetwork 头目录（qt_sse.cc 的 QNetworkAccessManager/QNetworkReply/QNetworkRequest
+# 经 qt_common.h 的 #ifndef QTPHP_NO_NETWORK 块拉进来）；webview 控件退化成
+# QTextBrowser 后端（未定义 QT_WEBVIEW2/QT_WEBVIEW_WK），所以不再要 WebView2 链接项。
+include-paths:
+  - ../../cpp-src
+  - ../../php-src
+  - D:/tools/Qt/6.9.3/msvc2022_64/include
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtCore
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtGui
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtWidgets
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtNetwork
+
+link-paths:
+  - D:/tools/Qt/6.9.3/msvc2022_64/lib
+
+link-libs:
+  - Qt6Core.lib
+  - Qt6Gui.lib
+  - Qt6Widgets.lib
+  - Qt6Network.lib
+
+cxx-flags:
+  - /Zc:__cplusplus
+  - /permissive-
+  - /EHsc

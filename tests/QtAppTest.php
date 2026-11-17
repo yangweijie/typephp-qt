@@ -10,6 +10,8 @@ use TypePHP\Qt\WidgetTree;
 
 use function test_inject_event;
 use function test_reset;
+use function test_set_sse_stream;
+use function test_sse_requests;
 use function test_window;
 
 /** 字符串 callable 测试用的计数器（放文件级，供函数名字符串引用）。 */
@@ -856,6 +858,41 @@ final class QtAppTest extends TestCase
 
         $value = $this->app->value('c');
         $this->assertSame(['timeText' => '09:09:09'], $value);
+    }
+
+    // ── SSE 流式 ──
+
+    /** sseOpen 把 spec 原样透传给桥接（不包装、不改键）。 */
+    public function testSseOpenForwardsSpecAsIs(): void
+    {
+        $spec = ['url' => 'http://a', 'method' => 'POST', 'headers' => ['Content-Type' => 'application/json'], 'body' => '{}'];
+        $this->assertSame(1, $this->app->sseOpen($spec));
+        $this->assertSame($spec, test_sse_requests()[0], 'spec 原样透传（不复制改键）');
+    }
+
+    /** sseRead 按 max 截断（转发语义：$max 到达桥接层生效）。 */
+    public function testSseReadForwardsMax(): void
+    {
+        test_set_sse_stream([['data' => 'a'], ['data' => 'b']], 200, '');
+        $stream = $this->app->sseOpen(['url' => 'http://a']);
+        $this->assertSame([['data' => 'a']], $this->app->sseRead($stream, 1));
+        $this->assertSame([['data' => 'b']], $this->app->sseRead($stream, 1));
+    }
+
+    /** sseStatus 转发：未知流报 unknown（-1 口径同源）。 */
+    public function testSseStatusForwardsUnknownStream(): void
+    {
+        $this->assertSame('unknown', $this->app->sseStatus(999)['state']);
+    }
+
+    /** sseClose 转发：关流后流表摘除（status 转 unknown）。 */
+    public function testSseCloseForwards(): void
+    {
+        $stream = $this->app->sseOpen(['url' => 'http://a']);
+        $this->assertArrayHasKey($stream, \TypePHP\Qt\Fake\FakeState::$sseStreams);
+        $this->app->sseClose($stream);
+        $this->assertArrayNotHasKey($stream, \TypePHP\Qt\Fake\FakeState::$sseStreams);
+        $this->assertSame('unknown', $this->app->sseStatus($stream)['state']);
     }
 
     // ── 补丁 ──

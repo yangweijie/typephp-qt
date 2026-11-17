@@ -282,3 +282,65 @@ function qt_qml_status(mixed $window, string $id): array {}
  *   短请求可以接受；长请求请在定时器回调里发起，或改成后台线程 + 轮询。
  */
 function qt_http_request(array $spec): array {}
+
+/* ────────────────────────────── SSE 流式 ────────────────────────────── */
+
+/**
+ * 异步开一条 SSE 流（text/event-stream），立即返回流 id（从 1 起递增）。
+ *
+ * 与 qt_http_request 的差异：这里**不阻塞** —— QNetworkReply 的信号挂在
+ * Qt 事件泵上，帧在之后的泵帧期间陆续到达，用 qt_sse_read() 拉取。
+ * 帧到达依赖窗口事件泵（processEvents 的 16ms 嵌套循环），消费方需要
+ * 每帧泵一下（主循环 / timer / runFrames）；无窗口的 CLI 式用法 v1 不支持。
+ *
+ * $spec: url(必填) / method(缺省 GET；AG-UI run 用 POST) /
+ *        headers(关联数组) / body(字符串) / timeout_ms(缺省 0 = 不设传输超时，
+ *        流可长命)。
+ *
+ * 返回流 id；-1 共三条条件（真桥口径）：
+ *   ① url 为空；② QApplication 尚未创建（惰性单例：只调过 qt_app_create()
+ *      但还没建过窗口的应用，QNetworkAccessManager 依赖它）；
+ *   ③ QTPHP_NO_NETWORK 构建（未链 Qt6Network，返回报错桩的 -1）。
+ * FakeBridge 没有 QApplication / Network 概念：-1 仅 url 为空；
+ * 未预置流时合成一条空流（state=done），行为完全由 test_set_sse_stream() 决定，
+ * 所以测试里 open 前要先建窗（窗口句柄是假状态的地基）。
+ *
+ * 流的生命周期与窗口无关（进程级资源）：关窗不会让未读的帧丢失，
+ * 但关窗后事件泵停摆，帧也不再到达（见上面的泵限制）。
+ */
+function qt_sse_open(array $spec): int {}
+
+/**
+ * 从流里一次取走至多 $max 个**已完整**的 SSE 帧。
+ *
+ * 每帧 ['data'=>string, 'event'=>?string, 'id'=>?string]：
+ *   data = 帧内多条 data: 行按 \n 拼接（AG-UI 的一帧就是一条 data: <json> 行）；
+ *   event / id 仅当帧里出现该字段时才带键（AG-UI 不用 SSE 的 event 字段，
+ *   事件类型在 JSON 的 type 里；event/id 行按协议解析、原样带出供消费方自决）。
+ *
+ * 空数组 = 本轮没有新帧（流没数据 / 已读完），不报错。
+ * 未知流 id 同样返回空数组（与「没读」不可区分，靠 status 区分存在性）。
+ */
+function qt_sse_read(int $stream, int $max = 64): array {}
+
+/**
+ * 读流的当前状态。
+ *
+ * 返回 ['state'=>'open'|'done'|'error'|'unknown', 'status'=>int, 'error'=>string]。
+ *   open   = 请求进行中（生产方还没关响应体）；
+ *   done   = 流存在且生产方正常关闭了响应体（AG-UI：终态事件后关流）；
+ *   error  = **流存在但请求失败/被 abort**（status 为 HTTP 状态码，0 = 连接级失败；
+ *             error 是失败文本）；
+ *   unknown = 流 id 不存在或已关闭 —— **含 qt_sse_status(-1)**（open 失败没有流，
+ *             不得报 error；error 只留给「流存在但请求失败」的语义）。
+ *
+ * 无网络构建（QTPHP_NO_NETWORK）下恒返回 unknown + 诊断文本。
+ */
+function qt_sse_status(int $stream): array {}
+
+/**
+ * abort 并释放一条流（幂等：重复调用、未知 id 均无副作用）。
+ *
+ * 关流后该 id 的 status 报 unknown、read 报空数组；id 不回收复用（进程内单调递增）。
+ */
+function qt_sse_close(int $stream): void {}

@@ -8,6 +8,7 @@
 //   qt_widgets.cc  控件工厂与属性应用（控件目录）
 //   qt_webview.cc  webview 的统一入口 + WebView2/QTextBrowser 后端
 //   qt_qml.cc      qml 的统一入口 + QQuickWidget 后端（QT_QML）/ 降级占位
+//   qt_sse.cc      SSE 流式原语（全局流注册表 + QNetworkAccessManager，QTPHP_NO_NETWORK 下为报错桩）
 //   qt_webview_wk.mm  WKWebView 后端（仅 macOS，且仅在 QT_WEBVIEW_WK 下进 sources）
 //
 // 设计约束（与 php-src/qt.stub.php 一一对应）：

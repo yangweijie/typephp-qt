@@ -73,6 +73,10 @@ sources:
   - {$pkgDir}/cpp-src/qt_widgets.cc
   - {$pkgDir}/cpp-src/qt_webview.cc
   - {$pkgDir}/cpp-src/qt_qml.cc
+  # SSE 流式原语（AG-UI 桥接）：模板已链 Qt6Network，恒可编；
+  # 配对规则：项目若引入 TypePHP\Qt\AGUI\SseClient（类体引用 \qt_sse_*），
+  # 就必须保留这一行，否则链接期 undefined symbol
+  - {$pkgDir}/cpp-src/qt_sse.cc
   # nano 在 Windows 上缺几个目标文件（crc32 SIMD / Fiber CE / MSVC seed256）
   - path: {$pkgDir}/compat/msvc/php_nano_win_stubs.c
     if: PHP_OS_FAMILY == "Windows"

@@ -376,6 +376,50 @@ final class QtApp
         $this->patch([['op' => 'call', 'id' => $id, 'method' => 'reload']]);
     }
 
+    // ── SSE 流式 ──
+
+    /**
+     * 异步开一条 SSE 流，返回流 id（从 1 起）；-1 = url 空 / QApplication 未建 /
+     * 无 Network 构建（真桥三条；FakeBridge 仅 url 空，测试里先建窗 + 预置）。
+     *
+     * 流是进程级资源，**不挂窗口句柄**（关窗不丢帧，但事件泵停摆帧也不再到达），
+     * 所以这四个方法都不带 handle()。$spec: url / method(缺省 GET；AG-UI run 用
+     * POST) / headers / body / timeout_ms(缺省 0 = 不设传输超时)。
+     *
+     * @param array{url:string, method?:string, headers?:array<string,string>, body?:string, timeout_ms?:int} $spec
+     */
+    public function sseOpen(array $spec): int
+    {
+        return \qt_sse_open($spec);
+    }
+
+    /**
+     * 从流里一次取走至多 $max 个完整 SSE 帧（每帧 ['data'=>…, 'event'=>?, 'id'=>?]，
+     * data = 多行 data: 按 \n 拼接）。空数组 = 本轮无新帧，不报错。
+     *
+     * 帧到达依赖窗口事件泵（processEvents 的 16ms 嵌套循环）：消费方每帧泵一下
+     * （主循环 / timer / runFrames）。无窗口的 CLI 式用法 v1 范围外。
+     */
+    public function sseRead(int $stream, int $max = 64): array
+    {
+        return \qt_sse_read($stream, $max);
+    }
+
+    /**
+     * 流状态 ['state'=>'open'|'done'|'error'|'unknown', 'status'=>int, 'error'=>string]。
+     * unknown 含 -1 / 已关闭的 id；error 只留给「流存在但请求失败」。
+     */
+    public function sseStatus(int $stream): array
+    {
+        return \qt_sse_status($stream);
+    }
+
+    /** abort + 释放一条流；幂等，重复调用 / 未知 id 无副作用。 */
+    public function sseClose(int $stream): void
+    {
+        \qt_sse_close($stream);
+    }
+
     // ── 取值 ──
 
     /** 读取控件当前值；控件不存在返回 null。 */
