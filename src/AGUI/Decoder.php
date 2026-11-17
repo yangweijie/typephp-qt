@@ -185,9 +185,7 @@ final class Decoder
                 $this->warnings[] = '丢弃形态非法事件（缺 type 字符串）';
                 continue;
             }
-            foreach ($this->expandOne($event) as $emitted) {
-                $out[] = $emitted;
-            }
+            $this->expandOne($event, $out);
         }
         return $out;
     }
@@ -279,8 +277,11 @@ final class Decoder
 
     // ── 单事件展开 ──
 
-    /** @return array<int, array<string, mixed>> */
-    private function expandOne(array $event): array
+    /**
+     * 展开单事件并直接追加进 $out（R5：原先返回临时数组、feed() 再二次遍历逐条
+     * 追加，每事件一次临时数组 + 双重遍历是纯开销；按引用写回即消掉两者）。
+     */
+    private function expandOne(array $event, array &$out): void
     {
         $type = $event['type'];
 
@@ -293,25 +294,31 @@ final class Decoder
 
         switch ($event['type']) {
             case self::TEXT_MESSAGE_CHUNK:
-                return $this->expandChunk($event, 'text');
+                $this->expandChunk($event, 'text', $out);
+                return;
             case self::TOOL_CALL_CHUNK:
-                return $this->expandChunk($event, 'tool');
+                $this->expandChunk($event, 'tool', $out);
+                return;
             case self::REASONING_MESSAGE_CHUNK:
-                return $this->expandChunk($event, 'reasoning');
+                $this->expandChunk($event, 'reasoning', $out);
+                return;
         }
 
         // 非 chunk 事件：先做隐式 END 的关闭判定（触发②③④），再透传。
         $lane = $this->laneOf($event);
-        $emitted = [];
 
         if (isset(self::RUN_LEVEL_SET[$event['type']])) {
             // 触发③：run 级事件关所有 lane
             foreach (array_keys($this->openItems) as $key) {
-                $emitted = array_merge($emitted, $this->closeLane($key));
+                foreach ($this->closeLane($key) as $closed) {
+                    $out[] = $closed;
+                }
             }
         } elseif (isset(self::SUBAGENT_END_SET[$event['type']])) {
             // 触发④：关归属 subagent 的 lane
-            $emitted = $this->closeLane($this->subagentKeyOf($event));
+            foreach ($this->closeLane($this->subagentKeyOf($event)) as $closed) {
+                $out[] = $closed;
+            }
         } elseif (!isset(self::STAND_ASIDE_SET[$event['type']])) {
             // 触发②：message/tool-call/step/state/custom/reasoning 族到达，
             // 关本 lane 的打开项。stand-aside 例外见上面 in_array 白名单：
@@ -320,7 +327,9 @@ final class Decoder
             // 同族同项的显式 CONTENT/START 不在此列 —— chunk 展开路径（expandChunk）
             // 与显式事件路径的分界：chunk 走 expandChunk；显式同族事件若与打开的
             // 紧凑项冲突，上面已把该项关掉，下面按显式事件重开。
-            $emitted = array_merge($emitted, $closed);
+            foreach ($closed as $item) {
+                $out[] = $item;
+            }
         }
         if ($event['type'] === self::SUBAGENT_STARTED) {
             $this->ensureLane($this->subagentKeyOf($event));
@@ -333,17 +342,14 @@ final class Decoder
         if (isset(self::UNTRUSTED_SET[$event['type']])) {
             $event['untrusted'] = true;
         }
-        $emitted[] = $event;
-        return $emitted;
+        $out[] = $event;
     }
 
     /**
-     * 紧凑 chunk → 显式 START/CONTENT(+ARGS) 展开，隐式 END 挂起。
-     * @return array<int, array<string, mixed>>
+     * 紧凑 chunk → 显式 START/CONTENT(+ARGS) 展开，隐式 END 挂起（R5：结果直接追加进 $out）。
      */
-    private function expandChunk(array $event, string $family): array
+    private function expandChunk(array $event, string $family, array &$out): void
     {
-        $out = [];
         $tagLane = $this->laneOf($event);
         $identifier = $family === 'tool' ? $event['toolCallId'] ?? null : $event['messageId'] ?? null;
 
@@ -364,7 +370,7 @@ final class Decoder
                     $identifier = $openElsewhere[0];
                 } else {
                     $this->warnings[] = 'chunk 歧义续接（无标识且' . (count($openElsewhere) > 1 ? '多 lane 同类打开' : '无打开项') . '），已跳过该 chunk';
-                    return $out;
+                    return;
                 }
             }
         }
@@ -386,7 +392,7 @@ final class Decoder
             if ($name !== null && $known !== null && $name !== $known) {
                 $this->warnings[] = "TOOL_CALL_CHUNK 后续 chunk 的 toolCallName \"{$name}\" 与首值 \"{$known}\" 冲突，终止该调用展开";
                 $out = array_merge($out, $this->closeOne($lane, 'tool'));
-                return $out;
+                return;
             }
         }
 
@@ -396,7 +402,7 @@ final class Decoder
             if ($delta !== null && $delta !== '') {
                 $out[] = $this->contentEvent($family, $identifier, $delta);
             }
-            return $out;
+            return;
         }
 
         // 新 item：触发① —— 同 lane 已打开别的 item，先补发旧者的隐式 END
@@ -413,7 +419,7 @@ final class Decoder
             $name = $event['toolCallName'] ?? null;
             if ($name === null) {
                 $this->warnings[] = 'TOOL_CALL_CHUNK 首 chunk 缺 toolCallName（spec MUST），终止该调用展开';
-                return $out;
+                return;
             }
             $this->toolCallNames[$identifier] = $name;
             $out[] = ['type' => self::TOOL_CALL_START, 'toolCallId' => $identifier, 'toolCallName' => $name];
@@ -425,7 +431,6 @@ final class Decoder
         if ($delta !== null && $delta !== '') {
             $out[] = $this->contentEvent($family, $identifier, $delta);
         }
-        return $out;
     }
 
     /** chunk 的增量载荷字段：tool 族 spec 用 argsDelta（容忍 delta 同义位），其余族用 delta。 */
