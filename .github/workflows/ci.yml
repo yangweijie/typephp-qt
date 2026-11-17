@@ -122,11 +122,11 @@ jobs:
       - name: 把示例里的 Qt 路径指向 runner 的安装位置
         shell: pwsh
         run: |
-          # examples/{hello,qmlclock}/project.yml 里的 Qt 路径是写死的（本地可直接 tpc 编译），
+          # examples/{hello,qmlclock,agui-demo}/project.yml 里的 Qt 路径是写死的（本地可直接 tpc 编译），
           # CI 上必须替换成 install-qt-action 装好的那份，否则 cl.exe 找不到 QWidget 头文件
           $qtRoot = $env:QT_ROOT_DIR -replace '\\', '/'
           if (-not $qtRoot) { throw 'QT_ROOT_DIR 未设置，install-qt-action 没有生效' }
-          foreach ($yml in @('examples/hello/project.yml', 'examples/qmlclock/project.yml')) {
+          foreach ($yml in @('examples/hello/project.yml', 'examples/qmlclock/project.yml', 'examples/agui-demo/project.yml')) {
             $content = Get-Content -LiteralPath $yml -Raw
             $content = $content -replace [regex]::Escape('D:/tools/Qt/6.9.3/msvc2022_64'), $qtRoot
             Set-Content -LiteralPath $yml -Value $content -NoNewline
@@ -171,3 +171,16 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           QT_QUICK_BACKEND: software
         run: examples\qmlclock\build\qmlclock.exe --selftest
+
+      - name: 编译 AGUI 示例（--nano）
+        # agui-demo 的 SSE 原语链 Qt6Network（qt_sse.cc 真实实现，非 QTPHP_NO_NETWORK
+        # 报错桩）；QtNetwork 在 install-qt-action 的 qtbase 默认组件里，无需额外
+        # modules。nano 与 hello 同理由
+        run: php bin/qtphp build examples/agui-demo --nano
+
+      - name: AGUI 示例无头自测
+        # 离线回放（fixture → 解码 → 渲染 → 读回断言）+ file:// 桥接 smoke；
+        # 纯 widgets 示例不需要 QT_QUICK_BACKEND（那是 QML 的软件渲染回退）
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: examples\agui-demo\build\agui-demo.exe --selftest

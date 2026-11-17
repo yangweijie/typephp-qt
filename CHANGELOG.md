@@ -43,7 +43,10 @@
   `QTPHP_NO_NETWORK` 构建下原语退化为报错桩（符号恒在、不链 `Qt6Network`）。
   离线回放示例 `examples/agui-demo`（内置 fixture → 解码 → 渲染 → 读回断言，
   无头可验收；`--bench N` 输出 `METRIC` 行供 autoresearch 计时）。
-- **CI**：新增 `.github/workflows/ci.yml`（PHPUnit + `qtphp lint` + Windows 构建）。
+  解码器热路径经 autoresearch 循环优化（每事件哈希探测收敛 + 快路径，
+  回放吞吐约 2× 基线，`experiment:` 提交链 a2f1b1e…b74b85b）。
+- **CI**：新增 `.github/workflows/ci.yml`（PHPUnit + `qtphp lint` + Windows 构建，
+  并编译/无头自测 hello、qmlclock、agui-demo 三个示例）。
 - **文档**：新增 `docs/src/advanced/performance.md` 与 `pitfalls.md`；
   `CHANGELOG.md`、`AGENTS.md`。
 

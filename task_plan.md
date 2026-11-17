@@ -1199,6 +1199,12 @@ ci.yml:129/151/167、AOT 考量与范围划分 —— 均属实，引用不改�
   中英一起改（Session 30 先例）。文档页允许压时间，但 AGENTS.md 两行与 CHANGELOG 是「done」的一部分。
 - [x] 42.12 收尾：progress.md Session 38 条目补验收读数与教训；task_plan 本清单勾选；
   **不 commit**（仅用户明示后执行，41.16 先例）。
+- [x] 42.13（后续轮，用户令「继续」触发）：agui-demo CI 接线 —— `.github/workflows/
+  ci.yml` 三处（路径重写 foreach 加 agui-demo yml :129；「编译 AGUI 示例（--nano）」
+  :176-179，注释钉 QtNetwork 在 qtbase 默认组件无需 modules；「AGUI 示例无头自测」
+  :180-186 纯 offscreen 无需 QT_QUICK_BACKEND）。F58 §58.5 原划范围外，此条将其
+  划回；本地验证 = YAML 语法（yaml.safe_load 过），Windows 侧跑通待 push 后 CI
+  读数（41.13 同口径，未验项留档）。
 
 ### Phase 42 最终收口（2026-11-17，记账轮核验）
 
@@ -1211,8 +1217,9 @@ ci.yml:129/151/167、AOT 考量与范围划分 —— 均属实，引用不改�
   （hello 回归 + AGUI 示例 build/selftest/bench 全过）。明细（各命令 rc、bench ×3
   波动）见 progress.md Session 38「实施轮 + 本机验收」42.10①–⑥ 表。
 - **未验项如实留档（不美化）**：`examples/agui-demo/project.linux.yml` 未实测
-  （本机 macOS、无 Linux Qt 环境，与 qmlclock 先例同口径）；agui-demo 未进 CI
-  （ci.yml 显式枚举 hello+qmlclock，42.11 计划交付面之外，F58 §58.5）；未 commit。
+  （本机 macOS、无 Linux Qt 环境，与 qmlclock 先例同口径）；agui-demo 的 CI 接线
+  已由 42.13 本地完成（ci.yml:129/176-186），Windows 侧跑通待 push 后 CI 读数
+  （41.13 同口径）；未 commit。
 
 ## Errors Encountered
 

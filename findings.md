@@ -3410,7 +3410,10 @@ hello+qmlclock，见 ci.yml:129/151/167）；`.auto/**`（主会话管理）。
 - 新控件类型（硬边界）；
 - META_EVENT（draft）与保留 part 类型（ReasoningPart/ToolCallPart/AssistantPart，
   1.0 未定义载荷）；
-- agui-demo 的 CI 接线；.auto/measure.sh 冻结（主会话职责，本 workflow 不碰）；
+- agui-demo 的 CI 接线~~；~~**勘误（后续轮，用户令「继续」）**：已接线
+  `.github/workflows/ci.yml`（:129 路径重写 + :176-186 编译/自测两 step），
+  本地 YAML 语法验证过、Windows 侧跑通待 push 后 CI 读数（42.13，
+  progress.md Session 38「CI 接线」节）；.auto/measure.sh 冻结（主会话职责，本 workflow 不碰）；
 - `qtphp new` 脚手架默认带 AGUI；
 - commit（用户未令）。
 
@@ -3515,8 +3518,10 @@ hello+qmlclock，见 ci.yml:129/151/167）；`.auto/**`（主会话管理）。
 
 - 明细读数（各命令 rc、断言数、bench ×3 波动 0.66%）已如实落在 progress.md
   Session 38「实施轮 + 本机验收」42.10①–⑥ 表（§58.6 验收判据 1–7 条全执行）；
-- 优化轮（autoresearch「agui-support」段 R1–R7，447974 → 928821 events/s，2.07×，
-  全部 keep、checks 全绿）与「AOT 地板高于纯 PHP 2.7×」探针读数落在
+- 优化轮（autoresearch「agui-support」段 R1–R9：R1–R8 keep，447974 → 937413；
+  R9 噪声带标定（noop）证明测量窗口噪声 ≥ ±2%、R7/R8 收益在带内——有效收益段
+  = R2–R6（→ 919931，+105%），全部 keep、checks 全绿；停点 = 原则内靶点尽 +
+  AOT 地板高于纯 PHP 2.7× 探针证据 + 噪声带标定）与探针读数落在
   progress.md Session 38「优化轮（autoresearch「agui-support」段，同日主会话执行）」；
 - 未验项如实留档（不美化）：`examples/agui-demo/project.linux.yml` 未实测
   （本机 macOS、无 Linux Qt 环境）；agui-demo 未进 CI（ci.yml:129/151/167 显式

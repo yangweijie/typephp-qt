@@ -58,3 +58,6 @@ composer.lock
 !docs/**/*.png
 !examples/**/assets/*.png
 .phpunit.cache
+
+# autoresearch 导出的 dashboard（生成物，同 .phpunit.cache/ 口径）
+/autoresearch-dashboard.html

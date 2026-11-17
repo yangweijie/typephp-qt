@@ -166,8 +166,25 @@ agui-demo 缺 .gitignore / 文档落点勘误），收口轮无新增。
 - 42.1–42.12 全部完成（上节收口；42.12 = 本条目 + task_plan 勾选，均已做）。
 - `examples/agui-demo/project.linux.yml` 未实测（本机 macOS、无 Linux Qt 环境，
   与 qmlclock 先例同口径，41.x 同族未验项）。
-- CI 不含 agui-demo（ci.yml 显式枚举 hello+qmlclock，后续轮或用户令）。
+- CI：agui-demo 已接线（下节「CI 接线」，用户令「继续」触发；本地改好待 push 验证）。
 - 未 commit（用户未令）。
+
+### CI 接线（用户令「继续」触发的后续轮，同日）
+
+F58 §58.5 原划范围外的「agui-demo 的 CI 接线」按用户「继续」指令执行，
+`.github/workflows/ci.yml` 三处改动（照 qmlclock 的 41.13 先例形态）：
+
+1. 路径重写 foreach 加 `'examples/agui-demo/project.yml'`（ci.yml:129）——
+   该 yml 与 hello/qmlclock 同款写死 `D:/tools/Qt/6.9.3/msvc2022_64`，
+   不重写则 Windows runner 上 cl.exe 找不到头文件；
+2. 新 step「编译 AGUI 示例（--nano）」（ci.yml:176-179）——注释钉死
+   QtNetwork 在 install-qt-action 的 qtbase 默认组件里（无需 modules，
+   区别于 qmlclock 的 qtdeclarative 依赖；qt_sse.cc 真实实现非 QTPHP_NO_NETWORK 桩）；
+3. 新 step「AGUI 示例无头自测」（ci.yml:180-186）——`QT_QPA_PLATFORM=offscreen`
+   即可，纯 widgets 示例不需要 qmlclock 的 `QT_QUICK_BACKEND=software`。
+
+本地验证限度（与 41.13 同口径）：YAML 语法 `yaml.safe_load` 通过；Windows 侧
+真实跑通要 push 后 CI 读数。未 commit（用户未令）。
 
 ### 优化轮（autoresearch「agui-support」段，同日主会话执行）
 
@@ -184,15 +201,24 @@ agui-demo 缺 .gitignore / 文档落点勘误），收口轮无新增。
 | R4 | closeLane 每事件付 3 族字面量 + 3×closeOne + 3×array_merge（常见情况 lane 无打开项）→ 空 lane 快返 [] | 832549（+33.8%） | bf816ea |
 | R5 | feed 每事件「expandOne 返回临时数组 + 二次遍历逐条追加」→ expandOne/expandChunk 按引用写 $out | 892375（+7.2%，累计 **2.0×**） | 2f563d5 |
 | R6 | expandOne 每事件 6 张 type=>true 表各探一次 → 合并单张位掩码表 CLASS_OF（一次 ?? 取回 + 位运算判 7 类属性） | 919931（+3.1%） | ff89928 |
-| R7 | expandOne 对 $event['type'] 的 4-5 次同键哈希探测 → 收敛到局部 $type（legacy 映射后同步） | 928821（+1.0%，累计 **2.07×**） | 3487b88 |
+| R7 | expandOne 对 $event['type'] 的 4-5 次同键哈希探测 → 收敛到局部 $type（legacy 映射后同步） | 928821（+1.0%） | 3487b88 |
+| R8 | findOpenLane 每 chunk 事件全 lane foreach → 先直探父 lane（'' 恒为首键，打开项绝大多数所在；结果与原循环等价） | 937413（+0.9%，累计 **2.10×**） | b74b85b |
+| R9 | **噪声带标定（noop，无代码改动）**：R8 态直接复测 ×3 | 953014（较 R8 中位漂移 +1.7%） | —（noop） |
 
 每轮 checks（phpunit + lint）全绿；bench ×3 波动 0.66–3% 内（R1 基线读数 447974，
-R7 读数 928821，各 repeat:3 取中位）。
+R8 读数 937413，各 repeat:3 取中位）。
 
 **教训**：
 
-- 单轮收益 25 → 11 → 34 → 7 → 3 → 1%，R7 后已进噪声带，loop 收手（7/20）：
-  剩余热点在 bench harness 本身（每批 array_slice / new Decoder+Session），属计时口径不动。
+- **R9 标定推翻 R7/R8 的收益归因**：未改代码的复测中位 953014，比 R8 的 937413
+  还高 1.7%——测量窗口噪声带 ≥ ±2%，R7（+1.0%）/ R8（+0.9%）全在带内、属中性
+  改动（语义等价已保，不回滚）。**有效收益段 = R2–R6：447974 → 919931（+105%，
+  累计 2.05×）**；R7/R8 是免费的（无回归风险的中性简化），但不是信号。
+  此后单轮收益 < 噪声带就不再做优化轮，改以「未改代码复测」标定噪声。
+- 单轮收益 25 → 11 → 34 → 7 → 3 → 1 → 1（%），R8 后原则内靶点已尽，loop 收手（9/20）：
+  R2–R8 覆盖 Decoder 全部每事件哈希探测（分类 6 表→位掩码 1 表、type 局部化、
+  closeLane 快路径、findOpenLane 快路径、引用写回）；Session 侧每事件已是 2 次
+  最小查表（messageIndex + messages），再动就是 fixture 分布过拟合。
 - **AOT 地板高于纯 PHP**：纯 PHP 探针（20000 事件口径，/tmp/agiuprobe/probe.php）
   full 管线 8.1ms，AOT 二进制 21.4ms——AOT 比原生 PHP **慢 2.7×**。每事件 ~1.1µs
   的地板由 AOT 运行时的哈希/数组开销决定，PHP 侧代码再压无意义；协议层优化收益
@@ -201,6 +227,24 @@ R7 读数 928821，各 repeat:3 取中位）。
   闭包捕获写入，普通形参传引用不受影响）——R5 若 AOT 不认会 build 炸，实测过。
 - 冻结顺序坑：先 init_experiment 再创建 measure.sh 会被写钩子以「循环已冻结」拒绝
   ——正确顺序是（clear → 建 measure.sh/checks.sh → init_experiment → run_experiment）。
+
+### 收尾（收口门复验 + 会话关闭，同日）
+
+优化循环（R1–R9）之后，全部优化改动都未经过完整收口门，本段补验（均为当日实跑）：
+
+| 检查 | 结果 |
+|---|---|
+| `python3 docs/check-anchors.py docs/src` | ✅ 全部锚点有效（18 个目标文件） |
+| hello 回归（`QT_QPA_PLATFORM=offscreen examples/hello/build/hello --selftest`） | ✅ rc=0 |
+| agui-demo 自测（offscreen `--selftest`，21 条判据含桥接 smoke） | ✅ selftest passed，rc=0 |
+| phpunit + lint（R9 的 checks.sh 回压） | ✅ 全绿（261 用例 / 45⇄45） |
+
+**Session 38 关闭**：Phase 42 全勾（42.1–42.12）、F58 台账完整（方案 + 偏离追记 +
+验收读数 + 优化轮指针）、autoresearch「agui-support」段按 R9 噪声带标定收手
+（9/20，有效收益 R2–R6 +105%）。遗留外部项：`project.linux.yml` 真机实测、
+agui-demo CI 接线 push 验证（下下节「CI 接线」本地已完成，Windows 侧跑通
+待 CI 读数，41.13 同口径）、未 commit（循环 keep 提交之外的补账改动
+findings.md / progress.md / .auto/ / ci.yml 仍在工作区，等用户令）。
 
 ## Session 37 — 2026-11-11（Windows 收尾：CI qtdeclarative 死结 + 41.14 QML 运行库白名单）
 
