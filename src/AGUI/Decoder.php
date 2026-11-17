@@ -76,78 +76,60 @@ final class Decoder
     public const THINKING_TEXT_MESSAGE_CONTENT = 'THINKING_TEXT_MESSAGE_CONTENT';
     public const THINKING_TEXT_MESSAGE_END = 'THINKING_TEXT_MESSAGE_END';
 
-    // 逐事件分类用的清单全部提为 const 哈希表（R2 提 const 去构造，R3 换哈希去线性）：
-    // expandOne 热路径上每个事件原先要现场构造 6 个小数组 + 一次 31 元素的
-    // knownTypes() 临时清单（R2 已消）；in_array 对清单仍是 O(n) 线性（KNOWN 每事件
-    // 全扫 31 项），R3 换 type => true 哈希表 + isset O(1)。语义与同一元素集合的
-    // in_array(..., true) 逐一相同。
-    /** legacy THINKING_* → REASONING_* 映射源（1.0 退役；映射表名就是这三个）。 */
-    private const LEGACY_SET = [
-        self::THINKING_TEXT_MESSAGE_START => true,
-        self::THINKING_TEXT_MESSAGE_CONTENT => true,
-        self::THINKING_TEXT_MESSAGE_END => true,
-    ];
-    /** 触发③：run 级事件关所有 lane。 */
-    private const RUN_LEVEL_SET = [
-        self::RUN_STARTED => true,
-        self::RUN_FINISHED => true,
-        self::RUN_ERROR => true,
-        self::MESSAGES_SNAPSHOT => true,
-    ];
-    /** 触发④：subagent 终止事件关归属 lane。 */
-    private const SUBAGENT_END_SET = [self::SUBAGENT_FINISHED => true, self::SUBAGENT_ERROR => true];
-    /** 触发② stand-aside 例外（不关 lane：不可信透传 / 物化 / 开新 lane / 加密值）。 */
-    private const STAND_ASIDE_SET = [
-        self::RAW => true,
-        self::ACTIVITY_SNAPSHOT => true,
-        self::ACTIVITY_DELTA => true,
-        self::REASONING_ENCRYPTED_VALUE => true,
-        self::SUBAGENT_STARTED => true,
-    ];
-    /** 不可信 passthrough 打 untrusted 标记。 */
-    private const UNTRUSTED_SET = [self::RAW => true, self::CUSTOM => true];
-    /** SUBAGENT_* 归属 lane 判定（laneOf）。 */
-    private const SUBAGENT_LANE_SET = [
-        self::SUBAGENT_STARTED => true,
-        self::SUBAGENT_FINISHED => true,
-        self::SUBAGENT_ERROR => true,
-    ];
-    /** 已知事件全集（unknown 标记判定；META_EVENT 是 draft，不入表按未知透传）。 */
-    private const KNOWN_SET = [
-        self::RUN_STARTED => true,
-        self::RUN_FINISHED => true,
-        self::RUN_ERROR => true,
-        self::STEP_STARTED => true,
-        self::STEP_FINISHED => true,
-        self::TEXT_MESSAGE_START => true,
-        self::TEXT_MESSAGE_CONTENT => true,
-        self::TEXT_MESSAGE_END => true,
-        self::TEXT_MESSAGE_CHUNK => true,
-        self::TOOL_CALL_START => true,
-        self::TOOL_CALL_ARGS => true,
-        self::TOOL_CALL_END => true,
-        self::TOOL_CALL_RESULT => true,
-        self::TOOL_CALL_CHUNK => true,
-        self::REASONING_START => true,
-        self::REASONING_END => true,
-        self::REASONING_MESSAGE_START => true,
-        self::REASONING_MESSAGE_CONTENT => true,
-        self::REASONING_MESSAGE_END => true,
-        self::REASONING_MESSAGE_CHUNK => true,
-        self::REASONING_ENCRYPTED_VALUE => true,
-        self::STATE_SNAPSHOT => true,
-        self::STATE_DELTA => true,
-        self::MESSAGES_SNAPSHOT => true,
-        self::ACTIVITY_SNAPSHOT => true,
-        self::ACTIVITY_DELTA => true,
-        self::SUBAGENT_STARTED => true,
-        self::SUBAGENT_FINISHED => true,
-        self::SUBAGENT_ERROR => true,
-        self::RAW => true,
-        self::CUSTOM => true,
-        self::THINKING_TEXT_MESSAGE_START => true,
-        self::THINKING_TEXT_MESSAGE_CONTENT => true,
-        self::THINKING_TEXT_MESSAGE_END => true,
+    // 逐事件分类（R2 消构造 → R3 哈希去线性 → R6 合并探针）：expandOne 热路径上
+    // 每个事件原先要 6 张 type=>true 表各探一次；R6 合并成一张位掩码表 CLASS_OF
+    // （一次取回 + 位运算判定 6 类属性）。语义与 R3 的 6 次独立 isset 逐一等价：
+    // 位布局 = 各 SET 的成员位；未知 type 不入表（?? 0 = 全 0 位 = 未知且非已知）。
+    /** 位布局：各 R3 集合成员对应位置 1。 */
+    private const CLS_LEGACY = 1;        // legacy THINKING_* 映射源
+    private const CLS_RUN_LEVEL = 2;     // 触发③：run 级事件关所有 lane
+    private const CLS_SUBAGENT_END = 4;  // 触发④：subagent 终止事件关归属 lane
+    private const CLS_STAND_ASIDE = 8;   // 触发② stand-aside 例外（不关 lane）
+    private const CLS_UNTRUSTED = 16;    // 不可信 passthrough 打 untrusted 标记
+    private const CLS_SUBAGENT_LANE = 32;// SUBAGENT_* 归属 lane 判定（laneOf）
+    private const CLS_KNOWN = 64;        // 已知事件（unknown 标记判定；META_EVENT 是 draft 不入表）
+
+    private const CLASS_OF = [
+        // 触发③（run 级关所有 lane）+ 已知
+        self::RUN_STARTED => self::CLS_RUN_LEVEL | self::CLS_KNOWN,
+        self::RUN_FINISHED => self::CLS_RUN_LEVEL | self::CLS_KNOWN,
+        self::RUN_ERROR => self::CLS_RUN_LEVEL | self::CLS_KNOWN,
+        self::MESSAGES_SNAPSHOT => self::CLS_RUN_LEVEL | self::CLS_KNOWN,
+        // step / 三族显式事件 / chunk / state：只已知
+        self::STEP_STARTED => self::CLS_KNOWN,
+        self::STEP_FINISHED => self::CLS_KNOWN,
+        self::TEXT_MESSAGE_START => self::CLS_KNOWN,
+        self::TEXT_MESSAGE_CONTENT => self::CLS_KNOWN,
+        self::TEXT_MESSAGE_END => self::CLS_KNOWN,
+        self::TEXT_MESSAGE_CHUNK => self::CLS_KNOWN,
+        self::TOOL_CALL_START => self::CLS_KNOWN,
+        self::TOOL_CALL_ARGS => self::CLS_KNOWN,
+        self::TOOL_CALL_END => self::CLS_KNOWN,
+        self::TOOL_CALL_RESULT => self::CLS_KNOWN,
+        self::TOOL_CALL_CHUNK => self::CLS_KNOWN,
+        self::REASONING_START => self::CLS_KNOWN,
+        self::REASONING_END => self::CLS_KNOWN,
+        self::REASONING_MESSAGE_START => self::CLS_KNOWN,
+        self::REASONING_MESSAGE_CONTENT => self::CLS_KNOWN,
+        self::REASONING_MESSAGE_END => self::CLS_KNOWN,
+        self::REASONING_MESSAGE_CHUNK => self::CLS_KNOWN,
+        self::STATE_SNAPSHOT => self::CLS_KNOWN,
+        self::STATE_DELTA => self::CLS_KNOWN,
+        // stand-aside（不关 lane）+ 已知
+        self::ACTIVITY_SNAPSHOT => self::CLS_STAND_ASIDE | self::CLS_KNOWN,
+        self::ACTIVITY_DELTA => self::CLS_STAND_ASIDE | self::CLS_KNOWN,
+        self::REASONING_ENCRYPTED_VALUE => self::CLS_STAND_ASIDE | self::CLS_KNOWN,
+        // subagent：归属 lane；STARTED 兼 stand-aside（只开新 lane），终止事件关归属 lane
+        self::SUBAGENT_STARTED => self::CLS_SUBAGENT_LANE | self::CLS_STAND_ASIDE | self::CLS_KNOWN,
+        self::SUBAGENT_FINISHED => self::CLS_SUBAGENT_LANE | self::CLS_SUBAGENT_END | self::CLS_KNOWN,
+        self::SUBAGENT_ERROR => self::CLS_SUBAGENT_LANE | self::CLS_SUBAGENT_END | self::CLS_KNOWN,
+        // passthrough：RAW 兼 stand-aside；CUSTOM 只打 untrusted（仍走触发②关 lane）
+        self::RAW => self::CLS_STAND_ASIDE | self::CLS_UNTRUSTED | self::CLS_KNOWN,
+        self::CUSTOM => self::CLS_UNTRUSTED | self::CLS_KNOWN,
+        // legacy 映射源（已知；映射后按映射名的类走）
+        self::THINKING_TEXT_MESSAGE_START => self::CLS_LEGACY | self::CLS_KNOWN,
+        self::THINKING_TEXT_MESSAGE_CONTENT => self::CLS_LEGACY | self::CLS_KNOWN,
+        self::THINKING_TEXT_MESSAGE_END => self::CLS_LEGACY | self::CLS_KNOWN,
     ];
 
     /**
@@ -284,12 +266,16 @@ final class Decoder
     private function expandOne(array $event, array &$out): void
     {
         $type = $event['type'];
+        $cls = self::CLASS_OF[$type] ?? 0;
 
         // legacy THINKING_* 容错映射（1.0 已退役，记 mapping warning 后按映射名走管线）
-        if (isset(self::LEGACY_SET[$type])) {
+        if (($cls & self::CLS_LEGACY) !== 0) {
             // 映射表名：THINKING_TEXT_MESSAGE_X → REASONING_MESSAGE_X（表内没有 THINKING_MESSAGE_*）
             $event['type'] = str_replace('THINKING_TEXT_MESSAGE_', 'REASONING_MESSAGE_', $type);
             $this->warnings[] = 'legacy 事件 ' . $type . ' 已映射为 ' . $event['type'] . '（1.0 退役）';
+            // 映射后按映射名的类走（REASONING_MESSAGE_* 只带 KNOWN 位；THINKING_* 无
+            // 其他分类位）⇒ 丢 LEGACY 位、其余不变
+            $cls &= ~self::CLS_LEGACY;
         }
 
         switch ($event['type']) {
@@ -307,19 +293,19 @@ final class Decoder
         // 非 chunk 事件：先做隐式 END 的关闭判定（触发②③④），再透传。
         $lane = $this->laneOf($event);
 
-        if (isset(self::RUN_LEVEL_SET[$event['type']])) {
+        if (($cls & self::CLS_RUN_LEVEL) !== 0) {
             // 触发③：run 级事件关所有 lane
             foreach (array_keys($this->openItems) as $key) {
                 foreach ($this->closeLane($key) as $closed) {
                     $out[] = $closed;
                 }
             }
-        } elseif (isset(self::SUBAGENT_END_SET[$event['type']])) {
+        } elseif (($cls & self::CLS_SUBAGENT_END) !== 0) {
             // 触发④：关归属 subagent 的 lane
             foreach ($this->closeLane($this->subagentKeyOf($event)) as $closed) {
                 $out[] = $closed;
             }
-        } elseif (!isset(self::STAND_ASIDE_SET[$event['type']])) {
+        } elseif (($cls & self::CLS_STAND_ASIDE) === 0) {
             // 触发②：message/tool-call/step/state/custom/reasoning 族到达，
             // 关本 lane 的打开项。stand-aside 例外见上面 in_array 白名单：
             // 它们不推导协议行为（RAW 不可信、ACTIVITY 物化、SUBAGENT_STARTED 只开新 lane）。
@@ -336,10 +322,10 @@ final class Decoder
         }
 
         // 透传标记：未知 type 与不可信 passthrough（消费方纪律位，见类头注释）
-        if (!isset(self::KNOWN_SET[$event['type']])) {
+        if (($cls & self::CLS_KNOWN) === 0) {
             $event['unknown'] = true;
         }
-        if (isset(self::UNTRUSTED_SET[$event['type']])) {
+        if (($cls & self::CLS_UNTRUSTED) !== 0) {
             $event['untrusted'] = true;
         }
         $out[] = $event;
@@ -488,7 +474,7 @@ final class Decoder
     /** 事件归属 lane：subagent 事件（SUBAGENT_*）归其 subagent lane，其余归父 lane（''）。 */
     private function laneOf(array $event): string
     {
-        if (isset(self::SUBAGENT_LANE_SET[$event['type']])) {
+        if (((self::CLASS_OF[$event['type']] ?? 0) & self::CLS_SUBAGENT_LANE) !== 0) {
             $key = $this->subagentKeyOf($event);
             $this->ensureLane($key);
             return $key;

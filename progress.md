@@ -169,6 +169,34 @@ agui-demo 缺 .gitignore / 文档落点勘误），收口轮无新增。
 - CI 不含 agui-demo（ci.yml 显式枚举 hello+qmlclock，后续轮或用户令）。
 - 未 commit（用户未令）。
 
+### 优化轮（autoresearch「agui-support」段，同日主会话执行）
+
+从零到一收口后接 autoresearch 循环：`.auto/measure.sh`（重建 agui-demo → `--bench 20000`
+→ 主指标 `agui_events_per_sec`）与 `.auto/checks.sh`（phpunit + lint）冻结后，每轮
+「改 PHP 协议层 → 重建 → ×3 取中位 → checks 全绿才 keep」。全部改动在
+`src/AGUI/Decoder.php`（语义等价重写，public API 不变），keep 各带 `experiment:` 提交：
+
+| 轮 | 假设 | 中位读数 | 提交 |
+|---|---|---|---|
+| R1 基线 | — | 447974 events/s（total_ms ≈ 44.65） | a2f1b1e |
+| R2 | expandOne 热路径 6 处现场构造 in_array 清单 + 每次调用构造 31 元素的 knownTypes() → 7 个 private const 预建清单 | 561737（+25.4%） | 01890e3 |
+| R3 | in_array 对清单仍 O(n) 线性（KNOWN 每事件全扫 31 项）→ 7 张 type=>true const 哈希表 + isset O(1) | 622292（+10.8%） | 580e79a |
+| R4 | closeLane 每事件付 3 族字面量 + 3×closeOne + 3×array_merge（常见情况 lane 无打开项）→ 空 lane 快返 [] | 832549（+33.8%） | bf816ea |
+| R5 | feed 每事件「expandOne 返回临时数组 + 二次遍历逐条追加」→ expandOne/expandChunk 按引用写 $out | 892375（+7.2%，累计 **2.0×**） | 2f563d5 |
+
+每轮 checks（phpunit + lint）全绿；bench ×3 波动 0.66–3% 内（R1 基线读数 447974，
+R5 读数 892375，各 repeat:3 取中位）。
+
+**教训**：
+
+- 单轮收益 25% → 11% → 34% → 7% 递减，已近协议层平台；剩余热点在 bench harness
+  本身（每批 array_slice / new Decoder+Session），属计时口径不动 —— 优化循环到
+  R5 收手，若继续看 Session::consume 的 switch 或 expandChunk 的 chunk 路径。
+- 按引用参数（`array &$out`）在 AOT 下行为正常（AGENTS.md 的 F53 警告只针对
+  闭包捕获写入，普通形参传引用不受影响）——R5 若 AOT 不认会 build 炸，实测过。
+- 冻结顺序坑：先 init_experiment 再创建 measure.sh 会被写钩子以「循环已冻结」拒绝
+  ——正确顺序是（clear → 建 measure.sh/checks.sh → init_experiment → run_experiment）。
+
 ## Session 37 — 2026-11-11（Windows 收尾：CI qtdeclarative 死结 + 41.14 QML 运行库白名单）
 
 ### 任务来源
