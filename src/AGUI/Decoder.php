@@ -513,6 +513,13 @@ final class Decoder
     /** 关单个 lane 全部打开项，补发隐式 END（族序 text → tool → reasoning）。 */
     private function closeLane(string $lane): array
     {
+        // R4 快路径：lane 无任何打开项时直接 [] —— 原实现每个事件都要付
+        // ['text','tool','reasoning'] 字面量 + 3×closeOne（各带 null 判定）+ 3×array_merge，
+        // 而回放中绝大多数事件的 lane 是空的；结果与逐族 closeOne 返回 [] 再 merge 完全相同。
+        $open = $this->openItems[$lane] ?? null;
+        if ($open === null || ($open['text'] === null && $open['tool'] === null && $open['reasoning'] === null)) {
+            return [];
+        }
         $out = [];
         foreach (['text', 'tool', 'reasoning'] as $family) {
             $out = array_merge($out, $this->closeOne($lane, $family));
