@@ -76,6 +76,37 @@ final class Decoder
     public const THINKING_TEXT_MESSAGE_CONTENT = 'THINKING_TEXT_MESSAGE_CONTENT';
     public const THINKING_TEXT_MESSAGE_END = 'THINKING_TEXT_MESSAGE_END';
 
+    // 逐事件分类用的清单全部提为 const（R2 吞吐优化）：expandOne 热路径上每个事件
+    // 原先要现场构造 6 个小数组 + 一次 31 元素的 knownTypes() 临时清单；提为 const
+    // 后零构造，语义与原先的数组字面量逐一相同（in_array 对预建清单）。
+    /** legacy THINKING_* → REASONING_* 映射源（1.0 退役；映射表名就是这三个）。 */
+    private const LEGACY_TYPES = [self::THINKING_TEXT_MESSAGE_START, self::THINKING_TEXT_MESSAGE_CONTENT, self::THINKING_TEXT_MESSAGE_END];
+    /** 触发③：run 级事件关所有 lane。 */
+    private const RUN_LEVEL_TYPES = [self::RUN_STARTED, self::RUN_FINISHED, self::RUN_ERROR, self::MESSAGES_SNAPSHOT];
+    /** 触发④：subagent 终止事件关归属 lane。 */
+    private const SUBAGENT_END_TYPES = [self::SUBAGENT_FINISHED, self::SUBAGENT_ERROR];
+    /** 触发② stand-aside 例外（不关 lane：不可信透传 / 物化 / 开新 lane / 加密值）。 */
+    private const STAND_ASIDE_TYPES = [self::RAW, self::ACTIVITY_SNAPSHOT, self::ACTIVITY_DELTA, self::REASONING_ENCRYPTED_VALUE, self::SUBAGENT_STARTED];
+    /** 不可信 passthrough 打 untrusted 标记。 */
+    private const UNTRUSTED_TYPES = [self::RAW, self::CUSTOM];
+    /** SUBAGENT_* 归属 lane 判定（laneOf）。 */
+    private const SUBAGENT_LANE_TYPES = [self::SUBAGENT_STARTED, self::SUBAGENT_FINISHED, self::SUBAGENT_ERROR];
+    /** 已知事件全集（unknown 标记判定；META_EVENT 是 draft，不入表按未知透传）。 */
+    private const KNOWN_TYPES = [
+        self::RUN_STARTED, self::RUN_FINISHED, self::RUN_ERROR,
+        self::STEP_STARTED, self::STEP_FINISHED,
+        self::TEXT_MESSAGE_START, self::TEXT_MESSAGE_CONTENT, self::TEXT_MESSAGE_END, self::TEXT_MESSAGE_CHUNK,
+        self::TOOL_CALL_START, self::TOOL_CALL_ARGS, self::TOOL_CALL_END, self::TOOL_CALL_RESULT, self::TOOL_CALL_CHUNK,
+        self::REASONING_START, self::REASONING_END,
+        self::REASONING_MESSAGE_START, self::REASONING_MESSAGE_CONTENT, self::REASONING_MESSAGE_END, self::REASONING_MESSAGE_CHUNK,
+        self::REASONING_ENCRYPTED_VALUE,
+        self::STATE_SNAPSHOT, self::STATE_DELTA, self::MESSAGES_SNAPSHOT,
+        self::ACTIVITY_SNAPSHOT, self::ACTIVITY_DELTA,
+        self::SUBAGENT_STARTED, self::SUBAGENT_FINISHED, self::SUBAGENT_ERROR,
+        self::RAW, self::CUSTOM,
+        self::THINKING_TEXT_MESSAGE_START, self::THINKING_TEXT_MESSAGE_CONTENT, self::THINKING_TEXT_MESSAGE_END,
+    ];
+
     /**
      * 隐式 END 的五个触发（spec「Closing a chunk stream」）：
      * ① 同 lane chunk 换开不同 item；② lane 内到达 message/tool-call/step/state/
@@ -211,7 +242,7 @@ final class Decoder
         $type = $event['type'];
 
         // legacy THINKING_* 容错映射（1.0 已退役，记 mapping warning 后按映射名走管线）
-        if (in_array($type, [self::THINKING_TEXT_MESSAGE_START, self::THINKING_TEXT_MESSAGE_CONTENT, self::THINKING_TEXT_MESSAGE_END], true)) {
+        if (in_array($type, self::LEGACY_TYPES, true)) {
             // 映射表名：THINKING_TEXT_MESSAGE_X → REASONING_MESSAGE_X（表内没有 THINKING_MESSAGE_*）
             $event['type'] = str_replace('THINKING_TEXT_MESSAGE_', 'REASONING_MESSAGE_', $type);
             $this->warnings[] = 'legacy 事件 ' . $type . ' 已映射为 ' . $event['type'] . '（1.0 退役）';
@@ -230,15 +261,15 @@ final class Decoder
         $lane = $this->laneOf($event);
         $emitted = [];
 
-        if (in_array($event['type'], [self::RUN_STARTED, self::RUN_FINISHED, self::RUN_ERROR, self::MESSAGES_SNAPSHOT], true)) {
+        if (in_array($event['type'], self::RUN_LEVEL_TYPES, true)) {
             // 触发③：run 级事件关所有 lane
             foreach (array_keys($this->openItems) as $key) {
                 $emitted = array_merge($emitted, $this->closeLane($key));
             }
-        } elseif (in_array($event['type'], [self::SUBAGENT_FINISHED, self::SUBAGENT_ERROR], true)) {
+        } elseif (in_array($event['type'], self::SUBAGENT_END_TYPES, true)) {
             // 触发④：关归属 subagent 的 lane
             $emitted = $this->closeLane($this->subagentKeyOf($event));
-        } elseif (!in_array($event['type'], [self::RAW, self::ACTIVITY_SNAPSHOT, self::ACTIVITY_DELTA, self::REASONING_ENCRYPTED_VALUE, self::SUBAGENT_STARTED], true)) {
+        } elseif (!in_array($event['type'], self::STAND_ASIDE_TYPES, true)) {
             // 触发②：message/tool-call/step/state/custom/reasoning 族到达，
             // 关本 lane 的打开项。stand-aside 例外见上面 in_array 白名单：
             // 它们不推导协议行为（RAW 不可信、ACTIVITY 物化、SUBAGENT_STARTED 只开新 lane）。
@@ -253,10 +284,10 @@ final class Decoder
         }
 
         // 透传标记：未知 type 与不可信 passthrough（消费方纪律位，见类头注释）
-        if (!in_array($event['type'], $this->knownTypes(), true)) {
+        if (!in_array($event['type'], self::KNOWN_TYPES, true)) {
             $event['unknown'] = true;
         }
-        if (in_array($event['type'], [self::RAW, self::CUSTOM], true)) {
+        if (in_array($event['type'], self::UNTRUSTED_TYPES, true)) {
             $event['untrusted'] = true;
         }
         $emitted[] = $event;
@@ -409,7 +440,7 @@ final class Decoder
     /** 事件归属 lane：subagent 事件（SUBAGENT_*）归其 subagent lane，其余归父 lane（''）。 */
     private function laneOf(array $event): string
     {
-        if (in_array($event['type'], [self::SUBAGENT_STARTED, self::SUBAGENT_FINISHED, self::SUBAGENT_ERROR], true)) {
+        if (in_array($event['type'], self::SUBAGENT_LANE_TYPES, true)) {
             $key = $this->subagentKeyOf($event);
             $this->ensureLane($key);
             return $key;
@@ -472,22 +503,4 @@ final class Decoder
 
     /** 首 chunk 记下的 toolCallName，供 continuation 冲突判定。 */
     private array $toolCallNames = [];
-
-    private function knownTypes(): array
-    {
-        return [
-            self::RUN_STARTED, self::RUN_FINISHED, self::RUN_ERROR,
-            self::STEP_STARTED, self::STEP_FINISHED,
-            self::TEXT_MESSAGE_START, self::TEXT_MESSAGE_CONTENT, self::TEXT_MESSAGE_END, self::TEXT_MESSAGE_CHUNK,
-            self::TOOL_CALL_START, self::TOOL_CALL_ARGS, self::TOOL_CALL_END, self::TOOL_CALL_RESULT, self::TOOL_CALL_CHUNK,
-            self::REASONING_START, self::REASONING_END,
-            self::REASONING_MESSAGE_START, self::REASONING_MESSAGE_CONTENT, self::REASONING_MESSAGE_END, self::REASONING_MESSAGE_CHUNK,
-            self::REASONING_ENCRYPTED_VALUE,
-            self::STATE_SNAPSHOT, self::STATE_DELTA, self::MESSAGES_SNAPSHOT,
-            self::ACTIVITY_SNAPSHOT, self::ACTIVITY_DELTA,
-            self::SUBAGENT_STARTED, self::SUBAGENT_FINISHED, self::SUBAGENT_ERROR,
-            self::RAW, self::CUSTOM,
-            self::THINKING_TEXT_MESSAGE_START, self::THINKING_TEXT_MESSAGE_CONTENT, self::THINKING_TEXT_MESSAGE_END,
-        ];
-    }
 }
