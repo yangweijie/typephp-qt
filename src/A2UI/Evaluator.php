@@ -36,6 +36,13 @@ final class Evaluator
     /** @var array<int, string> 求值期间累积的告警（取走即清，Renderer 聚合） */
     private array $warnings = [];
 
+    /**
+     * @var array<string, array<int, array{0: int, 1: string}>> formatString 模板
+     * token 缓存（键 = 原模板串）。解析是纯函数（与模型/作用域无关）⇒ 进程级缓存
+     * 安全；长度以应用实际出现的模板串数为上界（fixture/表单模板是有限集）。
+     */
+    private static array $formatTokenCache = [];
+
     public function __construct(private readonly DataModel $model)
     {
     }
@@ -154,34 +161,73 @@ final class Evaluator
         return json_encode($value, JSON_UNESCAPED_UNICODE);
     }
 
-    /** formatString：${...} 插值主入口（语法细节见类注释）。 */
     public function formatString(string $template, Scope $scope): string
     {
+        // 解析结果按模板串缓存：formatString 是纯字符串函数（模板 → token 序列的
+        // 映射与数据模型/作用域无关），fixture 回放里同一模板串每 render 重复解析
+        // 是纯浪费。token 化只在首次出现时做，之后 O(表达式数) 直接拼接。
+        $tokens = self::formatTokens($template);
         $out = '';
+        $literal = '';
+        foreach ($tokens as $token) {
+            if ($token[0] === 0) {
+                $literal .= $token[1];
+                continue;
+            }
+            if ($literal !== '') {
+                $out .= $literal;
+                $literal = '';
+            }
+            $out .= self::stringify($this->evaluateExpression($token[1], $scope));
+        }
+        if ($literal !== '') {
+            $out .= $literal;
+        }
+        return $out;
+    }
+
+    /**
+     * 模板 token 化（结果缓存）：0 = 字面段，1 = 表达式段。转义 \${ 折进字面段；
+     * 未闭合的 ${ 整段按字面输出（渐进渲染的宽容语义，与缓存前逐字一致）。
+     */
+    private static function formatTokens(string $template): array
+    {
+        if (isset(self::$formatTokenCache[$template])) {
+            return self::$formatTokenCache[$template];
+        }
+        $tokens = [];
+        $literal = '';
         $length = strlen($template);
         $i = 0;
         while ($i < $length) {
             if ($template[$i] === '\\' && substr($template, $i, 3) === '\\${') {
-                $out .= '${';
+                $literal .= '${';
                 $i += 3;
                 continue;
             }
             if ($template[$i] === '$' && ($i + 1) < $length && $template[$i + 1] === '{') {
                 $end = self::findMatchingBrace($template, $i + 1);
                 if ($end === null) {
-                    // 未闭合的 ${：字面输出（宽容——agent 流式输出中途截断不该崩渲染）
-                    $out .= substr($template, $i);
-                    break;
+                    $literal .= substr($template, $i);
+                    $i = $length;
+                    continue;
                 }
-                $expression = substr($template, $i + 2, $end - $i - 2);
-                $out .= self::stringify($this->evaluateExpression($expression, $scope));
+                if ($literal !== '') {
+                    $tokens[] = [0, $literal];
+                    $literal = '';
+                }
+                $tokens[] = [1, substr($template, $i + 2, $end - $i - 2)];
                 $i = $end + 1;
                 continue;
             }
-            $out .= $template[$i];
+            $literal .= $template[$i];
             $i++;
         }
-        return $out;
+        if ($literal !== '') {
+            $tokens[] = [0, $literal];
+        }
+        self::$formatTokenCache[$template] = $tokens;
+        return $tokens;
     }
 
     /** 表达式求值：函数调用 name(key:value,...) 或裸路径绑定。 */
