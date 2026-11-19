@@ -7,6 +7,9 @@ namespace TypePHP\Qt\A2UI;
 /**
  * DataModel — A2UI surface 数据模型：JSON Pointer（RFC 6901）寻址的可变树。
  *
+ * （性能注记）decodePointer 按指针串缓存（纯函数 ⇒ 进程级缓存安全，长度以应用
+ * 实际出现的指针串数为上界）；formatString 同策略在 Evaluator（R3）。
+ *
  * updateDataModel 三语义的唯一实现点（v1.0 spec「Agent to renderer updates」原文）：
  *   * 路径存在 → 更新；路径不存在 → 创建（upsert —— agent 从未初始化的路径也可写，
  *     双向绑定的写入契约依赖这一点）；value = null → 删除该键（spec 明说 null 是
@@ -24,6 +27,9 @@ final class DataModel
 {
     /** @var array<string, mixed> 根对象（updateDataModel 的 dataModel 恒为 JSON object） */
     private array $root = [];
+
+    /** @var array<string, array<int, string>> 指针 token 缓存（键 = 原指针串） */
+    private static array $pointerCache = [];
 
     /** 整模型替换（createSurface.dataModel / 根级 updateDataModel）。 */
     public function replaceModel(array $model): void
@@ -93,11 +99,17 @@ final class DataModel
         if ($pointer === '' || $pointer === '/') {
             return [];
         }
+        // 解析是纯函数（指针串 → token 列表，与模型状态无关）⇒ 按指针串缓存：
+        // 回放里同一批 @path 每条消息/每帧重复解析，explode+str_replace 是纯浪费
+        if (isset(self::$pointerCache[$pointer])) {
+            return self::$pointerCache[$pointer];
+        }
         $raw = ltrim($pointer, '/');
         $tokens = [];
         foreach (explode('/', $raw) as $token) {
             $tokens[] = str_replace(['~1', '~0'], ['/', '~'], $token);
         }
+        self::$pointerCache[$pointer] = $tokens;
         return $tokens;
     }
 
