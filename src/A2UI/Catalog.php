@@ -61,9 +61,20 @@ final class Catalog
         return in_array($type, self::PLACEHOLDER, true);
     }
 
+    /** @var array<string, bool> UAX #31 判定缓存（键 = id 串；判定是纯函数） */
+    private static array $idValidity = [];
+
     /** UAX #31 校验：`user_card`/`userCard` 合法；`user-card`/`1st_item` 非法。 */
     public static function isValidId(string $id): bool
     {
-        return preg_match(self::ID_PATTERN, $id) === 1;
+        // 解析是纯函数（id 串 → 布尔，与运行时状态无关）⇒ 按串缓存判定结果：
+        // 回放里同一批组件 id 每条消息重复过 Unicode 属性正则（\p{XID_*} 明显
+        // 慢于 isset），是 applyComponents 的主要常数开销
+        if (isset(self::$idValidity[$id])) {
+            return self::$idValidity[$id];
+        }
+        $valid = preg_match(self::ID_PATTERN, $id) === 1;
+        self::$idValidity[$id] = $valid;
+        return $valid;
     }
 }
