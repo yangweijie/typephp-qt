@@ -101,6 +101,7 @@
 moc 槽跳板，qml 事件同步到达；selftest 判据升级为「事件到达（控件树读回，F53 §2 的
 AOT 引用参数断链）+ 读回 + errors 为空」。**本机清单轮（同日第三轮）**：taskboard 回归 rc=0；qtphp new 端到端揪出 F54（绝对路径）→ 修复 + 6 单测；qmlclock --nano 4.4MB selftest passed（41.13 预演）；mac 打包一次过 + F55 归因（三重藏依赖 ⇒ mac 侧自包含闭环，Windows 侧 41.14 仍是真缺口）；reload 真机验证揪出 D-props①②（F53 §3：props 首帧静默丢失 + reload 二次实例化冲掉）→ 双修复，selftest 增至 9 条判据 ×3 稳定。**未做/未验**：41.13（ci.yml 改好待 push）、41.14（Windows）、`project.linux.yml` 实测、低版本 Qt 信号验证；未 commit。 |
 | 42 | AG-UI（Agent User Interaction Protocol）支持：SSE 流式桥接原语 + 纯 PHP 协议层（`src/AGUI/`）+ 离线回放示例 `examples/agui-demo`（F58，Session 38） | ✅ done（42.1–42.12 全部实施并本机验收：契约四件套 41→45、`src/AGUI/` 四类、`tests/AGUI/` 三件 + FakeBridge sse 区、`examples/agui-demo` 离线回放、中英文档 + AGENTS/CHANGELOG 接线。首轮真机验收暴露 42.10⑤ 假设错误（QtApp.php 的 sse* 方法引用 `\qt_sse_*`、AOT 全方法入编 ⇒ hello/qmlclock/taskboard 缺 TU 链接炸 4 个 undefined symbol；修法 = 三份 yml 各加 `qt_sse.cc` 一行 + 台账记偏离，F58 §58.4） |
+| 43 | A2UI（Agent-to-User Interface，Google/a2ui-project v1.0）支持：纯 PHP 协议层（`src/A2UI/`）+ 组件目录→WidgetTree 映射 + 离线回放示例 `examples/a2ui-demo`（F59，Session 39） | ✅ done：43.1–43.9 全部完成并本机验收。六类协议层（DataModel/Scope/Evaluator/Catalog/Renderer/Outbound，零新桥接函数，lint 45⇄45）+ 59 用例单测 + 示例三模式；**验收挖出并修掉一个 AOT 陷阱（F60）**：`DataModel::get()` 下钻变量被单一类型推断钉成 array、标量回填处插隐式 `Variant→Array` 转换，`--dry`/phpunit 全绿而产物运行期 fatal —— `std::any($x)` 编译期降级修复 + tests/bootstrap.php 补 `std` 运行期 polyfill，教训进 AGENTS.md。**读数**：phpunit 320/696、selftest 19/19、bench ×3 波动 0.6%（90.7k–91.8k msg/s）、hello 回归 rc=0、锚点检查 rc=0（18 文件）。中英 a2ui.md + config.ts + CHANGELOG + AGENTS.md + README 接线齐。**未 commit（用户未令）**；`project.linux.yml` 未实测（qmlclock/agui-demo 同口径）；autoresearch `a2ui-support` 段待主会话开 |
 
 ### Phase 10 分解（macOS）
 
@@ -1220,6 +1221,47 @@ ci.yml:129/151/167、AOT 考量与范围划分 —— 均属实，引用不改�
   （本机 macOS、无 Linux Qt 环境，与 qmlclock 先例同口径）；agui-demo 的 CI 接线
   已由 42.13 本地完成（ci.yml:129/176-186），Windows 侧跑通待 push 后 CI 读数
   （41.13 同口径）；未 commit。
+
+### Phase 43 分解（Session 39：A2UI 支持 —— 纯 PHP 协议层 + 组件目录→WidgetTree 映射 + 离线回放示例）
+
+- [x] 43.1 `src/A2UI/DataModel.php`：JSON Pointer（RFC 6901，`~0`/`~1` 转义）
+  get/set(upsert)/remove + 根替换；updateDataModel 三语义（存在→更新、不存在→
+  创建、value=null→删键；path 缺省或 `/` = 整模型替换）唯一实现点。
+- [x] 43.2 `src/A2UI/Scope.php`：路径解析作用域链（Root / Collection 迭代实例；
+  相对路径 → 绝对化；@index 记账在内层 Collection Scope）。
+- [x] 43.3 `src/A2UI/Evaluator.php`：Dynamic\* 解析（字面量 / `{"@path"}` /
+  `{"@call"}`）+ DynamicBoolean 强制转换表（F59 §59.1 的七行表）+ formatString
+  （`${...}` 绝对/相对插值、`\${` 转义、非字符串转换表、嵌套）+ Basic Catalog
+  函数注册表（required / email / regex / length / numeric / and / or / not）+
+  `@index`（offset 可选；Root Scope 调用 = 错误）；未注册函数 = null + warning。
+- [x] 43.4 `src/A2UI/Catalog.php`：Basic Catalog 18 组件映射表（F59 §59.2：
+  Text→label、Row/Column→hbox/vbox、List→scroll(vbox)、Card→group、Tabs→tabs/tab、
+  Divider→separator、Button→button、CheckBox/TextField/Slider/ChoicePicker→
+  checkbox/lineEdit/slider/combo、Image→image；Icon/Video/AudioPlayer/Modal/
+  DateTimeInput→占位 label）+ UAX #31 id 校验（`^[\p{XID_Start}_][\p{XID_Continue}]*$`）。
+- [x] 43.5 `src/A2UI/Renderer.php`：信封分发六消息（createSurface/updateComponents/
+  updateDataModel/deleteSurface/callRendererFunction/agentFunctionResponse）+
+  surfaceId→组件表 + root 缓冲/挂载 + INTEGRITY_ERROR（重复 create）+ 缺失引用
+  宽容（progressive rendering）+ `toWidgetTree(surfaceId)` 产出 WidgetTree 数组 +
+  事件绑定表（action.event → id）+ outbound 队列；`src/A2UI/Outbound.php`：
+  action / callAgentFunction / rendererFunctionResponse / error 四种
+  Renderer→Agent 信封构造（timestamp ISO 8601）。
+- [x] 43.6 `tests/A2UI/`：DataModelTest / EvaluatorTest / RendererTest /
+  CatalogTest 四件（纯 PHP，不碰桥接；fixture 覆盖 §59.1 全部语义钉点：
+  upsert/null 删/根替换/邻接表乱序/root 缓冲/模板迭代相对路径/@index/formatString
+  转义/DynamicBoolean 转换表/INTEGRITY_ERROR/占位组件/UAX #31 拒绝）。
+- [x] 43.7 `examples/a2ui-demo/`：离线回放主线（信封 fixture：createSurface(含
+  components+dataModel) → updateDataModel → updateComponents 模板列表 → 输入双绑
+  → Button action → action 回传展示），三平台 yml + Info.macos.plist +
+  README + .gitignore（agui-demo 先例全套）；`--selftest` rc 判据（读回 +
+  action 信封断言）/ `--bench [N]` METRIC `a2ui_replay_messages_per_s` 等三行 /
+  GUI 三模式（agui-demo 同款骨架）。
+- [x] 43.8 验收（全部本机现测，数字进台账）：phpunit 全绿（新 A2UI 用例数如实
+  记）+ `qtphp lint` 45⇄45 不变 + a2ui-demo build + offscreen `--selftest`
+  + `--bench` 三 METRIC + hello 回归 build/selftest。
+- [x] 43.9 文档与收尾：中英 `docs/src/{,zh/}guide/a2ui.md`（协议是什么/映射表/
+  范围外）+ config.ts 侧边栏 + CHANGELOG + AGENTS.md（`src/A2UI/` 目录表行）；
+  progress.md Session 39 收口读数 + task_plan 勾选；**不 commit**（用户未令）。
 
 ## Errors Encountered
 

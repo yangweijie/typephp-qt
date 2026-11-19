@@ -190,7 +190,8 @@ typephp-qt/
     │   ├── project.macos.yml  # macOS 入口：include 公共段，只覆盖 Qt 编译/链接参数
     │   └── project.linux.yml  # Linux 入口：同上，走 Debian 多架构的 -I/-lQt6Xxx（无 framework）
     ├── taskboard/         # 综合示例：表格 + 过滤 + 表单 + 菜单 + 状态栏 + 几何持久化
-    └── agui-demo/         # AG-UI 离线回放示例（--selftest 三段自检 / --bench 吞吐，零外部网络）
+    ├── agui-demo/         # AG-UI 离线回放示例（--selftest 三段自检 / --bench 吞吐，零外部网络）
+    └── a2ui-demo/         # A2UI 离线回放示例（信封 → Renderer → 控件树 + action 回传，零新桥接）
 ```
 
 桥接 C++ 的编译验证就是 `qtphp build examples/hello` —— 桥接的 `.cc` 是示例 `sources` 的一部分，

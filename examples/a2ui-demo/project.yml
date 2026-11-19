@@ -1,0 +1,73 @@
+name: a2ui-demo
+mode: bin
+output: build/a2ui-demo
+
+# 桥接 C++ 源码直接参与本应用编译（源码内联方案，与 examples/agui-demo 同一份 yml 结构）。
+#
+# 三份配置的分工（tpc 的 include 语义：map 递归合并、**list 整体替换**）：
+#   - 本文件 = 公共段 + Windows 默认段。
+#   - project.macos.yml / project.linux.yml = include 本文件，只覆盖平台相关的
+#     link-libs / link-paths / cxx-flags / ld-flags。
+#
+# A2UI 层是纯 PHP（src/A2UI/ 五类，零新桥接函数），传输复用既有 qt_sse（AG-UI 是
+# A2UI 的标准传输绑定之一；本示例的 smoke 段把 A2UI 信封装进 SSE data: 行 =
+# spec「Other transports」的 SSE 形态）。**配对规则**（AGENTS.md）：本 yml 编了
+# src/QtApp.php ⇒ 必须同时列 cpp-src/qt_sse.cc —— QtApp 的 sse* 方法体引用
+# \qt_sse_* 全限定函数，缺 TU 则链接期 undefined symbol（F58 §58.4 同族）。
+# 不定义 QTPHP_NO_NETWORK：qt_sse.cc 编进真实实现（file:// smoke 靠它）。
+#
+# 注意 sources **不列** src/AGUI/*.php：A2UI 不依赖 AG-UI 协议层（AG-UI 的事件
+# 语义与 A2UI 信封无关），SSE 分帧由 QtApp::sseRead 原语直接取帧。
+sources:
+  - src/main.php
+  - ../../src/QtApp.php
+  - ../../src/WidgetTree.php
+  - ../../src/A2UI/DataModel.php
+  - ../../src/A2UI/Scope.php
+  - ../../src/A2UI/Evaluator.php
+  - ../../src/A2UI/Catalog.php
+  - ../../src/A2UI/Outbound.php
+  - ../../src/A2UI/Renderer.php
+  - ../../php-src/qt.stub.php
+  - ../../cpp-src/qt_loop.cc
+  - ../../cpp-src/qt_render.cc
+  - ../../cpp-src/qt_decor.cc
+  - ../../cpp-src/qt_widgets.cc
+  - ../../cpp-src/qt_webview.cc
+  - ../../cpp-src/qt_qml.cc
+  - ../../cpp-src/qt_sse.cc
+  # Windows nano：php-nano 缺 crc32 SIMD / Fiber CE / MSVC inline seed256 的目标文件
+  - path: ../../compat/msvc/php_nano_win_stubs.c
+    if: PHP_OS_FAMILY == "Windows"
+
+build-dir: build
+
+# cxx-std 必须是 c++17（nano 严格校验，c++20 会被拒）；optimize: 2 即命令行 -O2。
+cxx-std: c++17
+optimize: 2
+
+# QtNetwork 头目录（qt_sse.cc 的 QNetworkAccessManager/QNetworkReply/QNetworkRequest
+# 经 qt_common.h 的 #ifndef QTPHP_NO_NETWORK 块拉进来）；webview 控件退化成
+# QTextBrowser 后端（未定义 QT_WEBVIEW2/QT_WEBVIEW_WK），所以不再要 WebView2 链接项。
+include-paths:
+  - ../../cpp-src
+  - ../../php-src
+  - D:/tools/Qt/6.9.3/msvc2022_64/include
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtCore
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtGui
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtWidgets
+  - D:/tools/Qt/6.9.3/msvc2022_64/include/QtNetwork
+
+link-paths:
+  - D:/tools/Qt/6.9.3/msvc2022_64/lib
+
+link-libs:
+  - Qt6Core.lib
+  - Qt6Gui.lib
+  - Qt6Widgets.lib
+  - Qt6Network.lib
+
+cxx-flags:
+  - /Zc:__cplusplus
+  - /permissive-
+  - /EHsc

@@ -29,6 +29,7 @@ Qt（Widgets）—— 只显示、只上报信号
 | `src/WidgetTree.php` | 声明式控件树构造器（静态方法返回数组） |
 | `src/FakeBridge.php` | **测试替身**，用纯 PHP 镜像全部 `qt_*` 全局函数 |
 | `src/AGUI/` | AG-UI 协议层纯 PHP 类（`JsonPatch` / `Decoder` / `Session` / `SseClient`，无网络依赖可单测）。**配对规则**：`QtApp.php` 的 `sse*` 方法引用 `\qt_sse_*`，所以**凡是 sources 里编了 `src/QtApp.php` 的应用，`project.yml` 就必须列 `cpp-src/qt_sse.cc`**（不只列 `SseClient.php` 才要 —— 例：hello/qmlclock/taskboard 不用 SseClient 也缺了这行，链接期 undefined symbol）；`QTPHP_NO_NETWORK` 构建下该 TU 编成报错桩、符号无条件存在，不链 Qt6Network 也能过。与 `qt_qml.cc` 静态表强制全应用链接的教训同族 |
+| `src/A2UI/` | A2UI 协议层纯 PHP 类（`DataModel` / `Scope` / `Evaluator` / `Catalog` / `Renderer` / `Outbound`，零新桥接函数——传输复用既有 `qt_sse_*`）。组件映射到 WidgetTree、模板实例 id 带 `__<index>` 后缀、双向绑定写回本地模型。注意 `std::any($x)` 是 tpc 编译期降级（`php::Var`），纯 PHP 环境由 `tests/bootstrap.php` 的 `std` polyfill 兜底 |
 | `php-src/qt.stub.php` | PHP 可见的桥接契约（函数体必须为空） |
 | `cpp-src/qt_common.h` | 共用工具、`QtWindowBox` 类声明、前向声明 |
 | `cpp-src/qt_loop.cc` | 应用/窗口生命周期、事件循环（自驱动分发） |
@@ -110,6 +111,12 @@ build\hello.exe --shot out.png
 - 跨文件调用桥接函数要用 `\qt_xxx()` 全限定名
 - 同一个变量不能先绑 `ReflectionMethod` 再绑 `ReflectionFunction`（AOT 类型推断不认），
   见 `QtApp::arityOf()` 里用两个变量分开写
+- **「一个局部一种类型」的运行期变体**：变量首赋值 array、循环里又被赋成标量
+  （如 `$node = $this->root; $node = $node[$token];` 下钻），编译期不报错、`--dry`
+  全绿，但 tpc 在标量回填处插入隐式 `Variant→Array` 转换（phpx `checkArray()`），
+  AOT 产物运行到该路径即 fatal（F60 实测）。降级出口是编译期函数
+  `\std::any($x)`（生成 `php::Var`，纯 PHP 环境没有 `std` 类 ——
+  `tests/bootstrap.php` 有运行期 polyfill）
 - **闭包按引用捕获（`use (&$x)`）的写入，对「按引用传入的函数参数」不可见**：handler 写的
   `$state`，在 `fn(array &$state)` 形参里读到的是旧值（普通 PHP 三方同一存储，F53 实测）。
   跨函数读「事件处理器改过的状态」走控件树读回（`value()`），那同时也是 GUI 的真实语义

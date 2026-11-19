@@ -3526,3 +3526,204 @@ hello+qmlclock，见 ci.yml:129/151/167）；`.auto/**`（主会话管理）。
 - 未验项如实留档（不美化）：`examples/agui-demo/project.linux.yml` 未实测
   （本机 macOS、无 Linux Qt 环境）；agui-demo 未进 CI（ci.yml:129/151/167 显式
   枚举 hello+qmlclock，§58.5 范围外）；未 commit。
+
+---
+
+## F59. A2UI 支持方案与摸底（Session 39，规划轮）
+
+> 任务「/workflow 支持 A2UI」。A2UI = Google（现 a2ui-project/a2ui，2026-06-03 从
+> google/A2UI 迁出）的 Agent-to-User Interface 协议：agent 发**声明式 JSON** 描述
+> UI 意图，客户端用自己的原生组件目录渲染。v1.0 是 current 版本
+> （`specification/versions.json`：v1.0 status=current，v0.9.1/previous）。
+> 规范原文第一手抓取于 `specification/v1_0/docs/a2ui_protocol.md`（107,025 B，
+> 落盘 /tmp/a2ui-spec/docs_a2ui_protocol.md）。与 AG-UI（F58）的关系：**AG-UI
+> 是 A2UI 的标准传输绑定之一**（spec「AG-UI binding」节，其余 A2A/MCP/SSE+JSON-RPC/
+> WebSocket/REST）——本仓库已支持 AG-UI（qt_sse_*），A2UI 层与其是**上下层关系**
+> （A2UI 消息可装进 AG-UI CUSTOM/传输），不重复建设传输。
+
+### §59.1 协议事实（v1.0 第一手，实施依据）
+
+- **Agent→Renderer 信封**（每消息恰好一个顶层键，`version: "1.0"`）：
+  `createSurface` / `updateComponents` / `updateDataModel` / `deleteSurface` /
+  `callRendererFunction` / `agentFunctionResponse`。
+  - `createSurface`：`surfaceId`（必需，渲染器生命周期内全局唯一）、`catalogId?`、
+    `sendDataModel?`、`components?`（ComponentsList）、`dataModel?`（根对象）；
+    单消息同时带 components+dataModel 时**先 dataModel 后 components**（首帧绑定
+    有数据）；隐式创建 canonical `Surface` 容器（`child: "root"`，不可用
+    updateComponents 改）；重复 create 同 id = `INTEGRITY_ERROR`。
+  - `updateComponents`：**邻接表**——扁平组件列表 + id 引用；`root` 组件挂到
+    Surface 的 child；缺失引用宽容（progressive rendering 占位）。
+  - `updateDataModel`：JSON Pointer 路径 **upsert**（存在→更新、不存在→创建、
+    value=null→删除该键）；path 缺省或 `/` = **整模型替换**。
+  - `deleteSurface`；`callRendererFunction`（`functionCallId` 必填、`callFunction`
+    `{@call, catalogId(必填), args?}`；完成后渲染器**必须**回
+    `rendererFunctionResponse`，void 也要）；`agentFunctionResponse`（value|error 二选一）。
+- **Renderer→Agent 信封**：`action`（`name`/`surfaceId`/`sourceComponentId`/
+  `timestamp`(ISO 8601)/`userMessage?`/`context`(动态绑定解析后)/`metadata?`）/
+  `callAgentFunction` / `rendererFunctionResponse` / `error`（code/message +
+  surfaceId|functionCallId 互斥）。
+- **组件对象**：`id`（UAX #31：`user_card`/`userCard` 合法，`user-card`/`1st_item`
+  非法）+ `component`（类型判别键）+ `@catalogId`/`@accessibility`/`@metadata`/
+  `@checks` 混入 + 类型自有属性。**恰好一个 id="root"**；未定义 root 前其它组件
+  缓冲不渲染。
+- **ChildList 两种形态**：`array`（ComponentId 数组）或 `object` 模板
+  `{path(纯字符串), componentId}`（对数据模型数组迭代，每项实例化模板并开
+  Collection Scope）。**相对路径规则**：模板内不以 `/` 开头的路径相对当前 item
+  （`name` → `/employees/N/name`）；绝对路径恒从根解析。
+- **Dynamic\* 数据绑定**：任何可绑定属性 = 字面量 | `{"@path": "<JSON Pointer>"}`
+  | `{"@call": "<fn>", "args": {...}}`。保留指令只有 `@path`/`@call`/`@index`；
+  单 `@` 前缀未识别键**拒绝**；字面 `@` 开头键用 `@@` 转义。
+- **双向绑定**（TextField/CheckBox/Slider/ChoicePicker/DateTimeInput）：写只改
+  **本地**数据模型（路径不存在则创建，agent 从未初始化也可），**不**自动发网络；
+  状态只在 User Action 触发时随 action 回传（或 sendDataModel=true 时全模型进
+  传输 metadata）。
+- **formatString**：`${...}` 插值；绝对 `${/user/name}` / 相对 `${firstName}`；
+  函数调用带 `()`（`${now()}`、`${formatDate(value:${/d}, format:'yyyy-MM-dd')}`）；
+  嵌套 `${upper(${now()})}`；字面 `${` 转义 `\${`；非字符串转换：数字/布尔→标准
+  字符串、null/undefined→`""`、对象/数组→JSON 字符串。
+- **@index**：系统函数（无 catalog），只在内层 Collection Scope 合法（Root Scope
+  调用 = 错误）；`offset` 可选（默认 0）。
+- **ValidationResult**：`{valid(bool 必), code?, message?, severity?}`；
+  DynamicBoolean 强制转换表（ValidationResult→取 valid；"true"/"false"（任意大小写）→
+  布尔；其它非空字符串→false；0→false、其它数字→true；null/缺席→false；其它
+  对象/数组→false）；boolean→ValidationResult 强制转换（true→{valid:true}；
+  false→{valid:false, message:CheckRule.message, severity:"error"}）。
+- **错误码**：VALIDATION_FAILED / UNALLOWED_PARENT / UNALLOWED_CHILD /
+  INTEGRITY_ERROR / INVALID_FUNCTION_CALL / EXPRESSION_ERROR / EXECUTION_ERROR；
+  校验错误标准格式 `{code, surfaceId, path, message}`。
+- **Basic Catalog 组件（18）**：Text / Image / Icon / Video / AudioPlayer / Row /
+  Column / List / Card / Tabs / Divider / Modal / Button / CheckBox / TextField /
+  DateTimeInput / ChoicePicker / Slider。**函数**：@index / required / regex /
+  length / numeric / email / formatString / formatNumber / formatCurrency /
+  formatDate / pluralize / openUrl / and / or / not。
+- **能力协商**不在消息里：走传输 metadata（`rendererCapabilities` /
+  `agentCapabilities` / `a2uiRendererDataModel`），每个传输绑定自己定义位置。
+
+### §59.2 映射层设计（A2UI → 本仓库现有能力，零新桥接）
+
+**关键结论：A2UI 支持是纯 PHP 层 + WidgetTree 映射，不动 C++ 桥、不加 stub 函数**
+（与 AG-UI 加 qt_sse_* 四件套不同——A2UI 的传输直接复用既有 qt_sse，消息本体是
+纯 JSON）。lint 维持 45⇄45。
+
+| A2UI 组件 | WidgetTree | 备注 |
+|---|---|---|
+| Text | `label` | markdown → 纯文本（本仓库 label 无 md 渲染，v1 直传字符串） |
+| Row / Column | `hbox` / `vbox` | children: ComponentId 数组直接映射 |
+| List | `scroll`(vbox 包裹) | 模板 children = 对模型数组迭代展开 |
+| Card | `group` | title 可选，缺省空标题 |
+| Tabs | `tabs` + `tab` | A2UI Tabs 的页集合映射 |
+| Divider | `separator` | |
+| Button | `button` | `action.event` → 事件回传；v1 不做 action.functionCall 本地函数 |
+| CheckBox / TextField / Slider / ChoicePicker | `checkbox` / `lineEdit` / `slider` / `combo` | 双绑输入：value 写回本地模型路径 |
+| Image | `image` | src/path |
+| Icon / Video / AudioPlayer / Modal / DateTimeInput | **占位 label** | 渲染器无对应原生控件——spec 的 progressive rendering 语义允许占位，占位文本标 `[a2ui] 未支持组件 <Type>`（不静默白屏，qml 占位先例） |
+
+- **评估器子集（v1）**：@path 字面量与 DataBinding、@call（required/email/regex/
+  length/numeric/and/or/not + formatString + @index）、formatString 插值
+  （绝对/相对路径、`\${` 转义、非字符串转换表）。formatNumber/Currency/Date/
+  pluralize/openUrl → v1 范围外（注册表缺函数名 = 值解析为 null + warning，
+  与「未知类型静默忽略」兼容默认一致）。
+- **@checks 校验规则**：v1 范围外（本仓库无组件级校验 UI 位）；
+  DynamicBoolean 强制转换表在评估器内实现（纯函数可单测）。
+- **事件回传**：映射层把 `action.event` 组件标进事件绑定表；示例层 poll_event
+  得 click → 构造 `action` 信封（name/surfaceId/sourceComponentId/timestamp/
+  context 解析）→ 展示在控件树（无 live agent，离线回放主线同 agui-demo）。
+
+### §59.3 类清单（src/A2UI/，命名空间 `TypePHP\Qt\A2UI`，final，纯 PHP 零网络）
+
+| 类 | 职责 |
+|---|---|
+| `DataModel` | JSON Pointer（RFC 6901，含 `~0`/`~1` 转义）get/set(upsert)/remove；根替换（`/`）；updateDataModel 语义唯一实现点 |
+| `Evaluator` | Dynamic\* 解析（@path/@call/字面量 + DynamicBoolean 强制转换表）+ formatString + Basic Catalog 函数注册表（required/email/regex/length/numeric/and/or/not）+ @index（Scope 链） |
+| `Scope` | 路径解析作用域链（Root / Collection 迭代实例；相对路径 → 绝对化）——Evaluator 的解析上下文，@index 在这里记账 |
+| `Renderer` | 信封分发（六种 Agent→Renderer 消息）+ 组件表（surfaceId→map）+ root 缓冲/挂载 + INTEGRITY_ERROR/未知消息 warning + `toWidgetTree(surfaceId)`（产出 WidgetTree 数组 + 事件绑定表 + outbound action 队列的消费口） |
+| `Catalog` | Basic Catalog 18 组件 → WidgetTree 映射表 + 未支持组件占位 + UAX #31 id 校验（`^[\p{XID_Start}_][\p{XID_Continue}]*$`） |
+| `Outbound` | Renderer→Agent 信封构造（action/callAgentFunction/rendererFunctionResponse/error），timestamp ISO 8601 |
+
+### §59.4 示例与验收
+
+- `examples/a2ui-demo`：离线回放主线（内置信封 fixture：createSurface(含
+  components+dataModel) → updateDataModel → updateComponents 模板列表 → 按钮动作
+  → action 回传展示），三模式照 agui-demo（--selftest rc 判据 / --bench METRIC
+  `a2ui_replay_messages_per_s` 等 / GUI）；桥接 smoke 段复用 file:// SSE
+  （qt_sse 既有，A2UI-over-AG-UI-传输形态）。
+- **范围外**：@checks 校验引擎、formatNumber/Currency/Date/pluralize/openUrl、
+  callAgentFunction RPC 双向、JSON Schema 线上校验、inline catalogs、extensions
+  深消费、A2A/MCP 绑定、CI 接线（ci.yml 显式枚举先例）、**不 commit**（用户未令）。
+- **验收**：phpunit（新增 tests/A2UI/ 四件）+ `qtphp lint`（45⇄45 不变）+
+  a2ui-demo build + offscreen `--selftest` + `--bench` 三 METRIC。
+- **autoresearch**：实施收口后开新段（建议名 `a2ui-support`），metric =
+  `a2ui_replay_messages_per_s`（direction=higher）；冻结顺序坑先例照
+  autoresearch-setup-order 记忆（先 measure.sh/checks.sh 再 init_experiment）。
+
+### §59.5 摸底环境事实
+
+- 上游仓库已迁移：google/A2UI → **a2ui-project/a2ui**（API 301 重定向实测；
+  旧 raw 路径 404，specification/ 下版本目录变为 v0_8/v0_9/v0_9_1/**v1_0**）。
+- 慢链路（本窗口 GitHub raw 平均 ~5KB/s）：107KB 主规范下载 >2min；规范文档
+  建议进仓库前先落 /tmp 再挑节摘录（本轮方式）。
+
+---
+
+## F60. AOT「一个局部一种类型」的运行期变体（Session 39 实施轮，A2UI 验收挖出）
+
+### 现象
+
+`examples/a2ui-demo` 编译 rc=0、`--dry` 全绿、phpunit 320/696 全绿，AOT 产物一跑即：
+
+```
+Fatal error: Uncaught Error: parameter 1 must be `array`, got `string` in .../src/main.php:330
+```
+
+行号 330 **不是业务代码**——是 `php::eval(std::string(329, '\n') + "global $argc, $argv; main(...)")`
+的最后一行（329 换行 + 1 行入口脚本），报错发生在 `main` 的 prologue 附近被归因到入口行。
+
+### 定位链（三步，每步排除一个假设）
+
+1. **第一份 lldb bt 是展开后的后帧，误导**：`zend_throw_exception_internal` 断点抓到的
+   `checkArray ← datamodel__get ← evaluateExpression ← formatstring ← …` 是异常**上抛路径**，
+   不是触发点。
+2. **`breakpoint set -n php::Array::checkArray` 抓触发点**：真栈是
+   `zif_main → php::toArray → checkArray`——看似入口 prologue 的
+   `php::toArray(php::getCallArg(1))`（argv 绑定）炸了；但 `main(2, Array)` 显示 argv 明明是
+   数组，且**最小复现工程**（`/tmp/mini-yml`：纯入口 + `has_flag`/`in_array`，同 yml 结构）
+   跑通不炸 ⇒ 入口假设否证。phpx.h:2196 的报错文案 "parameter 1" 是 `checkArray()` 助手
+   **硬编码**，不代表真实参数位——同一文案服务所有 `Array(const Variant&)` 转换。
+3. **收窄到协议层 + 生成代码对读**：生成的 `datamodel__get` prologue 是
+   `php::Str pointer`（无问题），但函数体 `node = this_.attr(prop("root"))` 把属性读进
+   **`php::Array node`**（tpc 从首赋值 `$this->root` 推断出 array），循环里
+   `$node = node.item(token)` 取到标量（fixture 第一条 Text 即
+   `formatString('${/company}…')` → `get("/company")` → `"Acme"`）时回填处插了
+   `Variant→Array` 转换 ⇒ `checkArray()` fatal。**修法探针**（`/tmp/mini-any-yml`）：
+   `$node = \std::any($start)` 的生成代码是 `php::Var node`，标量下钻正常返回 rc=0。
+
+### 根因与修法
+
+- **根因**：tpc 对「变量首赋值 array、后被赋非数组」的局部变量，编译期不报错，而是在
+  类型不符的赋值点插**运行期隐式转换**。这是 AGENTS.md 已有「同一变量不能先绑
+  ReflectionMethod 再绑 ReflectionFunction」的**推广形态**——后者编译期炸，前者运行期炸，
+  更隐蔽。
+- **修法**：`DataModel::get()` 用编译期降级 `\std::any($this->root)`
+  （COMPILE_TIME_FUNCTIONS.md：「将表达式降级为 mixed/any」；`CompilerBase.php:3652`
+  对 `std` 静态调用特判，`any` → `Type::VAR`），下钻值恒 mixed，`is_array` 显式收窄。
+- **连带约束**：`std` 类只存在于 tpc 的 polyfills.php（随编译器装），纯 PHP 环境
+  （phpunit）没有 ⇒ `tests/bootstrap.php` 补运行期 polyfill
+  （`if (!class_exists('std'))` + `final class std { any(mixed $value = null): mixed }` 恒等）。
+  修后 phpunit 320/696 全绿、selftest 19/19。
+- 教训进 **AGENTS.md AOT 约束区**（「一个局部一种类型」的运行期变体条目）与 CHANGELOG。
+
+### 同轮顺带修正（示例侧，非桥缺陷）
+
+- `view()` 构建函数返回**单节点**（`QtWindowBox::render` → `buildNode` 读 `spec.get("type")`），
+  包一层数组整个树静默不渲染——文档此前未写明，本轮在示例注释钉契约。
+- A2UI `length()` 是校验函数（返回 ValidationResult），不是计数——fixture 改走数据模型
+  字段 `/count`。
+- `WidgetTree::group(title, children)` 的 children 是单层（与 A2UI Card→children 直映一致），
+  selftest 首版多钻一层读空。
+
+### 验收读数（收口时现测）
+
+phpunit **320/696**；lint **45⇄45**；a2ui-demo 全清重建 rc=0（22 TU）→ offscreen
+`--selftest` **19/19 passed** rc=0 → `--bench 20000` ×3 = 90723 / 91787 / 91147 msg/s
+（波动 0.6%）；hello 回归 build rc=0 + selftest passed rc=0；`check-anchors.py` rc=0
+（18 目标文件）。探针工程 `/tmp/mini-*` 已删。

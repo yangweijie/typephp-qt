@@ -36,6 +36,17 @@
   能力查询与显式错误通道。配套示例 `examples/qmlclock`。
   信号经真实 moc 槽（`QPushButton::click()` 跳板）同步投递；mac 打包经藏依赖归因
   验证自包含（QML 类型注册内嵌 framework，F55）。
+- **A2UI 支持**：纯 PHP 协议层 `TypePHP\Qt\A2UI`（`DataModel` / `Scope` / `Evaluator` /
+  `Catalog` / `Renderer` / `Outbound`，零新桥接函数——传输复用既有 `qt_sse_*`，
+  AG-UI 是 A2UI 的标准传输绑定之一）。六种 Agent→Renderer 信封分发、JSON Pointer
+  数据模型（upsert / null 删键 / 根替换）、模板迭代（实例 id `__<index>` 后缀，
+  帧间稳定）、双向绑定（输入写回本地模型，action 派发时解析 context）、
+  18 组件映射到现有控件树（13 原生 + 5 占位 label，不静默白屏）。离线回放示例
+  `examples/a2ui-demo`（`--selftest` 四段 rc 判据 / `--bench N` METRIC 行 / GUI）。
+  顺带修掉一个 AOT 陷阱：`DataModel::get()` 的下钻变量被单一类型推断钉成 array，
+  标量节点回填处插入隐式 `Variant→Array` 转换，纯 PHP 单测全绿、AOT 产物运行期
+  fatal —— 用编译期降级 `std::any($x)`（`php::Var`）修复，测试引导补 `std` 运行期
+  polyfill。
 - **AG-UI 支持**：新增 SSE 流式桥接原语 `cpp-src/qt_sse.cc`（`qt_sse_open/read/status/
   close`，全局流注册表 + `QNetworkAccessManager`、无 moc）与纯 PHP 协议层
   `TypePHP\Qt\AGUI`（`JsonPatch` / `Decoder` / `Session` / `SseClient`，不依赖网络

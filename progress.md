@@ -1,5 +1,138 @@
 # Progress Log — typephp-qt
 
+## Session 39 — 2026-11-19（A2UI 支持：规划轮 + 实施轮收口 —— Phase 43 全部完成）
+
+### 任务来源
+
+用户「/workflow 支持 A2UI」——给 TypePHP\Qt 加 A2UI（Google Agent-to-User
+Interface）支持。编号顺延核实：F58 / Session 38 / Phase 42 已占用 ⇒ 本轮
+**F59 / Session 39 / Phase 43**（findings.md 尾部 `grep '^## F5'` 与
+progress.md Session 头重核）。**不 commit；不动 `.auto/`**（autoresearch 由
+主会话管理；「agui-support」段已按 R9 收手关闭，新段等实施收口后开）。
+
+### 摸底（规划轮完成）
+
+- 规范第一手：`specification/v1_0/docs/a2ui_protocol.md`（107,025 B）抓取落盘
+  `/tmp/a2ui-spec/docs_a2ui_protocol.md`；上游已迁移 google/A2UI →
+  **a2ui-project/a2ui**（API 301 实测）；v1.0 = current（versions.json）。
+- 协议事实 / 映射设计 / 类清单 / 验收口径全部钉进 **F59 §59.1–§59.5**；
+  分解落 **Phase 43（43.1–43.9）**。
+- 关键架构结论：**零新桥接函数**（纯 PHP 层 + WidgetTree 映射；传输复用既有
+  qt_sse——AG-UI 是 A2UI 的标准传输绑定之一，上下层关系），lint 维持 45⇄45。
+
+### 实施轮（同日「继续」，43.1–43.9 全部完成并本机验收）
+
+进入实施轮时发现 `src/A2UI/` 六类、`tests/A2UI/` 四件与 `examples/a2ui-demo/`
+的三份 yml/plist/.gitignore **已在盘上**（上游会话产出），缺 `src/main.php` 与
+`README.md`。逐文件核对：六类与 F59 §59.3 类清单一一对应（DataModel 170 行
+JSON Pointer + Evaluator 490 行含 regex 方言词法拒绝 + Renderer 550 行含模板
+迭代/绑定表/writeback + Outbound 三信封 + Scope 不可变链 + Catalog 18 映射）；
+测试 59 用例（DataModel 11 / Evaluator 24 / Renderer 19 / Catalog 5）覆盖 §59.1
+全部语义钉点。缺的两件补齐：
+
+- `examples/a2ui-demo/src/main.php`（~430 行）：信封 fixture（createSurface 同帧
+  dataModel+components → updateDataModel upsert /company、/count、/employees/2 三条）
+  → Renderer → toWidgetTree → GUI；三模式 `--selftest`（19 条判据 rc 判据）/ 
+  `--bench [N]`（METRIC 三行，Qt 创建前 exit）/ GUI（点按钮 buildAction 就地展示）。
+  smoke 段经真实 `file://` SSE 流逐帧取回 consume（A2UI-over-SSE 形态）。
+- `examples/a2ui-demo/README.md` + Info.plist 修正复制残留（CFBundleName
+  AguiDemo→A2uiDemo）。
+
+### 验收中挖出的缺陷（F60，全修）
+
+1. **AOT「一个局部一种类型」的运行期变体（主缺陷）**：`DataModel::get()` 的
+   `$node` 首绑 `$this->root`（array）、循环里 `$node = $node[$token]` 下钻到标量，
+   tpc 把该变量推断成 array 并在回填处插隐式 `Variant→Array` 转换（phpx
+   `checkArray()`，报错文案硬编码 "parameter 1 must be array, got string"）——
+   **编译期不报错、`--dry` 全绿、phpunit 全绿，AOT 产物运行期 fatal**。
+   定位链：fatal 行号 330 是 eval 入口（329 换行 + 1 行）≠ 业务行；第一份 lldb bt
+   是展开后的后帧误导；`breakpoint set -n php::Array::checkArray` 抓到真栈
+   `zif_main→toArray→checkArray`（入口误判）再向上收窄到
+   `checkArray ← datamodel__get ← evaluateExpression`；最小复现工程（mini-main，
+   纯入口+has_flag）不炸 ⇒ 嫌疑收窄协议层；`std::any` 探针工程（mini-any）实测
+   生成 `php::Var node`、标量下钻正常返回 ⇒ 修法定案。
+   **修法**：`$node = \std::any($this->root)`（编译期降级，COMPILE_TIME_FUNCTIONS.md
+   §54：省略参数初始 null、带参降级表达式；`CompilerBase.php:3652` 的 `std` 特判
+   `default => Type::VAR`）。**连带约束**：`std` 是 tpc 的编译期类（polyfills.php，
+   随编译器装），纯 PHP 环境（phpunit）没有 ⇒ `tests/bootstrap.php` 补运行期
+   polyfill（`if (!class_exists('std'))` + `any(mixed): mixed` 恒等）。修复后
+   selftest 19/19。**上游侧教训进 AGENTS.md AOT 约束区**（ReflectionMethod/
+   Function 先例的推广）。
+2. **view() 构建函数返回单节点**：`qt_window_render` 吃单节点（`buildNode` 读
+   `spec.get("type")`），首版包 `[vbox]` 一层数组 ⇒ 整树静默不渲染（a2ui_title
+   读回空）。修成直接返回 vbox 节点 + 注释钉契约。
+3. **fixture 滥用校验函数**：`length(value:${/employees}, min:1)` 是校验函数
+   （返回 ValidationResult），字符串化成 `{"valid":false}` 不是计数 ⇒ 改数据模型
+   字段 `/count`（2 → upsert 3）。
+4. **selftest 下钻深度**：`WidgetTree::group(title, children)` 单层（children 直接
+   是 who），首版多钻一层读空 ⇒ 修正并注释。
+
+### 验收读数（全部本机现测，rc 实测）
+
+| 检查 | 结果 |
+|---|---|
+| `php vendor/bin/phpunit --no-coverage` | **OK (320 tests, 696 assertions)**（基线 206→AGUI 261→+A2UI 59） |
+| `php bin/qtphp lint` | [OK] 契约一致（**45 ⇄ 45**，零新桥接） |
+| `php -l`（main.php / DataModel.php） | 无错 |
+| `php bin/qtphp build examples/a2ui-demo` | rc=0（22 TU） |
+| offscreen `--selftest` | **19/19 passed**，rc=0（四段：树断言 8 / 读回 2 / 双绑+action 5 / SSE smoke 4） |
+| `--bench 20000` ×3 | 90723 / 91787 / 91147 msg/s，**波动 0.6%**（<10% 判据） |
+| hello 回归 | build rc=0 + offscreen `--selftest` passed rc=0 |
+| `docs/check-anchors.py docs/src` | rc=0（18 目标文件，含新页 en/zh） |
+
+### 文档与收尾（43.9）
+
+- 中英 `docs/src/{,zh/}guide/a2ui.md`（协议 / 映射表 / 消息流 / 双绑 / 示例 /
+  宽容默认 / 范围外）；config.ts 侧边栏 en+zh 各 +1 行；CHANGELOG Added 一条
+  （含 AOT 陷阱记录）；AGENTS.md 目录表 +`src/A2UI/` 行 + AOT 约束区 +「一个局部
+  一种类型运行期变体」条目；README 示例树 + a2ui-demo 行。
+- **未 commit**（用户未令）；**未验**：`project.linux.yml`（本机 macOS，qmlclock/
+  agui-demo 同口径留档）；autoresearch `a2ui-support` 段待主会话开（metric=
+  `a2ui_replay_messages_per_s`，bench ×3 基线 90.7k–91.8k 已可作 init 读数）。
+
+### 规划轮遗留基线读数（本窗口现测）
+
+phpunit 320/696（见上表）；phpunit 基线演进：Session 38 规划轮 206/334 → 本轮
+AGUI 全量 261/503（Session 38 实施轮收口）→ 本轮 A2UI 320/696。
+
+### 未做项 / 待办
+
+- ~~Phase 43.1–43.9 全部未实施~~ → **全部完成**（本条保留供勾选核对）。
+- autoresearch 新段 `a2ui-support`（metric=`a2ui_replay_messages_per_s`）待
+  43.8 验收后开 ← **验收已过，待主会话开段**。
+- 未 commit（用户未令）。
+
+## Session 39 — 2026-11-19（A2UI 支持：规划轮 —— 方案定稿 + Phase 43 分解）
+
+### 任务来源
+
+用户「/workflow 支持 A2UI」——给 TypePHP\Qt 加 A2UI（Google Agent-to-User
+Interface）支持。编号顺延核实：F58 / Session 38 / Phase 42 已占用 ⇒ 本轮
+**F59 / Session 39 / Phase 43**（findings.md 尾部 `grep '^## F5'` 与
+progress.md Session 头重核）。**不 commit；不动 `.auto/`**（autoresearch 由
+主会话管理；「agui-support」段已按 R9 收手关闭，新段等实施收口后开）。
+
+### 摸底（本轮完成）
+
+- 规范第一手：`specification/v1_0/docs/a2ui_protocol.md`（107,025 B）抓取落盘
+  `/tmp/a2ui-spec/docs_a2ui_protocol.md`；上游已迁移 google/A2UI →
+  **a2ui-project/a2ui**（API 301 实测）；v1.0 = current（versions.json）。
+- 协议事实 / 映射设计 / 类清单 / 验收口径全部钉进 **F59 §59.1–§59.5**；
+  分解落 **Phase 43（43.1–43.9）**。
+- 关键架构结论：**零新桥接函数**（纯 PHP 层 + WidgetTree 映射；传输复用既有
+  qt_sse——AG-UI 是 A2UI 的标准传输绑定之一，上下层关系），lint 维持 45⇄45。
+
+### 基线读数
+
+待实施轮首条命令现测补齐（phpunit / lint / 版本）。
+
+### 未做项 / 待办
+
+- Phase 43.1–43.9 全部未实施（本条为规划轮）。
+- autoresearch 新段 `a2ui-support`（metric=`a2ui_replay_messages_per_s`）待
+  43.8 验收后开。
+- 未 commit（用户未令）。
+
 ## Session 38 — 2026-11-17（AG-UI 支持：规划轮 —— 三层方案定稿 + Phase 42 分解）
 
 ### 任务来源
