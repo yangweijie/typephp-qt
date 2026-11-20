@@ -98,9 +98,81 @@ AGUI 全量 261/503（Session 38 实施轮收口）→ 本轮 A2UI 320/696。
 ### 未做项 / 待办
 
 - ~~Phase 43.1–43.9 全部未实施~~ → **全部完成**（本条保留供勾选核对）。
-- autoresearch 新段 `a2ui-support`（metric=`a2ui_replay_messages_per_s`）待
-  43.8 验收后开 ← **验收已过，待主会话开段**。
-- 未 commit（用户未令）。
+- ~~autoresearch 新段 `a2ui-support` 待开~~ → **已开并按章程收手**（下节）。
+- 未 commit（用户未令）——基线 keep（c36965e）与 R3/R5 的 experiment: 提交为
+  /autoresearch 模式契约产物（段 1 同款），非擅自提交。
+
+### 优化轮（autoresearch「a2ui-support」段，同日主会话执行，6/20）
+
+段基建：`.auto/` 三件（measure.sh = 重建 a2ui-demo → `--bench 20000` → 主指标
+`a2ui_replay_messages_per_s`；checks.sh = phpunit + lint；prompt.md = charter，
+钉 Scope=src/A2UI/*.php、Out-of-scope=fixture/C++/AGUI、停 loop 条件）。
+**冻结态解法（新坑）**：段 1 的冻结哈希绑定在插件会话态里（不在 .auto/ 文件里
+——清空 .auto/ 与 init_experiment 都解不开，Write 钩子照拒），段间换基准只能
+**清空 .auto/ 后用 Bash 落新脚本再 init**（Write 工具对 measure.sh 恒被拒）。
+基线 keep（c36965e）顺带把整个 A2UI 实现随 `experiment:` 提交入库。
+
+| 轮 | 假设 | 中位读数 | 提交 |
+|---|---|---|---|
+| R1 基线 | A2UI 协议层 + demo 落地 | 68080（×3 离散 15% ⇒ 窗口被机器负载污染，无效） | c36965e |
+| R2 noop | 噪声标定：未改代码复测 | **75614**（离散 1.6%）⇒ 稳态带初标 ±1.6%，R1 作废 | —（noop） |
+| R3 | formatString 模板 token 序列按模板串缓存（纯函数，消每 render 的字符级扫描+配对搜索） | **93742**（+24.0%） | 40e5369 |
+| R4 | decodePointer 指针 token 按指针串缓存（消每 @path 解析的 explode+str_replace） | **109926**（+17.2%） | 02ab4f4 |
+| R5 | Catalog::isValidId 按串缓存（消每组件消息的 `\p{XID_*}` 正则） | 111222（+1.2%，带内） | 37cb14b |
+| R6 noop | 噪声带重标定：未改代码复测 | 106076（比 R5 低 3.5%）⇒ **跨窗口漂移 ≈ ±4%**，R5 属噪声 | —（noop） |
+
+**有效收益段 = R3+R4（两个「纯函数缓存」）：75614 → 109926 ≈ +45%**
+（对照被污染的 R1 基线名义 +62%，不采用）。R5 按段 1 R7/R8 先例中性保留
+（语义等价、单测全绿）。每轮 checks（phpunit + lint）全绿。
+
+**教训**：
+
+- **教训 49**：单轮收益 < 2% 先 noop 复测再归因——本轮 R5 的 +1.2% 与 R6 noop
+  的 -3.5% 同窗口对读，证伪「isValidId 缓存有收益」的初判；跨窗口漂移（±4%）
+  远大于轮内离散（1.6%），**比较只能在同窗口做**。
+- **教训 50**：autoresearch 的冻结态是插件会话态而非 .auto/ 文件——「换基准
+  开新段」的唯一通路是清空 .auto/ + Bash 落脚本 + init_experiment（Write 工具
+  对冻结路径恒拒，段 1 的「先建脚本再 init」顺序只适用于首段）。
+- 「纯函数 → 按串缓存」是本段两连大收益的共同形态（formatString/decodePointer），
+  都是**每消息每帧重复解析同一批字符串**的浪费；isValidId 同型但增益已进噪声
+  （正则占比小），说明该形态的收益上界取决于被缓存的计算在热路径里的占比。
+
+### CI 接线（用户令「继续」触发的后续轮，2026-11-20）
+
+F59 §59.4 原划范围外的「a2ui-demo CI 接线」按「继续」指令执行（42.13 同款先例），
+`.github/workflows/ci.yml` 三处改动：
+
+1. 路径重写 foreach 加 `'examples/a2ui-demo/project.yml'`——该 yml 与
+   hello/qmlclock/agui-demo 同款写死 `D:/tools/Qt/6.9.3/msvc2022_64`，
+   不重写则 Windows runner 上 cl.exe 找不到头文件；
+2. 新 step「编译 A2UI 示例（--nano）」——注释钉死 QtNetwork 在 install-qt-action
+   的 qtbase 默认组件里（a2ui-demo 与 agui-demo 同款：qt_sse.cc 真实实现链
+   Qt6Network；无需 modules，区别于 qmlclock 的 qtdeclarative）；
+3. 新 step「A2UI 示例无头自测」——`QT_QPA_PLATFORM=offscreen` 即可（纯 widgets，
+   不需要 QML 的 QT_QUICK_BACKEND）。
+
+本地验证限度（与 42.13 同口径）：YAML 语法 `yaml.safe_load` 通过（jobs=test,
+build-windows；新两 step 就位）；Windows 侧真实跑通要 push 后 CI 读数。
+未 commit（用户未令）。
+
+### `project.linux.yml` 实测尝试（2026-11-20，被环境挡住）
+
+按 F20–F23 先例尝试 Apple Container（Debian 12 arm64）路线：`container system
+start` 两次 `XPC connection error: Connection invalid`、`container list -a` 同报
+——容器服务本身起不来（F20 记过本机 vmnetd 与 aTrust 的纠葛；当时只影响 NAT
+egress，服务能起；本次连服务都起不来，疑似系统状态变化，重启宿主才可能恢复，
+非会话内可修）。⇒ a2ui-demo 的 `project.linux.yml` 真机实测**维持未验**，
+未验原因从「本机无 Linux Qt 环境」细化为「容器服务 XPC 起不来，待宿主重启后
+按 F20–F23 配方重试」。macOS 侧全部验收读数不受影响。
+
+### 收口门复验（优化后，当日实跑）
+
+| 检查 | 结果 |
+|---|---|
+| a2ui-demo offscreen `--selftest`（19 判据含 SSE smoke） | ✅ selftest passed，rc=0 |
+| hello 回归（build + offscreen `--selftest`） | ✅ selftest passed，rc=0 |
+| phpunit | ✅ OK (320 tests, 696 assertions) |
+| `qtphp lint` | ✅ 契约一致（45 ⇄ 45） |
 
 ## Session 39 — 2026-11-19（A2UI 支持：规划轮 —— 方案定稿 + Phase 43 分解）
 

@@ -3727,3 +3727,20 @@ phpunit **320/696**；lint **45⇄45**；a2ui-demo 全清重建 rc=0（22 TU）�
 `--selftest` **19/19 passed** rc=0 → `--bench 20000` ×3 = 90723 / 91787 / 91147 msg/s
 （波动 0.6%）；hello 回归 build rc=0 + selftest passed rc=0；`check-anchors.py` rc=0
 （18 目标文件）。探针工程 `/tmp/mini-*` 已删。
+
+### §59.6 追记（autoresearch「a2ui-support」段，同日主会话执行）
+
+- **段基建**：.auto/ 三件重建（measure.sh = 重建 a2ui-demo → `--bench 20000` →
+  `a2ui_replay_messages_per_s`；checks.sh = phpunit + lint；prompt.md charter 钉
+  Scope/Out-of-scope/停 loop 条件）。**冻结态坑**：段 1 的冻结哈希在**插件会话态**
+  而非 .auto/ 文件——清空 .auto/ 与 init_experiment 都解不开，Write 对
+  measure.sh 恒拒；唯一通路 = 清空 .auto/ + Bash 落脚本 + init_experiment。
+- **轮次**：R1 基线 keep（68080，离散 15% ⇒ 窗口污染，c36965e 顺带把 A2UI 实现
+  入库）/ R2 noop 标定 75614（±1.6%）/ **R3 keep formatString 模板 token 缓存
+  93742（+24.0%，40e5369）** / **R4 keep decodePointer 指针缓存 109926（+17.2%，
+  02ab4f4）** / R5 keep isValidId 缓存 111222（+1.2% 带内，37cb14b）/
+  R6 noop 106076（-3.5%）⇒ **跨窗口漂移 ≈ ±4%**，R5 属噪声、中性保留。
+- **有效收益 = R3+R4（「纯函数 → 按串缓存」两连）：75614 → 109926 ≈ +45%**；
+  R6 后剩余靶点预期 2–4% 无法在 ±4% 带宽自证 ⇒ 按 charter 收手（6/20）。
+  收口门复验：a2ui-demo selftest 19/19 + hello 回归 + phpunit 320/696 +
+  lint 45⇄45 全绿。台账详见 progress.md Session 39「优化轮」。

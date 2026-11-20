@@ -126,7 +126,7 @@ jobs:
           # CI 上必须替换成 install-qt-action 装好的那份，否则 cl.exe 找不到 QWidget 头文件
           $qtRoot = $env:QT_ROOT_DIR -replace '\\', '/'
           if (-not $qtRoot) { throw 'QT_ROOT_DIR 未设置，install-qt-action 没有生效' }
-          foreach ($yml in @('examples/hello/project.yml', 'examples/qmlclock/project.yml', 'examples/agui-demo/project.yml')) {
+          foreach ($yml in @('examples/hello/project.yml', 'examples/qmlclock/project.yml', 'examples/agui-demo/project.yml', 'examples/a2ui-demo/project.yml')) {
             $content = Get-Content -LiteralPath $yml -Raw
             $content = $content -replace [regex]::Escape('D:/tools/Qt/6.9.3/msvc2022_64'), $qtRoot
             Set-Content -LiteralPath $yml -Value $content -NoNewline
@@ -184,3 +184,16 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: examples\agui-demo\build\agui-demo.exe --selftest
+
+      - name: 编译 A2UI 示例（--nano）
+        # a2ui-demo 与 agui-demo 同款：qt_sse.cc 真实实现链 Qt6Network（qtbase 默认
+        # 组件，无需额外 modules），纯 PHP 协议层（src/A2UI/）零新桥接函数；
+        # --nano 与 hello 同理由（CI 上不现编 php-src）
+        run: php bin/qtphp build examples/a2ui-demo --nano
+
+      - name: A2UI 示例无头自测
+        # 离线回放（信封 fixture → consume → 构树 → 读回断言）+ file:// SSE smoke；
+        # 纯 widgets，offscreen 即可
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: examples\a2ui-demo\build\a2ui-demo.exe --selftest
