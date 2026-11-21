@@ -162,8 +162,11 @@ run `44121673074` / `44760754063` 两连红在「AGUI 示例无头自测」（�
 `'file://' . tempnam(…)` 在 Windows 拼出 `file://C:\…`（QUrl 把 `C:` 当 host，
 畸形 ⇒ 流 error），POSIX 恰好三斜杠合法所以本机全绿；该缺陷自 agui 接线
 （11-17）落地起就在，且把 A2UI 两步挡在 CI 外。修法：两示例 URL 构造改平台
-感知三斜杠形态（F61），本机两示例 rebuild + selftest + phpunit + lint 全绿；
-Windows 分支待 push 后 CI 读数（判据：AGUI/A2UI 四步全 ✓）。
+感知三斜杠形态（F61），本机两示例 rebuild + selftest + phpunit + lint 全绿。
+**CI 读数（run 44929667907，fb187b6）**：两 job 全绿；AGUI/A2UI 编译+自测四步
+**全部 ✓**——A2UI 两步是**首次**在 Windows runner 真跑（此前被 AGUI 步挡住），
+日志实录 `ok SSE 流 150 帧内到达 done` + `selftest passed` ⇒ Windows 分支修复
+真机成立；⇒ **a2ui-demo 的 CI 接线闭环**（41.13/42.13 同族未验项清零）。
 
 ### `project.linux.yml` 实测尝试（2026-11-20，被环境挡住）
 
