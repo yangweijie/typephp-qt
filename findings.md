@@ -3744,3 +3744,25 @@ phpunit **320/696**；lint **45⇄45**；a2ui-demo 全清重建 rc=0（22 TU）�
   R6 后剩余靶点预期 2–4% 无法在 ±4% 带宽自证 ⇒ 按 charter 收手（6/20）。
   收口门复验：a2ui-demo selftest 19/19 + hello 回归 + phpunit 320/696 +
   lint 45⇄45 全绿。台账详见 progress.md Session 39「优化轮」。
+
+---
+
+## F61. CI AGUI 自测红两连的根因：file:// URL 的 Windows 形态差（Session 39，CI 日志轮）
+
+- **现象**：run `44121673074`（11-17「调整ci」）与 `44760754063`（11-20「A2UI」）
+  两连红在**同一步**「AGUI 示例无头自测」，签名完全一致：
+  `FAIL SSE 流 150 帧内到达 done -> state=error pumped=1` + `帧数 0 != 29`
+  + `最后一帧 JSON … RUN_FINISHED -> 空`。且后者死在 AGUI 步 ⇒ **A2UI 两步
+  从未在 CI 上跑过**（被同根因挡住）。macOS 本机同段全绿 ⇒ 平台差缺陷。
+- **根因**：两个示例的 smoke 段都写 `'file://' . tempnam(…)`。Windows 的
+  tempnam 给 `C:\Users\…`（盘符 + 反斜杠）⇒ URL 成 `file://C:\…`——QUrl 把
+  `C:` 解析成 **host**，畸形 URL 异步报 InvalidUrl ⇒ qt_sse 的流 `state=error`、
+  0 帧；POSIX 的 tempnam 给 `/var/…` ⇒ `file:///var/…` 恰好合法（三斜杠），
+  这就是「本机绿、CI 红」的全部原因。**该缺陷自 agui 接线落地（11-17）起就存在**，
+  Session 38 收口时只验了 macOS。
+- **修法**：两个示例的 URL 构造改成平台感知的三斜杠形态
+  （POSIX：`file://` + `/…` 不变；Windows：`file:///` + 反斜杠转正斜杠），
+  桥接 `qt_sse.cc:146` 的 QUrl 直传不动（传输原语对坏 URL 报 error 是正确行为）。
+- **验证**：两示例 rebuild rc=0 + offscreen selftest passed（rc=0）+ phpunit
+  320/696 + lint 45⇄45；POSIX 分支产出与原 URL 逐字节一致（本机行为零变化）。
+  Windows 分支待 push 后 CI 读数（判据：AGUI/A2UI 四步全 ✓）。

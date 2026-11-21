@@ -155,6 +155,16 @@ F59 §59.4 原划范围外的「a2ui-demo CI 接线」按「继续」指令执�
 build-windows；新两 step 就位）；Windows 侧真实跑通要 push 后 CI 读数。
 未 commit（用户未令）。
 
+### CI 红两连的根因与修复（F61，2026-11-22 CI 日志轮）
+
+run `44121673074` / `44760754063` 两连红在「AGUI 示例无头自测」（签名：
+`state=error pumped=1`、0 帧）——根因是两个示例 smoke 段的
+`'file://' . tempnam(…)` 在 Windows 拼出 `file://C:\…`（QUrl 把 `C:` 当 host，
+畸形 ⇒ 流 error），POSIX 恰好三斜杠合法所以本机全绿；该缺陷自 agui 接线
+（11-17）落地起就在，且把 A2UI 两步挡在 CI 外。修法：两示例 URL 构造改平台
+感知三斜杠形态（F61），本机两示例 rebuild + selftest + phpunit + lint 全绿；
+Windows 分支待 push 后 CI 读数（判据：AGUI/A2UI 四步全 ✓）。
+
 ### `project.linux.yml` 实测尝试（2026-11-20，被环境挡住）
 
 按 F20–F23 先例尝试 Apple Container（Debian 12 arm64）路线：`container system

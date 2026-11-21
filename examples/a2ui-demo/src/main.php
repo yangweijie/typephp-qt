@@ -265,7 +265,12 @@ function self_test(QtApp $app, array $replay): int
     $tmpFile = tempnam(sys_get_temp_dir(), 'a2ui-sse-');
     $tmpPath = (string) $tmpFile;
     file_put_contents($tmpPath, a2uiFixture());
-    $stream = $app->sseOpen(['url' => 'file://' . $tmpPath, 'method' => 'GET']);
+    // file URL 三斜杠形态（同 agui-demo 修复注释：file://C:/… 是畸形 URL，
+    // Windows CI 实测 state=error；file:///C:/… 与 file:///var/… 两平台皆合法）
+    $url = str_starts_with($tmpPath, '/')
+        ? 'file://' . $tmpPath
+        : 'file:///' . str_replace('\\', '/', $tmpPath);
+    $stream = $app->sseOpen(['url' => $url, 'method' => 'GET']);
     if ($stream < 0) {
         $check('sseOpen(file://) 成功', false, '返回 ' . (string) $stream);
     } else {

@@ -271,7 +271,13 @@ function self_test(QtApp $app, array $replay): int
     $tmpFile = tempnam(sys_get_temp_dir(), 'agui-sse-');
     $tmpPath = (string) $tmpFile;
     file_put_contents($tmpPath, aguiFixture());
-    $url = 'file://' . $tmpPath;
+    // tempnam 在 Windows 给 C:\…（盘符 + 反斜杠）、POSIX 给 /…。file URL 必须是
+    // 三斜杠形态：file://C:/… 会把 "C:" 解析成 host（QUrl 畸形 ⇒ 流 state=error、
+    // 0 帧 —— CI 44121673074 / 44760754063 实测），file:///C:/… 与 file:///var/…
+    // 才是两平台都合法的形态
+    $url = str_starts_with($tmpPath, '/')
+        ? 'file://' . $tmpPath
+        : 'file:///' . str_replace('\\', '/', $tmpPath);
     $stream = $app->sseOpen(['url' => $url, 'method' => 'GET']);
     if ($stream < 0) {
         $check('sseOpen(file://) 成功', false, '返回 ' . (string) $stream);
